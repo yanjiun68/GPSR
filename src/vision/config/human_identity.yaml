@@ -1,0 +1,27 @@
+human_identity_node:
+  ros__parameters:
+    # Section: Camera and identity result topics.
+    image_topic: /camera/color/image_raw
+    output_topic: /human_identity/recognized_people
+
+    # Section: Installed model filenames.
+    person_model: yolo11n.pt
+    attribute_model: human_attributes.pt
+    pose_model: pose_landmarker_full.task
+
+    # Section: Persistent identity database location.
+    database_path: /home/yanjiun68/.ros/vision/human_identity.db
+
+    # Section: Inference and publishing controls.
+    device: "0"
+    publish_interval: 0.5
+    nearest_timeout: 2.0
+
+    # Section: Live annotated OpenCV preview.
+    show_gui: true
+    gui_window_name: Human Identity
+    gui_scale: 1.0
+
+    # Section: Recognition decision thresholds.
+    identity_threshold: 0.72
+    ambiguity_margin: 0.08

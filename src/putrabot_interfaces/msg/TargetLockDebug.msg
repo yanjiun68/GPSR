@@ -1,0 +1,24 @@
+std_msgs/Header header
+
+uint8 DECISION_NONE=0
+uint8 DECISION_CLEAN_MATCH=1
+uint8 DECISION_ACCEPTABLE_MATCH=2
+uint8 DECISION_OCCLUDED_REJECT=3
+uint8 DECISION_AMBIGUOUS_REJECT=4
+uint8 DECISION_REACQUIRE_CANDIDATE=5
+uint8 DECISION_RELOCK_CONFIRMED=6
+
+string target_lock_state
+int32 selected_track_id
+int32 relock_candidate_track_id
+int32 reacquire_confirm_count
+bool crossover_active
+bool post_relock_protection_active
+bool publishable
+bool contradictory_candidate
+string rejection_reason_code
+uint8 decision_code
+uint8 suppression_code
+float32 best_score
+float32 second_score
+float32 identity_agreement_score

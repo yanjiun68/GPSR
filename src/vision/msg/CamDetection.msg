@@ -1,0 +1,9 @@
+float64 x
+float64 y
+float64 z
+float32 confidence
+float32[] embedding
+uint16 xmin
+uint16 ymin
+uint16 xmax
+uint16 ymax

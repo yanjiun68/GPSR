@@ -1,0 +1,12 @@
+# Section: Goal containing a validated symbolic queue.
+robot_ai_interfaces/ActionQueue queue
+---
+# Section: Queue execution result.
+bool success
+string outcome
+robot_ai_interfaces/SkillResult[] results
+---
+# Section: Queue execution feedback.
+uint32 current_index
+string current_action_type
+string status

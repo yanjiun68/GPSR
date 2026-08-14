@@ -1,0 +1,15 @@
+# Goal
+string mic_device
+float32 record_sec
+string piper_model_path
+string whisper_model
+string whisper_language
+---
+# Result
+bool success
+string message
+receptionist_interfaces/PersonProfile profile
+---
+# Feedback
+string stage
+string heard_text

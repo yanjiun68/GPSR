@@ -1,0 +1,13 @@
+bool auto_select_if_needed
+float32 follow_distance_m
+float32 face_hold_sec
+---
+bool success
+string message
+---
+bool active
+int32 selected_track_id
+bool target_visible
+float32 target_age_sec
+bool facing_robot
+string stop_reason

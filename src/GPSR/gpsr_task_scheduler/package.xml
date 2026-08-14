@@ -1,0 +1,32 @@
+<?xml version="1.0"?>
+<!-- Section: Deterministic GPSR scheduler package metadata. -->
+<package format="3">
+  <!-- Section: Package identity used by colcon and ROS graph tools. -->
+  <name>gpsr_task_scheduler</name>
+  <version>0.0.0</version>
+  <description>Deterministic LLM-absent GPSR task scheduler.</description>
+  <maintainer email="yanjiun68@example.com">yanjiun68</maintainer>
+  <license>TODO</license>
+
+  <!-- Section: Build and runtime dependencies. -->
+  <buildtool_depend>ament_python</buildtool_depend>
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>ament_index_python</exec_depend>
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+  <exec_depend>std_srvs</exec_depend>
+  <exec_depend>robot_ai_interfaces</exec_depend>
+  <exec_depend>robot_yasmin_tasks</exec_depend>
+  <exec_depend>vision</exec_depend>
+  <exec_depend>face_detection</exec_depend>
+  <exec_depend>voice</exec_depend>
+
+  <!-- Section: Test dependencies. -->
+  <test_depend>pytest</test_depend>
+
+  <!-- Section: ament package type declaration. -->
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

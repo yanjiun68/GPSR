@@ -1,0 +1,243 @@
+# ============================================================
+# RX200 Object Grasp System - Configuration (OPTIMIZED)
+# ============================================================
+# System with:
+# - Eye-in-Hand configuration (camera mounted on gripper)
+# - YOLO detection for objects (medicine boxes, etc.)
+# - 5-DOF arm + lifting axis coordinated motion
+# - Visual servoing for closed-loop fine-tuning
+# - Automatic retry on planning failure
+# - [NEW] Adaptive visual servoing with Kalman filtering
+# - [NEW] Mask-based depth sampling
+# - [NEW] Contact detection approach
+# ============================================================
+
+/**:
+  ros__parameters:
+
+    # ========================================
+    # Frame Configuration (Eye-in-Hand)
+    # ========================================
+    # Camera mounted on gripper servo
+    # TF chain: gripper_prop_link -> camera_mount_link -> camera_link -> camera_color_optical_frame
+    ref_frame: "camera_color_optical_frame"
+    # Use the connected live TF base frame for grasp transforms.
+    # The current runtime tree exposes rx200/base_link -> camera_color_optical_frame,
+    # while lift_base_link is not connected to the camera tree.
+    arm_base_frame: "rx200/base_link"
+    ee_link: "rx200/ee_gripper_link"
+
+    # ========================================
+    # Depth Processing (OPTIMIZED)
+    # ========================================
+    min_depth: 0.12                # Reduced from 0.15 for closer grasps
+    max_depth: 1.00
+    max_grasp_distance: 0.60       # Max depth in camera frame
+    roi_padding: 3                 # Reduced from 5 for tighter ROI
+    depth_sample_ratio: 0.6        # Increased from 0.5 for more samples
+    use_depth_filter: true         # Bilateral filter for noise reduction
+
+    # [NEW] Advanced depth processing
+    depth_use_mask_sampling: true  # Use SAM mask to constrain depth sampling
+    depth_percentile_low: 15       # Lower percentile filter (was 10)
+    depth_percentile_high: 85      # Upper percentile filter (was 90)
+    depth_outlier_threshold: 0.02  # 20mm outlier rejection threshold
+    depth_plane_fitting: true      # Use RANSAC plane fitting for surface
+    depth_plane_inlier_threshold: 0.005  # 5mm inlier threshold for plane fitting
+
+    # ========================================
+    # Grasp Geometry (OPTIMIZED)
+    # ========================================
+    approach_distance: 0.10        # Pre-grasp height above target (10cm)
+    # Camera-to-gripper offset compensation in camera optical frame:
+    # These values should be calibrated using auto_calibrate_offset.py
+    grasp_offset_x: -0.070         # Shift LEFT in camera frame (gripper is left of camera)
+    grasp_offset_y: 0.015          # Shift up in camera frame (gripper is BELOW camera)
+    grasp_offset_z: 0.008          # Reduced from 0.01 to 8mm for more precision
+    grasp_min_z: -0.05             # Allow grasping objects below lift base level
+    lift_height: 0.12              # Height to lift after grasping
+    depth_safety_offset: 0.003     # Reduced from 5mm to 3mm for precision
+    depth_window_size: 21          # Reduced from 31 to 21 for tighter sampling
+    grasp_point_offset_ratio: 0.0  # 0=center (for boxes), 0.15=15% above center (for handles)
+
+    # [NEW] Adaptive window sizing
+    depth_window_adaptive: true    # Enable adaptive window based on object size
+    depth_window_ratio: 0.25       # Window size = 25% of min(bbox_w, bbox_h)
+    depth_window_min: 11           # Minimum window size
+    depth_window_max: 31           # Maximum window size
+
+    # ========================================
+    # Fixed Grasp Orientation (Stable Baseline)
+    # ========================================
+    use_fixed_orientation: false   # Let VS preserve current orientation
+
+    # ========================================
+    # Perception Models (OPTIMIZED)
+    # ========================================
+    model_type: "yoloworld"        # yolo, yoloworld (switch to "yolo" with custom model)
+    model_size: "m"                # Upgraded from "s" to "m" for better accuracy
+    model_path: "best_bag_handle.pt"  # For custom models
+    confidence_threshold: 0.35     # Increased from 0.20 for higher quality detections
+
+    # SAM Segmentation Refinement
+    use_sam_segmentation: true     # Refine YOLO boxes with SAM2 masks
+    sam_model_size: "s"            # Upgraded from "t" to "s" for better masks
+
+    # ========================================
+    # Cartesian Path (Straight Line Motion)
+    # ========================================
+    use_cartesian_path: true
+    cartesian_step_size: 0.003     # Reduced from 5mm to 3mm for finer control
+    cartesian_jump_threshold: 0.0  # Disable jump detection
+
+    # ========================================
+    # Gripper Strategy (Two-Stage Squeeze)
+    # ========================================
+    gripper_second_squeeze: true
+    gripper_first_close_effort: 0.5
+    gripper_squeeze_effort: 0.8
+    gripper_close_delay: 0.3
+    gripper_current_limit_grasp: 60
+    gripper_current_limit_max: 150
+
+    # ========================================
+    # Pose Filtering (Anti-Jitter) - OPTIMIZED
+    # ========================================
+    pose_filter_alpha: 0.2         # Reduced from 0.3 for smoother filtering
+    min_detection_confidence: 0.25 # Increased from 0.15
+
+    # ========================================
+    # Multi-Target Selection
+    # ========================================
+    target_selection.use_reachability: true
+    target_selection.confidence_weight: 0.4   # Reduced for balanced scoring
+    target_selection.reachability_weight: 0.35
+    target_selection.depth_quality_weight: 0.25  # Increased depth quality importance
+    target_selection.optimal_distance: 0.25
+
+    # ========================================
+    # Retry Mechanism
+    # ========================================
+    retry.enabled: false
+    retry.max_attempts: 1
+    retry.lift_adjustment: 0.03    # Reduced from 0.05 for finer adjustment
+    retry.position_offset: 0.015   # Reduced from 0.02
+
+    # ========================================
+    # Multi-Frame Detection Fusion (OPTIMIZED)
+    # ========================================
+    fusion.enabled: true
+    fusion.buffer_size: 7          # Increased from 5 for more stable fusion
+    fusion.min_detections: 5       # Increased from 3 for higher confidence
+    fusion.max_position_std: 0.015 # Tightened from 0.03 to 15mm
+    fusion.timeout_sec: 1.5        # Increased from 1.0
+
+    # [NEW] Kalman filter for detection smoothing
+    fusion.use_kalman: true
+    fusion.kalman_process_noise: 0.001    # Process noise covariance
+    fusion.kalman_measurement_noise: 0.01 # Measurement noise covariance
+
+    # ========================================
+    # Visual Servoing (OPTIMIZED)
+    # ========================================
+    visual_servo.enabled: true
+    visual_servo.max_iterations: 15        # Reduced from 30 — faster convergence
+    visual_servo.pixel_tolerance: 5        # ~2.5mm
+    visual_servo.depth_tolerance: 0.008    # 8mm
+    visual_servo.step_gain: 0.35           # Prevent oscillation
+    visual_servo.max_step: 0.015           # 15mm
+    visual_servo.min_step: 0.001           # 1mm
+    visual_servo.settle_time: 0.20         # OPTIMIZED: was 0.8 — reduced 4x
+
+    # Adaptive gain control
+    visual_servo.adaptive_gain: true
+    visual_servo.gain_far: 0.5             # error > 10mm
+    visual_servo.gain_mid: 0.35            # error 5-10mm
+    visual_servo.gain_near: 0.2            # error < 5mm
+    visual_servo.error_threshold_far: 0.01 # 10mm threshold
+    visual_servo.error_threshold_near: 0.005  # 5mm threshold
+
+    # Convergence detection
+    visual_servo.convergence_window: 5     # Check last N iterations
+    visual_servo.convergence_threshold: 0.002  # Converged if std < 2mm
+
+    # Adaptive settle_time (NEW)
+    visual_servo.adaptive_settle: true
+    visual_servo.settle_time_far: 0.10     # Fast iteration when error is large
+    visual_servo.settle_time_near: 0.30    # More careful near target
+
+    # ========================================
+    # Contact Detection (NEW)
+    # ========================================
+    contact_detection.enabled: true
+    contact_detection.current_threshold: 45   # mA threshold for contact
+    contact_detection.approach_speed: 0.003   # 3mm/s approach speed
+    contact_detection.max_extra_descent: 0.03 # Max 3cm extra descent
+    contact_detection.check_interval: 0.05    # Check every 50ms
+    contact_detection.current_window: 5       # Average over 5 readings
+
+    # ========================================
+    # MoveIt Motion Planning
+    # ========================================
+    arm_group: "interbotix_arm"
+    lift_group: "interbotix_lift"
+    arm_lift_group: "interbotix_arm_lift"
+    use_coordinated_motion: false
+    max_velocity_scaling: 0.12     # OPTIMIZED: was 0.08 — smoother with higher ctrl rate
+    max_acceleration_scaling: 0.10 # OPTIMIZED: was 0.08
+    planning_time: 8.0             # Reduced from 10.0 for faster response
+    num_planning_attempts: 15      # Reduced from 20 — faster with better IK
+    use_orientation_constraint: false
+
+    # ========================================
+    # Gripper (PWM Mode)
+    # ========================================
+    gripper_pwm_open: 200
+    gripper_pwm_close: -75
+    gripper_close_duration: 2.5
+    gripper_current_limit_grasp: 250
+    gripper_current_limit_max: 500
+
+    # ========================================
+    # Workspace Limits (in lift_base_link frame, meters)
+    # ========================================
+    workspace_x_min: -0.90
+    workspace_x_max: 1.05
+    workspace_y_min: -0.45
+    workspace_y_max: 1.15
+    workspace_z_min: -0.33
+    workspace_z_max: 1.00
+
+    # ========================================
+    # Pre-Grasp Navigation Gate
+    # ========================================
+    pregrasp_nav.enabled: false
+    pregrasp_nav.min_distance_m: 0.40
+    pregrasp_nav.max_distance_m: 1.00
+    pregrasp_nav.target_distance_m: 0.65
+    pregrasp_nav.base_action_name: "/base/move_by_distance"
+    pregrasp_nav.base_align_topic: "/base/aligned_for_grasp"
+    pregrasp_nav.base_action_timeout_s: 20.0
+    pregrasp_nav.base_align_timeout_s: 10.0
+    pregrasp_nav.max_detection_stale_s: 3.0
+    pregrasp_nav.wait_fresh_detection_timeout_s: 2.0
+
+    # ========================================
+    # Lift Axis Configuration
+    # ========================================
+    lift.enabled: true
+    lift.joint_name: "lift_joint"
+    lift.action_name: "/lift_controller/follow_joint_trajectory"
+    lift.min_position: 0.0
+    lift.max_position: 0.275
+    lift.home_position: 0.0
+    lift.grasp_position: 0.0
+    lift.retract_position: 0.15
+    lift.move_timeout: 15.0
+
+    # ========================================
+    # Eye-in-Hand Mode Settings
+    # ========================================
+    # Camera is mounted on gripper (defined in URDF)
+    # TF chain: gripper_prop_link -> camera_mount_link -> camera_link -> camera_color_optical_frame
+    # No AprilTag calibration needed - grasp_offset values handle fine-tuning

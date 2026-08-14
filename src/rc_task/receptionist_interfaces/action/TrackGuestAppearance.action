@@ -1,0 +1,10 @@
+# Goal
+string guest_profile_id
+---
+# Result
+bool success
+string message
+receptionist_interfaces/GuestAppearance appearance
+---
+# Feedback
+receptionist_interfaces/GuestAppearance latest_appearance

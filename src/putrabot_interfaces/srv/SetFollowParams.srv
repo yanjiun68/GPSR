@@ -1,0 +1,5 @@
+float32 follow_distance_m
+float32 face_hold_sec
+---
+bool success
+string message

@@ -1,0 +1,7 @@
+# The caller provides the stable guest profile id that should move to seated memory.
+string profile_id
+---
+# The service reports whether the guest was moved successfully.
+bool success
+# The service also returns a short human-readable status message.
+string message

@@ -1,0 +1,55 @@
+std_msgs/Header header
+
+uint8 STATE_IDLE=0
+uint8 STATE_WAIT_FOR_TARGET=1
+uint8 STATE_LOCKING_TARGET=2
+uint8 STATE_FOLLOWING=3
+uint8 STATE_FOLLOWING_CAUTIOUS=4
+uint8 STATE_HOLD_LOCKED=5
+uint8 STATE_TEMP_OCCLUDED=6
+uint8 STATE_REACQUIRE=7
+uint8 STATE_LOCAL_SEARCH=8
+uint8 STATE_SAFE_STOP=9
+uint8 STATE_ABORTED=10
+
+uint8 MOTION_HOLD=0
+uint8 MOTION_ROTATE=1
+uint8 MOTION_FOLLOW_POSE=2
+uint8 MOTION_SEARCH=3
+
+uint8 REASON_NONE=0
+uint8 REASON_FOLLOW_DISABLED=1
+uint8 REASON_WAITING_FOR_TARGET=2
+uint8 REASON_LOCK_DWELL=3
+uint8 REASON_LOCK_CONFIRMED=4
+uint8 REASON_CONFIDENCE_HIGH=5
+uint8 REASON_CONFIDENCE_DEGRADED=6
+uint8 REASON_TARGET_FACING_ROBOT=7
+uint8 REASON_STANDOFF_REACHED=8
+uint8 REASON_TARGET_PREDICTED=9
+uint8 REASON_TARGET_CONTRADICTORY=10
+uint8 REASON_TARGET_SOFT_STALE=11
+uint8 REASON_TARGET_HARD_STALE=12
+uint8 REASON_SEARCH_BUDGET=13
+uint8 REASON_SAFETY_INHIBIT=14
+uint8 REASON_ABORT_TRIGGER=15
+
+uint8 state
+uint8 previous_state
+uint8 motion_mode
+uint8 transition_reason
+int32 selected_track_id
+bool target_visible
+bool translation_allowed
+float32 target_age_sec
+float32 detection_confidence
+float32 geometry_confidence
+float32 identity_confidence
+float32 motion_confidence
+float32 visibility_confidence
+float32 freshness_confidence
+float32 combined_confidence
+string state_label
+string previous_state_label
+string motion_mode_label
+string transition_reason_label

@@ -1,0 +1,8 @@
+# Section: Requested ActionStep skill and optional bounded transition timeout.
+string skill_name
+float32 timeout_sec
+---
+# Section: Lifecycle operation result and per-node state snapshot.
+bool success
+string message
+string state_json

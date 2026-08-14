@@ -1,0 +1,66 @@
+# Section: Deterministic parser and planner vocabulary.
+known_locations:
+  - kitchen
+  - living_room
+  - bedroom
+  - dining_room
+  - entrance
+  - operator
+  - instruction_point
+known_objects:
+  - apple
+  - banana
+  - bottle
+  - chair
+  - coke
+  - cup
+  - milk
+  - chips
+known_categories:
+  - drink
+  - food
+  - object
+known_people:
+  - operator
+  - john
+  - mary
+supported_object_features:
+  shirt_color:
+    - red
+    - blue
+    - green
+    - black
+    - white
+  object_color:
+    - blue
+    - green
+    - black
+    - white
+supported_human_poses:
+  - right_hand_raised
+  - left_hand_raised
+  - waving
+  - sitting
+  - standing
+  - lying
+instruction_point: instruction_point
+return_after_completion: false
+return_after_failure: false
+default_skill_timeout_sec: 30.0
+default_skill_retries: 0
+skill_timeouts:
+  NAVIGATE: 60.0
+  FIND_OBJECT: 300.0
+  FIND_PERSON: 20.0
+  COUNT_OBJECTS: 10.0
+  COUNT_PEOPLE: 10.0
+  SAY: 8.0
+skill_retries:
+  NAVIGATE: 1
+  FIND_OBJECT: 0
+  FIND_PERSON: 0
+  COUNT_OBJECTS: 0
+  COUNT_PEOPLE: 0
+  SAY: 0
+actions:
+  execute_action_queue: /execute_action_queue

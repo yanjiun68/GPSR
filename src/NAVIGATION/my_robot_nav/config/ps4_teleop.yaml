@@ -1,0 +1,29 @@
+teleop_twist_joy_node:
+  ros__parameters:
+    # PS4 手柄轴映射
+    axis_linear:
+      x: 1    # 左摇杆 上下 -> 前后移动
+      y: 0    # 左摇杆 左右 -> 左右移动（麦轮横移）
+    axis_angular:
+      yaw: 3  # 右摇杆 左右 -> 旋转
+    
+    # 速度缩放（与 cmd_vel_to_targets.py 限制一致）
+    scale_linear:
+      x: 0.15   # 前后最大速度 m/s
+      y: 0.15   # 横移最大速度 m/s
+    scale_angular:
+      yaw: 0.3  # 最大旋转速度 rad/s
+    
+    # 安全按钮（需要按住才能移动）
+    enable_button: 4       # L1 键作为使能按钮
+    enable_turbo_button: 5 # R1 键作为加速按钮（可选）
+    
+    # 加速模式的速度
+    scale_linear_turbo:
+      x: 0.25
+      y: 0.25
+    scale_angular_turbo:
+      yaw: 0.5
+    
+    # 发布频率
+    publish_stamped_twist: false

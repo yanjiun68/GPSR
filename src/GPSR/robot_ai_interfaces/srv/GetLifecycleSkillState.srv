@@ -1,0 +1,7 @@
+# Section: ActionStep skill whose lifecycle group should be inspected.
+string skill_name
+---
+# Section: Registry lookup result and per-node lifecycle state snapshot.
+bool success
+string message
+string state_json

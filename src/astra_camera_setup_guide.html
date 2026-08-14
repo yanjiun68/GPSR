@@ -1,0 +1,376 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Astra Camera Setup Guide</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      color: #1f2933;
+      line-height: 1.45;
+      margin: 32px;
+    }
+    h1 {
+      border-bottom: 2px solid #1f2933;
+      padding-bottom: 8px;
+    }
+    h2 {
+      margin-top: 28px;
+      color: #0f4c81;
+    }
+    h3 {
+      margin-top: 20px;
+      color: #334e68;
+    }
+    code {
+      background: #eef2f7;
+      padding: 2px 4px;
+      border-radius: 3px;
+    }
+    pre {
+      background: #f5f7fa;
+      border: 1px solid #d9e2ec;
+      border-radius: 6px;
+      padding: 12px;
+      overflow-wrap: break-word;
+      white-space: pre-wrap;
+    }
+    table {
+      border-collapse: collapse;
+      width: 100%;
+      margin: 12px 0;
+    }
+    th, td {
+      border: 1px solid #bcccdc;
+      padding: 8px;
+      text-align: left;
+      vertical-align: top;
+    }
+    th {
+      background: #e6f0fa;
+    }
+    .note {
+      border-left: 4px solid #0f4c81;
+      background: #f0f7ff;
+      padding: 10px 12px;
+      margin: 12px 0;
+    }
+    .warn {
+      border-left: 4px solid #b7791f;
+      background: #fff8e6;
+      padding: 10px 12px;
+      margin: 12px 0;
+    }
+  </style>
+</head>
+<body>
+  <h1>Astra Camera Setup Guide</h1>
+
+  <p>
+    This guide summarizes the Astra camera setup used in
+    <code>PutrabotUPM-project</code>. It covers device checks, ROS 2 launch
+    commands, expected topics, image preview, and troubleshooting for the
+    RoboCup camera adapter.
+  </p>
+
+  <h2>1. System Overview</h2>
+
+  <pre>
+Orbbec Astra USB Camera
+        |
+        v
+astra_camera driver
+        |
+        +-- /astra/color/image_raw
+        +-- /astra/depth/image_raw
+        +-- /astra/color/camera_info
+        +-- /astra/depth/camera_info
+        |
+        v
+robocup_astra_camera_node.py
+        |
+        +-- /camera/image_raw
+        +-- /camera/depth/image_raw
+        +-- /camera/camera_info
+        +-- /camera/depth/camera_info
+        +-- /diagnostics
+  </pre>
+
+  <p>
+    The Astra driver publishes native topics under <code>/astra</code>. The
+    RoboCup adapter node republishes the camera feed under stable
+    task-facing topics beginning with <code>/camera</code>.
+  </p>
+
+  <h2>2. Hardware Connection Check</h2>
+
+  <p>Connect the Astra camera by USB, then check whether Linux sees it:</p>
+
+  <pre>lsusb | grep -i -E "orbbec|astra|2bc5"</pre>
+
+  <p>Expected device pattern:</p>
+
+  <pre>2bc5:0401 Orbbec Astra</pre>
+
+  <p>Use the Astra driver device listing tool after sourcing the workspace:</p>
+
+  <pre>
+source /opt/ros/humble/setup.bash
+source install/setup.bash
+ros2 run astra_camera list_devices_node
+  </pre>
+
+  <p>Expected result from the local test:</p>
+
+  <pre>
+Device name: Astra
+URI: 2bc5/0401@...
+Serial number: 18022710375
+  </pre>
+
+  <h2>3. Build Workspace</h2>
+
+  <pre>
+source /opt/ros/humble/setup.bash
+colcon build --packages-select astra_camera my_robot_nav
+source install/setup.bash
+  </pre>
+
+  <div class="note">
+    If you recently added or changed launch files or Python nodes, rebuild and
+    source <code>install/setup.bash</code> again before launching.
+  </div>
+
+  <h2>4. Launch Native Astra Driver</h2>
+
+  <p>The project does not contain a file literally named <code>astra.launch.py</code>.
+    The relevant native launch file is:</p>
+
+  <pre>astra_camera astra_mini.launch.py</pre>
+
+  <p>Run it directly:</p>
+
+  <pre>
+source /opt/ros/humble/setup.bash
+source install/setup.bash
+export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+ros2 launch astra_camera astra_mini.launch.py namespace:=astra
+  </pre>
+
+  <p>Expected native topics:</p>
+
+  <pre>
+/astra/color/image_raw
+/astra/color/camera_info
+/astra/depth/image_raw
+/astra/depth/camera_info
+/astra/ir/image_raw
+/astra/points
+  </pre>
+
+  <h2>5. Launch RoboCup Astra Adapter</h2>
+
+  <p>Use the package-local launch file added for RoboCup tasks:</p>
+
+  <pre>
+source /opt/ros/humble/setup.bash
+source install/setup.bash
+export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+ros2 launch my_robot_nav robocup_astra_camera.launch.py
+  </pre>
+
+  <p>This launch starts:</p>
+
+  <table>
+    <tr>
+      <th>Component</th>
+      <th>Purpose</th>
+    </tr>
+    <tr>
+      <td><code>astra_camera/astra_mini.launch.py</code></td>
+      <td>Starts the Astra RGB-D hardware driver.</td>
+    </tr>
+    <tr>
+      <td><code>robocup_astra_camera_node.py</code></td>
+      <td>Relays Astra topics into stable RoboCup camera topics.</td>
+    </tr>
+  </table>
+
+  <h2>6. Expected RoboCup Topics</h2>
+
+  <table>
+    <tr>
+      <th>Topic</th>
+      <th>Message Type</th>
+      <th>Purpose</th>
+    </tr>
+    <tr>
+      <td><code>/camera/image_raw</code></td>
+      <td><code>sensor_msgs/msg/Image</code></td>
+      <td>RGB image feed for perception.</td>
+    </tr>
+    <tr>
+      <td><code>/camera/depth/image_raw</code></td>
+      <td><code>sensor_msgs/msg/Image</code></td>
+      <td>Depth image feed for distance estimation.</td>
+    </tr>
+    <tr>
+      <td><code>/camera/camera_info</code></td>
+      <td><code>sensor_msgs/msg/CameraInfo</code></td>
+      <td>RGB camera intrinsics.</td>
+    </tr>
+    <tr>
+      <td><code>/camera/depth/camera_info</code></td>
+      <td><code>sensor_msgs/msg/CameraInfo</code></td>
+      <td>Depth camera intrinsics.</td>
+    </tr>
+    <tr>
+      <td><code>/diagnostics</code></td>
+      <td><code>diagnostic_msgs/msg/DiagnosticArray</code></td>
+      <td>Adapter health and frame counters.</td>
+    </tr>
+  </table>
+
+  <h2>7. Verify Nodes and Topics</h2>
+
+  <pre>
+source install/setup.bash
+export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+ros2 node list
+ros2 topic list
+ros2 topic info /camera/image_raw -v
+ros2 topic info /camera/depth/image_raw -v
+  </pre>
+
+  <p>Check whether images are being published:</p>
+
+  <pre>
+ros2 topic hz /camera/image_raw
+ros2 topic hz /camera/depth/image_raw
+  </pre>
+
+  <h2>8. Preview Raw Image Feed</h2>
+
+  <p>Use <code>rqt_image_view</code> if a GUI display is available:</p>
+
+  <pre>
+source install/setup.bash
+export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+rqt_image_view /camera/image_raw
+  </pre>
+
+  <p>You can also preview the native Astra feed directly:</p>
+
+  <pre>rqt_image_view /astra/color/image_raw</pre>
+
+  <div class="note">
+    In the local hardware test, the Astra driver started RGB and depth streams
+    at 640x480 at 30 Hz and advertised <code>/astra/color/image_raw</code> and
+    <code>/astra/depth/image_raw</code>.
+  </div>
+
+  <h2>9. Troubleshooting Flow</h2>
+
+  <pre>
+Camera not working
+        |
+        +-- lsusb does not show Orbbec/Astra
+        |       |
+        |       v
+        |   Replug USB, try another port, check cable/power
+        |
+        +-- list_devices_node shows no camera
+        |       |
+        |       v
+        |   Check udev permissions and astra_camera install
+        |
+        +-- launch says Resource busy
+        |       |
+        |       v
+        |   Stop other camera processes or replug camera
+        |
+        +-- topics exist but ros2 topic list hangs
+        |       |
+        |       v
+        |   Use Fast DDS: export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+        |
+        +-- topics exist but no image in rqt
+                |
+                v
+            Check DISPLAY, QoS, topic name, and driver logs
+  </pre>
+
+  <h2>10. Common Issues</h2>
+
+  <table>
+    <tr>
+      <th>Symptom</th>
+      <th>Likely Cause</th>
+      <th>Fix</th>
+    </tr>
+    <tr>
+      <td><code>Resource busy</code></td>
+      <td>Another process still owns the Astra USB device.</td>
+      <td>Close previous launch/rqt processes, then unplug and replug the camera if needed.</td>
+    </tr>
+    <tr>
+      <td>Lifecycle or ROS graph commands keep waiting</td>
+      <td>DDS discovery issue, observed with CycloneDDS in this workspace.</td>
+      <td>Run with <code>export RMW_IMPLEMENTATION=rmw_fastrtps_cpp</code>.</td>
+    </tr>
+    <tr>
+      <td>No image in viewer</td>
+      <td>Wrong topic, no GUI display, or camera stream not active.</td>
+      <td>Check <code>ros2 topic list</code>, <code>ros2 topic hz</code>, and driver logs.</td>
+    </tr>
+    <tr>
+      <td>No camera listed</td>
+      <td>USB, permission, or driver issue.</td>
+      <td>Check <code>lsusb</code>, udev rules, and <code>list_devices_node</code>.</td>
+    </tr>
+  </table>
+
+  <h2>11. Recommended RoboCup Startup Sequence</h2>
+
+  <pre>
+1. Connect Astra camera by USB.
+2. Confirm Linux sees the device with lsusb.
+3. Source ROS and workspace setup files.
+4. Export Fast DDS RMW implementation.
+5. Launch robocup_astra_camera.launch.py.
+6. Verify /camera/image_raw and /camera/depth/image_raw.
+7. Start GPSR/perception nodes that consume /camera topics.
+  </pre>
+
+  <h2>12. Quick Command Reference</h2>
+
+  <pre>
+# Build
+source /opt/ros/humble/setup.bash
+colcon build --packages-select astra_camera my_robot_nav
+source install/setup.bash
+
+# Detect camera
+lsusb | grep -i -E "orbbec|astra|2bc5"
+ros2 run astra_camera list_devices_node
+
+# Launch RoboCup camera adapter
+export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+ros2 launch my_robot_nav robocup_astra_camera.launch.py
+
+# Inspect topics
+ros2 topic list
+ros2 topic hz /camera/image_raw
+ros2 topic hz /camera/depth/image_raw
+
+# Preview RGB image
+rqt_image_view /camera/image_raw
+  </pre>
+
+  <div class="warn">
+    The adapter standardizes topic names but does not fix a hardware-level
+    <code>Resource busy</code> error. If the Astra driver cannot open the USB
+    device, stop competing processes or replug the camera.
+  </div>
+</body>
+</html>

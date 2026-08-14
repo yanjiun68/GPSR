@@ -1,0 +1,227 @@
+<?xml version="1.0" ?>
+<robot name="rx200_lift_combined" xmlns:xacro="http://www.ros.org/wiki/xacro">
+    <xacro:arg name="robot_name" default="rx200"/>
+    <xacro:arg name="base_link_frame" default="base_link"/>
+
+    <!-- Virtual joint connecting world to robot base -->
+    <virtual_joint name="world_joint" type="fixed" parent_frame="world" child_link="lift_base_link" />
+
+    <group name="interbotix_arm">
+        <joint name="waist" />
+        <joint name="shoulder" />
+        <joint name="elbow" />
+        <joint name="wrist_angle" />
+        <joint name="wrist_rotate" />
+        <joint name="ee_arm" />
+        <joint name="gripper_bar" />
+        <joint name="ee_bar" />
+        <joint name="ee_gripper" />
+    </group>
+    <group name="interbotix_gripper">
+        <joint name="left_finger" />
+    </group>
+    <group name="interbotix_lift">
+        <joint name="lift_joint" />
+    </group>
+
+    <!-- Combined Group for Whole-Body Planning -->
+    <!-- Explicit joint list for compatibility with kinematics solvers -->
+    <group name="interbotix_arm_lift">
+        <joint name="lift_joint" />
+        <joint name="waist" />
+        <joint name="shoulder" />
+        <joint name="elbow" />
+        <joint name="wrist_angle" />
+        <joint name="wrist_rotate" />
+    </group>
+
+    <group_state name="Home" group="interbotix_arm">
+        <joint name="elbow" value="0" />
+        <joint name="shoulder" value="0" />
+        <joint name="waist" value="-1.57" />
+        <joint name="wrist_angle" value="0" />
+        <joint name="wrist_rotate" value="0" />
+    </group_state>
+    <group_state name="Upright" group="interbotix_arm">
+        <joint name="elbow" value="-1.5708" />
+        <joint name="shoulder" value="0" />
+        <joint name="waist" value="-1.57" />
+        <joint name="wrist_angle" value="0" />
+        <joint name="wrist_rotate" value="0" />
+    </group_state>
+    <group_state name="Sleep" group="interbotix_arm">
+        <joint name="elbow" value="1.55" />
+        <joint name="shoulder" value="-1.85" />
+        <joint name="waist" value="-1.57" />
+        <joint name="wrist_angle" value="0.8" />
+        <joint name="wrist_rotate" value="0" />
+    </group_state>
+    <group_state name="ready" group="interbotix_arm">
+        <!-- Recorded ready pose from current hardware joint_states -->
+        <joint name="elbow" value="-0.5169515609741211" />
+        <joint name="shoulder" value="-0.21935926377773285" />
+        <joint name="waist" value="-0.08897088468074799" />
+        <joint name="wrist_angle" value="1.2501944303512573" />
+        <joint name="wrist_rotate" value="0.0" />
+    </group_state>
+    <group_state name="grasp" group="interbotix_arm">
+        <!-- Recorded grasp pose from current hardware joint_states -->
+        <joint name="elbow" value="0.849825382232666" />
+        <joint name="shoulder" value="0.4111068546772003" />
+        <joint name="waist" value="-0.13192234933376312" />
+        <joint name="wrist_angle" value="-0.45405831933021545" />
+        <joint name="wrist_rotate" value="-0.0015339808305725455" />
+    </group_state>
+    <group_state name="Grasping" group="interbotix_gripper">
+        <joint name="left_finger" value="0.015" />
+    </group_state>
+    <group_state name="Released" group="interbotix_gripper">
+        <joint name="left_finger" value="0.037" />
+    </group_state>
+    <group_state name="grasp" group="interbotix_gripper">
+        <joint name="left_finger" value="0.03667954355478287" />
+    </group_state>
+    <group_state name="Home" group="interbotix_gripper">
+        <joint name="left_finger" value="0.0195" />
+    </group_state>
+    <group_state name="Home" group="interbotix_lift">
+        <joint name="lift_joint" value="0.0" />
+    </group_state>
+    <group_state name="Up" group="interbotix_lift">
+        <joint name="lift_joint" value="0.15" />
+    </group_state>
+
+    <!-- Combined Arm+Lift group states -->
+    <group_state name="Home" group="interbotix_arm_lift">
+        <joint name="lift_joint" value="0.0" />
+        <joint name="waist" value="-1.57" />
+        <joint name="shoulder" value="0" />
+        <joint name="elbow" value="0" />
+        <joint name="wrist_angle" value="0" />
+        <joint name="wrist_rotate" value="0" />
+    </group_state>
+    <group_state name="Ready" group="interbotix_arm_lift">
+        <!-- Recorded ready pose from current hardware joint_states -->
+        <joint name="lift_joint" value="0.0" />
+        <joint name="waist" value="-0.08897088468074799" />
+        <joint name="shoulder" value="-0.21935926377773285" />
+        <joint name="elbow" value="-0.5169515609741211" />
+        <joint name="wrist_angle" value="1.2501944303512573" />
+        <joint name="wrist_rotate" value="0.0" />
+    </group_state>
+    <group_state name="grasp" group="interbotix_arm_lift">
+        <joint name="lift_joint" value="0.0" />
+        <joint name="waist" value="-0.13192234933376312" />
+        <joint name="shoulder" value="0.4111068546772003" />
+        <joint name="elbow" value="0.849825382232666" />
+        <joint name="wrist_angle" value="-0.45405831933021545" />
+        <joint name="wrist_rotate" value="-0.0015339808305725455" />
+    </group_state>
+    <group_state name="Retracted" group="interbotix_arm_lift">
+        <joint name="lift_joint" value="0.20" />
+        <joint name="waist" value="-1.57" />
+        <joint name="shoulder" value="-1.0" />
+        <joint name="elbow" value="1.2" />
+        <joint name="wrist_angle" value="0.5" />
+        <joint name="wrist_rotate" value="0" />
+    </group_state>
+
+    <end_effector name="interbotix_gripper" parent_link="$(arg robot_name)/ee_gripper_link" group="interbotix_gripper" />
+
+    <!-- ============================================================ -->
+    <!-- COLLISION CONFIGURATION                                       -->
+    <!-- Only disable collisions for ADJACENT links                    -->
+    <!-- All other pairs (arm body vs lift_base_link) ARE CHECKED!     -->
+    <!-- ============================================================ -->
+    
+    <!-- Lift: Adjacent links only -->
+    <disable_collisions link1="lift_base_link" link2="lift_top_link" reason="Adjacent" />
+    <disable_collisions link1="lift_top_link" link2="$(arg robot_name)/$(arg base_link_frame)" reason="Adjacent" />
+    
+    <!-- Arm Base to Lift (base sits on platform) -->
+    <disable_collisions link1="$(arg robot_name)/$(arg base_link_frame)" link2="lift_base_link" reason="Never" />
+    <!-- Shoulder is close to base, physically cannot reach lift frame -->
+    <disable_collisions link1="$(arg robot_name)/shoulder_link" link2="lift_base_link" reason="Never" />
+    <disable_collisions link1="$(arg robot_name)/shoulder_link" link2="lift_top_link" reason="Never" />
+    <!-- Current real mounting can put finger meshes very close to lift base in folded poses. -->
+    <disable_collisions link1="$(arg robot_name)/left_finger_link" link2="lift_base_link" reason="Never" />
+    <disable_collisions link1="$(arg robot_name)/right_finger_link" link2="lift_base_link" reason="Never" />
+    
+    <!-- ============================================================ -->
+    <!-- ARM BODY vs LIFT: Collision checking ENABLED (no disable)    -->
+    <!-- upper_arm, forearm, wrist, gripper vs lift_base_link         -->
+    <!-- These pairs ARE checked for collision during planning!       -->
+    <!-- ============================================================ -->
+    
+    <!-- Standard RX200 Adjacent Collisions -->
+    <disable_collisions link1="$(arg robot_name)/$(arg base_link_frame)" link2="$(arg robot_name)/shoulder_link" reason="Adjacent" />
+    <disable_collisions link1="$(arg robot_name)/shoulder_link" link2="$(arg robot_name)/upper_arm_link" reason="Adjacent" />
+    <disable_collisions link1="$(arg robot_name)/upper_arm_link" link2="$(arg robot_name)/forearm_link" reason="Adjacent" />
+    <disable_collisions link1="$(arg robot_name)/forearm_link" link2="$(arg robot_name)/wrist_link" reason="Adjacent" />
+    <disable_collisions link1="$(arg robot_name)/wrist_link" link2="$(arg robot_name)/gripper_link" reason="Adjacent" />
+    <disable_collisions link1="$(arg robot_name)/gripper_link" link2="$(arg robot_name)/gripper_prop_link" reason="Adjacent" />
+    <disable_collisions link1="$(arg robot_name)/gripper_bar_link" link2="$(arg robot_name)/gripper_link" reason="Adjacent" />
+    <disable_collisions link1="$(arg robot_name)/gripper_bar_link" link2="$(arg robot_name)/gripper_prop_link" reason="Adjacent" />
+    <disable_collisions link1="$(arg robot_name)/gripper_bar_link" link2="$(arg robot_name)/left_finger_link" reason="Adjacent" />
+    <disable_collisions link1="$(arg robot_name)/gripper_bar_link" link2="$(arg robot_name)/right_finger_link" reason="Adjacent" />
+    <disable_collisions link1="$(arg robot_name)/left_finger_link" link2="$(arg robot_name)/right_finger_link" reason="Adjacent" />
+    
+    <!-- Gripper parts that never collide with forearm/wrist (geometry separated) -->
+    <disable_collisions link1="$(arg robot_name)/forearm_link" link2="$(arg robot_name)/gripper_bar_link" reason="Never" />
+    <disable_collisions link1="$(arg robot_name)/forearm_link" link2="$(arg robot_name)/gripper_link" reason="Never" />
+    <disable_collisions link1="$(arg robot_name)/forearm_link" link2="$(arg robot_name)/gripper_prop_link" reason="Never" />
+    <disable_collisions link1="$(arg robot_name)/forearm_link" link2="$(arg robot_name)/left_finger_link" reason="Never" />
+    <disable_collisions link1="$(arg robot_name)/forearm_link" link2="$(arg robot_name)/right_finger_link" reason="Never" />
+    <disable_collisions link1="$(arg robot_name)/gripper_bar_link" link2="$(arg robot_name)/wrist_link" reason="Never" />
+    <disable_collisions link1="$(arg robot_name)/gripper_link" link2="$(arg robot_name)/left_finger_link" reason="Never" />
+    <disable_collisions link1="$(arg robot_name)/gripper_link" link2="$(arg robot_name)/right_finger_link" reason="Never" />
+    <disable_collisions link1="$(arg robot_name)/gripper_prop_link" link2="$(arg robot_name)/left_finger_link" reason="Never" />
+    <disable_collisions link1="$(arg robot_name)/gripper_prop_link" link2="$(arg robot_name)/right_finger_link" reason="Never" />
+    <disable_collisions link1="$(arg robot_name)/gripper_prop_link" link2="$(arg robot_name)/wrist_link" reason="Never" />
+    <disable_collisions link1="$(arg robot_name)/left_finger_link" link2="$(arg robot_name)/wrist_link" reason="Never" />
+    <disable_collisions link1="$(arg robot_name)/right_finger_link" link2="$(arg robot_name)/wrist_link" reason="Never" />
+    
+    <!-- ee_arm_link, fingers_link, ee_gripper_link, ar_tag_link vs lift -->
+    <!-- Collision checking ENABLED (no disable) for safety -->
+    
+    <!-- Additional adjacent/never collide pairs for ee links -->
+    <disable_collisions link1="$(arg robot_name)/ee_arm_link" link2="$(arg robot_name)/gripper_link" reason="Adjacent" />
+    <disable_collisions link1="$(arg robot_name)/ee_arm_link" link2="$(arg robot_name)/gripper_bar_link" reason="Adjacent" />
+    <disable_collisions link1="$(arg robot_name)/ee_arm_link" link2="$(arg robot_name)/wrist_link" reason="Adjacent" />
+    <disable_collisions link1="$(arg robot_name)/fingers_link" link2="$(arg robot_name)/gripper_bar_link" reason="Adjacent" />
+    <disable_collisions link1="$(arg robot_name)/fingers_link" link2="$(arg robot_name)/left_finger_link" reason="Adjacent" />
+    <disable_collisions link1="$(arg robot_name)/fingers_link" link2="$(arg robot_name)/right_finger_link" reason="Adjacent" />
+    <disable_collisions link1="$(arg robot_name)/ee_gripper_link" link2="$(arg robot_name)/gripper_bar_link" reason="Adjacent" />
+    <disable_collisions link1="$(arg robot_name)/ee_gripper_link" link2="$(arg robot_name)/fingers_link" reason="Adjacent" />
+    <disable_collisions link1="$(arg robot_name)/ar_tag_link" link2="$(arg robot_name)/gripper_bar_link" reason="Adjacent" />
+    <disable_collisions link1="$(arg robot_name)/ar_tag_link" link2="$(arg robot_name)/gripper_link" reason="Adjacent" />
+    <disable_collisions link1="$(arg robot_name)/ar_tag_link" link2="$(arg robot_name)/gripper_prop_link" reason="Adjacent" />
+    <disable_collisions link1="$(arg robot_name)/ar_tag_link" link2="$(arg robot_name)/forearm_link" reason="Never" />
+    <disable_collisions link1="$(arg robot_name)/ar_tag_link" link2="$(arg robot_name)/left_finger_link" reason="Never" />
+    <disable_collisions link1="$(arg robot_name)/ar_tag_link" link2="$(arg robot_name)/right_finger_link" reason="Never" />
+    <disable_collisions link1="$(arg robot_name)/ar_tag_link" link2="$(arg robot_name)/wrist_link" reason="Never" />
+
+    <!-- ============================================================ -->
+    <!-- Camera Mount Link (Eye-in-Hand) Collision Configuration      -->
+    <!-- Camera is mounted on gripper_prop_link (gripper servo)       -->
+    <!-- ============================================================ -->
+    <disable_collisions link1="$(arg robot_name)/camera_mount_link" link2="$(arg robot_name)/gripper_prop_link" reason="Adjacent" />
+    <disable_collisions link1="$(arg robot_name)/camera_mount_link" link2="$(arg robot_name)/gripper_link" reason="Adjacent" />
+    <disable_collisions link1="$(arg robot_name)/camera_mount_link" link2="$(arg robot_name)/gripper_bar_link" reason="Adjacent" />
+    <disable_collisions link1="$(arg robot_name)/camera_mount_link" link2="$(arg robot_name)/ee_arm_link" reason="Adjacent" />
+    <disable_collisions link1="$(arg robot_name)/camera_mount_link" link2="$(arg robot_name)/wrist_link" reason="Never" />
+    <disable_collisions link1="$(arg robot_name)/camera_mount_link" link2="$(arg robot_name)/fingers_link" reason="Adjacent" />
+    <disable_collisions link1="$(arg robot_name)/camera_mount_link" link2="$(arg robot_name)/left_finger_link" reason="Never" />
+    <disable_collisions link1="$(arg robot_name)/camera_mount_link" link2="$(arg robot_name)/right_finger_link" reason="Never" />
+    <disable_collisions link1="$(arg robot_name)/camera_mount_link" link2="$(arg robot_name)/forearm_link" reason="Never" />
+    <disable_collisions link1="$(arg robot_name)/camera_mount_link" link2="$(arg robot_name)/ar_tag_link" reason="Never" />
+    <disable_collisions link1="$(arg robot_name)/camera_mount_link" link2="$(arg robot_name)/ee_gripper_link" reason="Never" />
+
+    <!-- ============================================================ -->
+    <!-- COLLISION CONFIGURATION SUMMARY:                              -->
+    <!-- DISABLED: base_link, shoulder_link vs lift (adjacent/close)   -->
+    <!-- ENABLED:  upper_arm, forearm, wrist, gripper vs lift (safety) -->
+    <!-- MoveIt will check collisions between arm body and lift!       -->
+    <!-- ============================================================ -->
+
+</robot>

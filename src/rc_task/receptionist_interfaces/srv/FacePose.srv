@@ -1,0 +1,7 @@
+# The caller provides the pose the robot should face using a small in-place turn.
+geometry_msgs/PoseStamped target_pose
+---
+# The service reports whether the facing motion completed successfully.
+bool success
+# The service also returns a short human-readable status message.
+string message

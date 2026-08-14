@@ -1,0 +1,107 @@
+face_perception_node:
+  ros__parameters:
+    image_topic: "/camera/rx200_camera/color/image_raw"
+    face_topic: "/perception/largest_face"
+    det_score_threshold: 0.65
+
+appearance_node:
+  ros__parameters:
+    image_topic: "/camera/rx200_camera/color/image_raw"
+    face_topic: "/perception/largest_face"
+    appearance_topic: "/appearance/current_estimate"
+    debug_topic: "/perception/appearance"
+    yolo_conf_threshold: 0.4
+
+appearance_action_server:
+  ros__parameters:
+    appearance_topic: "/appearance/current_estimate"
+    feedback_period_sec: 0.5
+
+profile_capture_node:
+  ros__parameters:
+    face_topic: "/perception/largest_face"
+    appearance_topic: "/appearance/current_estimate"
+    guest_profile_topic: "/dialogue/current_guest_profile"
+    host_profile_topic: "/dialogue/current_host_profile"
+    status_topic: "/appearance/current_capture_status"
+    snapshot_service_name: "/appearance/capture_profile_snapshot"
+    snapshot_json_topic: "/appearance/captured_profile_json"
+    action_name: "/appearance/capture_named_profile"
+    min_stable_samples: 8
+    embedding_similarity_threshold: 0.55
+    center_tolerance_px: 40.0
+    area_ratio_tolerance: 0.35
+    feedback_period_sec: 0.2
+
+vision_node:
+  ros__parameters:
+    image_topic: "/camera/rx200_camera/color/image_raw"
+    face_topic: "/perception/largest_face"
+    appearance_topic: "/appearance/current_estimate"
+    debug_topic: "/perception/appearance"
+    debug_image_topic: "/perception/vision_image"
+    status_topic: "/appearance/current_capture_status"
+    show_gui: true
+    window_name: "InsightFace Vision Node"
+    det_score_threshold: 0.65
+    ctx_id: 0
+    yolo_conf_threshold: 0.4
+
+dialogue_action_server:
+  ros__parameters:
+    action_name: "/dialogue/collect_guest_profile"
+    profile_topic: "/dialogue/current_guest_profile"
+    profile_json_topic: "/dialogue/current_guest_profile_json"
+    store_profile_in_memory: true
+    set_current_guest_service: "/guest_memory/set_current_guest_profile"
+    piper_bin: "/home/likoy/piper/piper/piper"
+    piper_model_path: "/home/likoy/piper/en_US-ryan-high.onnx"
+    whisper_model: "base"
+    whisper_language: "en"
+    mic_device: "auto"
+    speaker_device: "auto"
+    audio_device_candidates: "default,pulse,pipewire"
+    record_sec: 4.0
+    enable_tts_prompts: false
+    recording_beep_enabled: true
+    recording_beep_frequency_hz: 880.0
+    recording_beep_duration_sec: 0.18
+
+guest_profile_memory_bridge:
+  ros__parameters:
+    profile_topic: "/dialogue/current_guest_profile"
+    set_current_guest_service: "/guest_memory/set_current_guest_profile"
+
+host_profile_memory_bridge:
+  ros__parameters:
+    profile_topic: "/dialogue/current_host_profile"
+    set_host_service: "/guest_memory/set_host_profile"
+
+introduction_node:
+  ros__parameters:
+    piper_model_path: "/home/likoy/piper/en_US-ryan-high.onnx"
+    prefer_tts_action: true
+    tts_action_name: "/tts/speak"
+    tts_action_timeout_sec: 1.0
+
+tts_bridge_node:
+  ros__parameters:
+    piper_model_path: "/home/likoy/piper/en_US-ryan-high.onnx"
+
+nav_controller_node:
+  ros__parameters:
+    nav2_action_name: "/navigate_to_pose"
+    amcl_pose_topic: "/amcl_pose"
+
+chair_manager_node:
+  ros__parameters:
+    detections_topic: "/cam_detections"
+
+seated_people_node:
+  ros__parameters:
+    detections_topic: "/cam_detections"
+
+seat_pointing_node:
+  ros__parameters:
+    joint_single_topic: "/rx200/commands/joint_single"
+    command_pause_sec: 1.0

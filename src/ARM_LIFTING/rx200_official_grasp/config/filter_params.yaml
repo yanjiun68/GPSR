@@ -1,0 +1,35 @@
+# ============================================================
+# PointCloud Filter Parameters
+# ============================================================
+# Configuration for the official Interbotix pc_filter node.
+# These parameters control object detection via point cloud clustering.
+# ============================================================
+
+# Crop Box Filter (in camera frame, meters)
+# Limits the point cloud to a specific 3D region
+x_filter_min: -0.25
+x_filter_max: 0.25
+y_filter_min: 0.05
+y_filter_max: 0.50
+z_filter_min: 0.15
+z_filter_max: 0.60
+
+# Voxel Grid Filter
+# Downsamples the point cloud for faster processing
+voxel_leaf_size: 0.004  # 4mm voxel size
+
+# RANSAC Plane Segmentation
+# Removes the dominant plane (typically the table/surface)
+plane_max_iter: 50          # Max RANSAC iterations
+plane_dist_thresh: 0.005    # Distance threshold for plane inliers (5mm)
+
+# Radius Outlier Removal
+# Removes isolated points (noise)
+ror_radius_search: 0.01     # Search radius (10mm)
+ror_min_neighbors: 5        # Minimum neighbors within radius
+
+# Euclidean Cluster Extraction
+# Groups nearby points into object clusters
+cluster_tol: 0.02           # Cluster tolerance (20mm)
+cluster_min_size: 100       # Minimum points per cluster
+cluster_max_size: 5000      # Maximum points per cluster

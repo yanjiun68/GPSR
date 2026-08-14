@@ -1,0 +1,10 @@
+# Goal
+bool require_known_match
+---
+# Result
+bool success
+string message
+receptionist_interfaces/RecognitionStatus status
+---
+# Feedback
+receptionist_interfaces/RecognitionStatus latest_status

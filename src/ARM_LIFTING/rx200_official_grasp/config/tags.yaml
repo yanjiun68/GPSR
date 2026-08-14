@@ -1,0 +1,21 @@
+# ============================================================
+# AprilTag Configuration
+# ============================================================
+# Configuration for AprilTag detection used in camera calibration.
+# ============================================================
+
+# AprilTag family and settings
+image_transport: raw
+family: tag41h12
+size: 0.03  # Tag size in meters (30mm)
+
+# Detection settings
+max_hamming: 0
+z_up: true
+
+# Tag definitions
+# The RX200 has an AR tag on the gripper for calibration
+standalone_tags:
+  - id: 5
+    size: 0.03
+    name: "arm_tag"

@@ -1,0 +1,36 @@
+# target_lock_manager.py
+/**:
+  ros__parameters:
+    # HIGH IMPACT
+    target_timeout_sec: 1.0
+    publishable_timeout_sec: 0.55
+    combined_publishable_min: 0.5
+    relock_stability_cycles: 6
+    relock_cooldown_sec: 1.5
+    current_lock_stale_hold_sec: 0.75
+    same_target_position_gate_m: 0.4
+    same_target_staleness_gate_sec: 1.0
+    lock_score_switch_margin: 0.12
+    lock_score_retain_margin: 0.05
+    lock_score_strong_min: 0.76
+    lock_score_weak_min: 0.58
+    lock_score_unsure_min: 0.4
+
+    # NORMAL TUNING
+    publish_timer_period_sec: 0.01
+    lock_score_w_track: 0.2
+    lock_score_w_confidence: 0.28
+    lock_score_w_identity: 0.18
+    lock_score_w_motion: 0.08
+    lock_score_w_freshness: 0.14
+    lock_score_w_facing: 0.04
+    lock_score_w_history: 0.12
+    lock_score_selected_bonus: 0.14
+    lock_score_publishable_bonus: 0.05
+    lock_score_contradiction_penalty: 0.28
+    lock_score_crossover_penalty: 0.18
+    lock_score_stale_penalty: 0.2
+    lock_score_visibility_penalty: 0.12
+
+    # NODE-LOCAL WIRING
+    target_lock_debug_topic: /person_target_lock_debug

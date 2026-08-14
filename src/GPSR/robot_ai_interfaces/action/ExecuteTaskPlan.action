@@ -1,0 +1,21 @@
+# Section: Top-level GPSR task-plan execution goal.
+string command_id
+string original_instruction
+string structured_task_json
+bool return_after_completion
+float32 overall_timeout_sec
+bool dry_run
+---
+# Section: Top-level GPSR task-plan execution result.
+bool success
+uint32 completed_steps
+string failed_step
+string failure_reason
+string execution_log_json
+---
+# Section: Top-level GPSR task-plan execution feedback.
+string current_step
+string current_skill
+uint32 completed_count
+uint32 total_count
+string status_message

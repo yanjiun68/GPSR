@@ -1,0 +1,8 @@
+# Section: Extract person info request/response.
+string person_id
+string field
+---
+bool success
+string value
+string result_json
+string message

@@ -1,0 +1,3 @@
+/robot_camera/camera:
+  ros__parameters:
+    serial_no: "_022422071806"

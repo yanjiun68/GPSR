@@ -1,0 +1,122 @@
+# ============================================================
+# RX200 Official Grasp System - Configuration
+# ============================================================
+# Uses official Interbotix perception modules:
+# - PointCloud clustering for object detection
+# - AprilTag for camera-to-arm calibration
+# ============================================================
+
+/**:
+  ros__parameters:
+
+    # ========================================
+    # Robot Configuration
+    # ========================================
+    robot:
+      model: "rx200"
+      base_frame: "rx200/base_link"
+      ee_link: "rx200/ee_gripper_link"
+      arm_tag_frame: "rx200/ar_tag_link"
+
+    # ========================================
+    # Camera Configuration
+    # ========================================
+    camera:
+      frame: "camera_color_optical_frame"
+      color_topic: "/camera/camera/color/image_raw"
+      depth_topic: "/camera/camera/aligned_depth_to_color/image_raw"
+      info_topic: "/camera/camera/color/camera_info"
+      pointcloud_topic: "/camera/camera/depth/color/points"
+
+    # ========================================
+    # PointCloud Filter Configuration
+    # ========================================
+    # Namespace for official pc_filter node
+    filter_ns: "pc_filter"
+
+    # Filter bounds (in camera frame, meters)
+    x_filter_min: -0.25
+    x_filter_max: 0.25
+    y_filter_min: 0.05
+    y_filter_max: 0.50
+    z_filter_min: 0.15
+    z_filter_max: 0.60
+
+    # Voxel grid downsampling
+    voxel_leaf_size: 0.004
+
+    # Plane segmentation (table removal)
+    plane_max_iter: 50
+    plane_dist_thresh: 0.005
+
+    # Radius outlier removal
+    ror_radius_search: 0.01
+    ror_min_neighbors: 5
+
+    # Euclidean clustering
+    cluster_tol: 0.02
+    cluster_min_size: 100
+    cluster_max_size: 5000
+
+    # ========================================
+    # AprilTag / ArmTag Configuration
+    # ========================================
+    apriltag_ns: "apriltag"
+    armtag_ns: "armtag"
+
+    calibration:
+      num_samples: 5
+      auto_calibrate: true
+      calibration_interval: 5
+
+    # ========================================
+    # Gripper Configuration
+    # ========================================
+    gripper:
+      open_position: 0.037      # meters - fully open
+      close_position: 0.015     # meters - fully closed
+      grasp_position: 0.020     # meters - grasping position
+
+    # ========================================
+    # Motion Planning Configuration
+    # ========================================
+    motion:
+      arm_group: "interbotix_arm"
+      gripper_group: "interbotix_gripper"
+      max_velocity_scaling: 0.3
+      max_acceleration_scaling: 0.3
+      planning_time: 5.0
+      num_planning_attempts: 10
+
+    # ========================================
+    # Grasp Configuration
+    # ========================================
+    grasp:
+      approach_distance: 0.08   # meters - pre-grasp height above target
+      lift_height: 0.10         # meters - lift after grasp
+
+      # Workspace bounds (in base_link frame, meters)
+      workspace:
+        x_min: 0.12
+        x_max: 0.45
+        y_min: -0.25
+        y_max: 0.25
+        z_min: 0.01
+        z_max: 0.40
+
+    # ========================================
+    # Predefined Poses (joint positions in radians)
+    # [waist, shoulder, elbow, wrist_angle, wrist_rotate]
+    # ========================================
+    poses:
+      home: [0.0, 0.0, 0.0, 0.0, 0.0]
+      sleep: [0.0, -1.8, 1.55, 0.8, 0.0]
+      observe: [0.0, 0.3, 0.3, -0.3, 0.0]
+      upright: [0.0, 0.0, -1.57, 0.0, 0.0]
+
+    # ========================================
+    # Pipeline Configuration
+    # ========================================
+    pipeline:
+      detection_timeout: 10.0
+      execution_timeout: 60.0

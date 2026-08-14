@@ -1,0 +1,10 @@
+---
+bool active
+bool inhibit_active
+int32 selected_track_id
+bool target_visible
+float32 target_age_sec
+bool facing_robot
+string state
+string safety_state
+string stop_reason

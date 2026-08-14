@@ -1,0 +1,17 @@
+<?xml version="1.0"?>
+<!-- Section: GPSR symbolic interface package metadata. -->
+<package format="3">
+  <name>robot_ai_interfaces</name>
+  <version>0.0.0</version>
+  <description>Symbolic GPSR action queue interfaces.</description>
+  <maintainer email="yanjiun68@example.com">yanjiun68</maintainer>
+  <license>TODO</license>
+  <!-- Section: ROS interface build dependencies. -->
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <build_depend>rosidl_default_generators</build_depend>
+  <exec_depend>rosidl_default_runtime</exec_depend>
+  <build_depend>geometry_msgs</build_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <member_of_group>rosidl_interface_packages</member_of_group>
+  <export><build_type>ament_cmake</build_type></export>
+</package>

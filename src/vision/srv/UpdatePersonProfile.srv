@@ -1,0 +1,15 @@
+bool is_nearest
+int32 person_id
+
+string person_name
+uint16 age
+string favourite_drink
+
+bool update_name
+bool update_age
+bool update_favourite_drink
+---
+bool success
+int32 resolved_person_id
+int32 resolved_track_id
+string message

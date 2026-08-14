@@ -1,0 +1,8 @@
+llm_interfaces/ReceptionistContext context
+string request_type
+---
+bool success
+string speech_text
+string normalized_name
+string normalized_drink
+string error_code

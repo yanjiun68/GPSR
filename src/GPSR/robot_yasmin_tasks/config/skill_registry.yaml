@@ -1,0 +1,34 @@
+{
+  "skills": {
+    "NAVIGATE": {"conflict_group": "", "lifecycle_nodes": [], "execution_interface": "/nav/navigate_named_pose"},
+    "RETURN_TO_INSTRUCTION_POINT": {"conflict_group": "", "lifecycle_nodes": [], "execution_interface": "/nav/navigate_named_pose"},
+    "FIND_OBJECT": {
+      "conflict_group": "vision_gpu",
+      "lifecycle_nodes": ["/gpsr_object_detection_node", "/find_object_skill_server"],
+      "execution_interface": "/gpsr/find_object"
+    },
+    "COUNT_OBJECTS": {
+      "conflict_group": "vision_gpu",
+      "lifecycle_nodes": ["/gpsr_object_detection_node", "/count_objects_perception_server", "/count_objects_skill_server"],
+      "execution_interface": "/gpsr/count_objects"
+    },
+    "COUNT_PEOPLE": {
+      "conflict_group": "vision_gpu",
+      "lifecycle_nodes": ["/gpsr_human_detection_node", "/human_skeleton_detection_node", "/count_people_perception_server", "/count_people_skill_server"],
+      "execution_interface": "/gpsr/count_people"
+    },
+    "FIND_PERSON": {"conflict_group": "vision_gpu", "lifecycle_nodes": [], "execution_interface": "/appearance/recognize_human_id + /appearance/lookup_identity_profile + /appearance/current_person_observation"},
+    "COMPARE_OBJECTS": {"conflict_group": "", "lifecycle_nodes": [], "execution_interface": "simulation_only"},
+    "EXTRACT_PERSON_INFO": {"conflict_group": "", "lifecycle_nodes": [], "execution_interface": "simulation_only"},
+    "PICK": {"conflict_group": "", "lifecycle_nodes": [], "execution_interface": "simulation_only"},
+    "PLACE": {"conflict_group": "", "lifecycle_nodes": [], "execution_interface": "simulation_only"},
+    "DISPOSE_TRASH": {"conflict_group": "", "lifecycle_nodes": [], "execution_interface": "simulation_only"},
+    "GIVE": {"conflict_group": "", "lifecycle_nodes": [], "execution_interface": "simulation_only"},
+    "FOLLOW": {"conflict_group": "", "lifecycle_nodes": [], "execution_interface": "simulation_only"},
+    "GUIDE": {"conflict_group": "", "lifecycle_nodes": [], "execution_interface": "simulation_only"},
+    "GREET": {"conflict_group": "", "lifecycle_nodes": [], "execution_interface": "/voice/tts/say"},
+    "SAY": {"conflict_group": "", "lifecycle_nodes": [], "execution_interface": "/voice/tts/say"},
+    "ASK": {"conflict_group": "", "lifecycle_nodes": [], "execution_interface": "/voice/stt"},
+    "REPORT": {"conflict_group": "", "lifecycle_nodes": [], "execution_interface": "/voice/tts/say"}
+  }
+}

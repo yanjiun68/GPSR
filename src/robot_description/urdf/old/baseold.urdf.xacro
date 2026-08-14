@@ -1,0 +1,162 @@
+<?xml version="1.0"?>
+<robot name="omni_robot" xmlns:xacro="http://ros.org/wiki/xacro">
+  <!-- Define Materials -->
+  <material name="gray">
+    <color rgba="0.5 0.5 0.5 1"/>
+  </material>
+
+  <material name="black">
+    <color rgba="0 0 0 1"/>
+  </material>
+
+  <material name="white">
+    <color rgba="1 1 1 1"/>
+  </material>
+
+  <material name="blue">
+    <color rgba="0 0 1 1"/>
+  </material>
+
+  <!-- Base Footprint (Reference Point at 0,0,0) -->
+  <link name="base_footprint"/>
+
+  <!-- Base Link (Hexagonal Platform) -->
+  <link name="base_link">
+    <visual>
+      <geometry>
+        <cylinder radius="0.2655" length="0.05"/>
+      </geometry>
+      <material name="gray"/>
+    </visual>
+  </link>
+
+  <!-- Static Transform between base_footprint and base_link -->
+  <joint name="base_footprint_joint" type="fixed">
+    <parent link="base_footprint"/>
+    <child link="base_link"/>
+    <origin xyz="0 0 0.048" rpy="0 0 0"/> <!-- Base height at 10.1cm -->
+  </joint>
+
+    <!-- Base Link (Hexagonal Platform) -->
+  <link name="baseup_link">
+    <visual>
+      <geometry>
+        <cylinder radius="0.2355" length="0.03136"/>
+      </geometry>
+      <material name="white"/>
+    </visual>
+  </link>
+
+  <!-- Static Transform between base_footprint and base_link -->
+  <joint name="baseup_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="baseup_link"/>
+    <origin xyz="0 0 0.04068" rpy="0 0 0"/> <!-- Base height at 10.1cm -->
+  </joint>
+
+  <!-- Omni Wheel Macro -->
+  <xacro:macro name="omni_wheel" params="wheel_name x y z roll pitch yaw">
+    <link name="${wheel_name}">
+      <visual>
+        <geometry>
+          <cylinder radius="0.05" length="0.03804"/>  <!-- Wheel radius = 10cm, width = 3.804cm -->
+        </geometry>
+        <material name="black"/>
+      </visual>
+    </link>
+
+    <joint name="joint_${wheel_name}" type="continuous">
+      <parent link="base_link"/>
+      <child link="${wheel_name}"/>
+      <origin xyz="${x} ${y} ${z}" rpy="${roll} ${pitch} ${yaw}"/>
+      <axis xyz="0 0 1"/>
+    </joint>
+  </xacro:macro>
+
+  <!-- Four Omni Wheels (Positioned in X-Y Plane) -->
+  <xacro:omni_wheel wheel_name="wheel_left" x="0" y="0.265" z="0.002" roll="1.5708" pitch="0" yaw="3.14159"/>
+  <xacro:omni_wheel wheel_name="wheel_right" x="0" y="-0.265" z="0.002" roll="1.5708" pitch="0" yaw="0"/>
+  <xacro:omni_wheel wheel_name="wheel_front" x="0.265" y="0" z="0.002" roll="1.5708" pitch="0" yaw="1.5708"/>
+  <xacro:omni_wheel wheel_name="wheel_rear" x="-0.265" y="0" z="0.002" roll="1.5708" pitch="0" yaw="-1.5708"/>
+
+  <!-- LiDAR Definition -->
+  <link name="lidar_link">
+    <visual>
+      <geometry>
+        <cylinder radius="0.03785" length="0.0408"/>  <!-- LiDAR dimensions (diameter: 75.70mm / 2) -->
+      </geometry>
+      <material name="blue"/>
+    </visual>
+  </link>
+
+  <!-- Fixed Joint: Attach LiDAR to base_link -->
+  <joint name="lidar_joint" type="fixed">
+    <parent link="baseup_link"/>
+    <child link="lidar_link"/>
+    <origin xyz="0.215 0 0.085" rpy="0 0 0"/>  <!-- LiDAR placed 47.10 mm above base_link -->
+  </joint>
+
+  <!-- LiDAR Definition -->
+  <link name="Stepper_link">
+    <visual>
+      <geometry>
+        <cylinder radius="0.005" length="0.006"/>  <!-- LiDAR dimensions (diameter: 75.70mm / 2) -->
+      </geometry>
+      <material name="black"/>
+    </visual>
+  </link>
+
+  <!-- Fixed Joint: Attach LiDAR to base_link -->
+  <joint name="Stepper_joint" type="continuous">
+    <parent link="baseup_link"/>
+    <child link="Stepper_link"/>
+    <origin xyz="0 0 0.23" rpy="1.5708 0 0"/>  <!-- LiDAR placed 47.10 mm above base_link -->
+    <axis xyz="0 0 1"/>
+  </joint>
+
+
+  <!-- Moving Platform (Prismatic) -->
+  <link name="platform_link">
+    <visual>
+      <geometry>
+        <box size="0.2 0.26 0.006"/>  <!-- Platform Top: 20cm x 26cm x 0.6cm -->
+      </geometry>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <material name="gray"/>
+    </visual>
+  </link>
+
+  <joint name="platform_joint" type="prismatic">
+    <parent link="baseup_link"/>
+    <child link="platform_link"/>
+    <origin xyz="0.2215 0 0.3246" rpy="0 0 0"/>  <!-- Starting 15cm above the base -->
+    <axis xyz="0 0 1"/>  <!-- Moves vertically -->
+    <limit lower="0.0" upper="0.4" effort="50.0" velocity="0.1"/>  <!-- 0 to 40cm -->
+  </joint>
+
+  <xacro:include filename="$(find robot_description)/urdf/rx200.urdf.xacro" />
+    <!-- Attach RX200 arm to platform_link -->
+  <joint name="rx200_mount_joint" type="fixed">
+    <parent link="platform_link"/>
+    <child link="rx200/base_link"/>  <!-- This must match the name used in rx200.urdf.xacro -->
+    <origin xyz="0 0 0.003" rpy="0 0 0"/>  <!-- Adjust height if needed -->
+  </joint>
+
+  <link name="camera_link">
+  <visual>
+    <geometry>
+      <box size="0.1151 0.0422 0.04015"/>  <!-- length x width x height -->
+    </geometry>
+    <material name="blue"/>
+  </visual>
+</link>
+
+<joint name="camera_joint" type="fixed">
+  <parent link="baseup_link"/>  <!-- or base_link, baseup_link, etc. -->
+  <child link="camera_link"/>
+  <origin xyz="0.08795 0.1244 0.852075" rpy="-1.5708 0 -1.5708"/>  <!-- Adjust position as needed -->
+</joint>
+
+
+
+</robot>

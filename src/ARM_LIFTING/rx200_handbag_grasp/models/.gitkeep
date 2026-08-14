@@ -1,0 +1,4 @@
+# Placeholder for YOLO and SAM model files
+# Model files should be downloaded and placed here:
+# - yolov8s-worldv2.pt (YOLO-World model)
+# - sam2.1_hiera_small.pt (SAM2.1 model)

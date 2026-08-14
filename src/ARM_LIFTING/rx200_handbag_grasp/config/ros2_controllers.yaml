@@ -1,0 +1,57 @@
+# ros2_control controllers for RX200 arm
+# Namespace /rx200 is specified explicitly for correct parameter loading
+# OPTIMIZED: Higher control frequency for smoother motion
+
+/rx200:
+  controller_manager:
+    ros__parameters:
+      update_rate: 100  # Hz (was 50 — Dynamixel XM430 supports 100+)
+
+      arm_controller:
+        type: joint_trajectory_controller/JointTrajectoryController
+
+      gripper_controller:
+        type: joint_trajectory_controller/JointTrajectoryController
+
+      joint_state_broadcaster:
+        type: joint_state_broadcaster/JointStateBroadcaster
+
+  arm_controller:
+    ros__parameters:
+      joints:
+        - waist
+        - shoulder
+        - elbow
+        - wrist_angle
+        - wrist_rotate
+      command_interfaces:
+        - position
+      state_interfaces:
+        - position
+      state_publish_rate: 100.0       # was 50.0
+      action_monitor_rate: 50.0       # was 20.0
+      allow_partial_joints_goal: false
+      constraints:
+        stopped_velocity_tolerance: 0.02
+        goal_time: 2.0
+
+  gripper_controller:
+    ros__parameters:
+      joints:
+        - left_finger
+      command_interfaces:
+        - position
+      state_interfaces:
+        - position
+      state_publish_rate: 100.0       # was 50.0
+      action_monitor_rate: 50.0       # was 20.0
+
+  joint_state_broadcaster:
+    ros__parameters:
+      joints:
+        - waist
+        - shoulder
+        - elbow
+        - wrist_angle
+        - wrist_rotate
+        - left_finger

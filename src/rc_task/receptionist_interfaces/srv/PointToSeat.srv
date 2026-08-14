@@ -1,0 +1,13 @@
+# The caller provides the selected chair id for logging and traceability.
+string chair_id
+# The caller provides the safe pre-calibrated waist yaw for that chair.
+float32 waist_yaw_rad
+# The caller can request an immediate return to the home waist angle after pointing.
+bool return_home
+# The caller can also request only the home motion without any pointing gesture.
+bool home_only
+---
+# The service reports whether the waist command sequence completed successfully.
+bool success
+# The service also returns a short human-readable status message.
+string message

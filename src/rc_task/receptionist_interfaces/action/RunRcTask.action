@@ -1,0 +1,15 @@
+# Goal
+# Task A runs the full receptionist flow.
+# Task B runs a lighter prototype flow for A/B testing.
+string task_id
+bool reset_memory
+bool dry_run
+int32 target_guest_count
+---
+# Result
+bool success
+string message
+---
+# Feedback
+string current_state
+string detail

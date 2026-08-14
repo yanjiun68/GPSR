@@ -1,0 +1,18 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>dio13_monitor_example</name>
+  <version>0.0.1</version>
+  <description>Example ROS 2 Python consumer node for /dio13_state.</description>
+  <maintainer email="user@example.com">OpenAI</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>ament_python</buildtool_depend>
+
+  <depend>rclpy</depend>
+  <depend>std_msgs</depend>
+  <exec_depend>dio13_serial_bridge</exec_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

@@ -1,0 +1,52 @@
+guest_text_renderer:
+  ros__parameters:
+    target_topic: /guest_profile/target
+    guest_name_topic: /guest_profile/guest_name
+    age_topic: /guest_profile/age
+    favourite_drink_topic: /guest_profile/favourite_drink
+    shirt_color_topic: /guest_profile/shirt_color
+    item1_topic: /guest_profile/item1
+    item2_topic: /guest_profile/item2
+    item3_topic: /guest_profile/item3
+    item4_topic: /guest_profile/item4
+    trigger_topic: /guest_profile/ready
+    auto_render_on_update: false
+    render_delay_sec: 0.2
+    action_name: /tts/speak
+    template: "Hi {target}, this is {guest_name}, {guest_name} likes {favourite_drink}, {guest_name} is {age} years old, {guest_name} wears a {shirt_color}, has {item1}, {item2}, {item3}, {item4}."
+
+json_guest_text_renderer:
+  ros__parameters:
+    json_path: ~/.ros/rc_task/guest_memory.json
+    json_trigger_topic: /guest_profile/speak_from_json
+    default_profile_id: latest
+    target_name: everyone
+    action_name: /tts/speak
+    tts_server_timeout_sec: 1.0
+    template: "Hi {target}, this is {guest_name}, {guest_name} likes {favourite_drink}, {guest_name} is {age} years old, {guest_name} wears a {shirt_color}, has {item1}, {item2}, {item3}, {item4}."
+
+piper_tts_node:
+  ros__parameters:
+    action_name: /tts/speak
+    piper_executable: /home/yanjiun68/.local/bin/piper
+    model_path: /home/yanjiun68/piper_models/en_US-lessac-medium.onnx
+    config_path: /home/yanjiun68/piper_models/en_US-lessac-medium.onnx.json
+    sample_rate: 22050
+    speaker_id: 0
+    use_cuda: false
+
+test_guest_profile_publisher:
+  ros__parameters:
+    target_topic: /guest_profile/target
+    guest_name_topic: /guest_profile/guest_name
+    age_topic: /guest_profile/age
+    favourite_drink_topic: /guest_profile/favourite_drink
+    shirt_color_topic: /guest_profile/shirt_color
+    item1_topic: /guest_profile/item1
+    item2_topic: /guest_profile/item2
+    item3_topic: /guest_profile/item3
+    item4_topic: /guest_profile/item4
+    trigger_topic: /guest_profile/ready
+    publish_stored_topic: /guest_profile/publish_stored
+    publish_once: true
+    ready_delay_sec: 0.1

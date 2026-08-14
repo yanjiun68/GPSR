@@ -1,0 +1,80 @@
+# Section: Strategy 2B search policy using only recorded gpsr_waypoint.yaml names.
+rooms:
+  kitchen:
+    viewpoints: [kitchen]
+  dining_room:
+    viewpoints: [dining_room]
+  living_room:
+    viewpoints: [living_room]
+  bedroom:
+    viewpoints: [bedroom]
+  entrance:
+    viewpoints: [entrance]
+
+# Section: Semantic priors control ordering and never remove global fallback rooms.
+object_priors:
+  bottle: [kitchen, dining_room, living_room, bedroom]
+  chair: [dining_room, living_room, bedroom, entrance]
+  coke: [kitchen, dining_room, living_room]
+  cup: [kitchen, dining_room, living_room]
+  milk: [kitchen, dining_room]
+  apple: [kitchen, dining_room]
+  banana: [kitchen, dining_room]
+  chips: [kitchen, living_room]
+
+# Section: Category priors are used only when no object-specific prior exists.
+category_priors:
+  drink: [kitchen, dining_room, living_room, bedroom]
+  food: [kitchen, dining_room, living_room]
+  object: [kitchen, dining_room, living_room, bedroom, entrance]
+
+# Section: Category goals expand to detector-native object labels.
+category_members:
+  drink: [bottle, cup, coke, milk]
+  food: [apple, banana, chips]
+  object: []
+
+# Section: Angles are desired offsets from the arrival heading, not raw wheel commands.
+scan:
+  fast_angles_deg: [0, 60, -60]
+  extended_angles_deg: [120, -120]
+  exhaustive_angles_deg: [180]
+  settle_interval_sec: 0.5
+  action_timeout_sec: 20.0
+
+# Section: Sliding-window stationary target verification.
+verification:
+  window_frames: 5
+  minimum_hits: 3
+  min_confidence: 0.35
+  last_seen_timeout_sec: 1.0
+  confirmation_timeout_sec: 3.0
+  perception_startup_timeout_sec: 3.0
+
+# Section: Aligned-depth projection and TF freshness safeguards.
+localization:
+  map_frame: map
+  base_frame: base_link
+  camera_frame: camera_color_optical_frame
+  depth_roi_width_px: 20
+  depth_roi_height_px: 20
+  min_valid_depth_ratio: 0.5
+  min_range_m: 0.15
+  max_range_m: 6.0
+  max_detection_age_sec: 0.75
+  max_depth_age_sec: 0.75
+  max_timestamp_skew_sec: 0.35
+  tf_timeout_sec: 0.3
+
+# Section: Collision-safe candidate generation and Nav2 planner validation.
+approach:
+  default_stand_off_distance_m: 0.8
+  candidate_angles_deg: [180, 135, -135, 90, -90, 45, -45, 0]
+  costmap_lethal_threshold: 252
+  planner_timeout_sec: 5.0
+  navigation_timeout_sec: 90.0
+
+# Section: Named navigation remains Nav2-owned through NavigateNamedPose.
+navigation:
+  server_timeout_sec: 5.0
+  result_timeout_sec: 120.0

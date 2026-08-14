@@ -1,0 +1,36 @@
+<?xml version="1.0"?>
+<!-- Package section: standalone semantic self-localization package metadata. -->
+<package format="3">
+  <name>semantic_location_server</name>
+  <version>0.1.0</version>
+  <description>Polygon-based semantic self-localization from an existing TF or AMCL pose.</description>
+  <maintainer email="pehyanjiun@gmail.com">PutrabotUPM maintainers</maintainer>
+  <license>Apache-2.0</license>
+
+  <!-- Build section: generate the package-local structured ROS interfaces. -->
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <buildtool_depend>ament_cmake_python</buildtool_depend>
+  <buildtool_depend>rosidl_default_generators</buildtool_depend>
+
+  <!-- Runtime section: consume existing localization and publish semantic state. -->
+  <depend>builtin_interfaces</depend>
+  <depend>geometry_msgs</depend>
+  <depend>rclpy</depend>
+  <depend>std_msgs</depend>
+  <depend>tf2_ros</depend>
+  <depend>visualization_msgs</depend>
+  <exec_depend>ament_index_python</exec_depend>
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+  <exec_depend>python3-yaml</exec_depend>
+  <exec_depend>rosidl_default_runtime</exec_depend>
+
+  <!-- Test section: exercise the pure semantic model without a running ROS graph. -->
+  <test_depend>ament_cmake_pytest</test_depend>
+
+  <!-- Export section: declare the CMake build and interface-package membership. -->
+  <member_of_group>rosidl_interface_packages</member_of_group>
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

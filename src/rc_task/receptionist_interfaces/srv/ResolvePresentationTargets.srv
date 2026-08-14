@@ -1,0 +1,13 @@
+# The caller tells the node which guest index is being handled now.
+int32 guest_index
+---
+# The service reports whether target resolution completed successfully.
+bool success
+# The service also returns a short human-readable status message.
+string message
+# The service returns the ordered list of profile ids to introduce the guest to.
+string[] target_profile_ids
+# The service returns the main profile id the robot should face before speaking.
+string face_target_profile_id
+# The service returns the main pose the robot should face before speaking.
+geometry_msgs/PoseStamped face_target_pose

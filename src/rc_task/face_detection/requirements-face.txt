@@ -1,0 +1,3 @@
+# Section: Face math dependency; use ROS/system python3-opencv instead of installing a pip wheel.
+numpy>=1.23,<2
+# OpenCV >=4.5.4 with FaceDetectorYN and FaceRecognizerSF is provided by rosdep/system packages.

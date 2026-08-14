@@ -1,0 +1,11 @@
+# Requirements for RX200 Bag Handle Grasping System
+# Install directly: pip install -r requirements.txt
+
+# YOLO11 (Ultralytics)
+ultralytics>=8.3.0
+
+# Core dependencies
+numpy>=1.24.0
+scipy>=1.10.0
+PyYAML>=6.0
+opencv-python>=4.8.0

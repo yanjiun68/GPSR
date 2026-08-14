@@ -1,0 +1,11 @@
+string profile_id
+string role
+string name
+bool store_in_memory
+bool commit_current_guest
+string commit_profile_id
+---
+bool success
+string message
+receptionist_interfaces/PersonProfile profile
+string json_data

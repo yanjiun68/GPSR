@@ -1,0 +1,4 @@
+string state
+float32 completeness_score
+float32 confidence_score
+string active_profile_id

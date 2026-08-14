@@ -1,0 +1,5 @@
+string waypoint_id
+---
+geometry_msgs/PoseStamped goal
+bool success
+string message

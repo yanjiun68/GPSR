@@ -1,0 +1,627 @@
+"""Section: ROS action node for deterministic GPSR scheduling."""
+
+from __future__ import annotations
+
+import json
+import time
+import uuid
+from pathlib import Path
+from typing import Any
+
+import rclpy
+from ament_index_python.packages import get_package_share_directory
+from rclpy.action import ActionClient, ActionServer, CancelResponse, GoalResponse
+from rclpy.callback_groups import ReentrantCallbackGroup
+from rclpy.executors import MultiThreadedExecutor
+from rclpy.node import Node
+from std_msgs.msg import String
+from std_srvs.srv import Trigger
+
+from gpsr_task_scheduler.config import SchedulerConfig, load_config
+from gpsr_task_scheduler.cycle import GpsrCycleController, SchedulerState
+from gpsr_task_scheduler.planner import plan_to_dict, step_to_action_step_dict
+from gpsr_task_scheduler.scheduler import schedule_command
+from robot_ai_interfaces.action import ExecuteActionQueue, ExecuteTaskPlan
+from robot_ai_interfaces.msg import ActionQueue, ActionStep
+from robot_ai_interfaces.srv import ScheduleCommand
+
+
+class GpsrTaskSchedulerNode(Node):
+    """Special function: Parse, plan, dry-run, and dispatch deterministic GPSR tasks."""
+
+    def __init__(self) -> None:
+        """Special function: Initialize scheduler configuration, topics, and action clients."""
+        super().__init__("gpsr_task_scheduler")
+
+        # Section: Declare runtime parameters exposed by the scheduler launch file.
+        self.declare_parameter("config_file", self.default_config_path())
+        self.declare_parameter("dry_run", True)
+        self.declare_parameter("command_input_mode", "topic")
+        self.declare_parameter("command_topic", "/gpsr/command")
+        self.declare_parameter("plan_topic", "/gpsr/task_plan")
+        self.declare_parameter("schedule_command_service", "/gpsr/schedule_command")
+        self.declare_parameter("reset_state_service", "/gpsr/reset_state")
+        self.declare_parameter("execute_task_plan_action", "/gpsr/execute_task_plan")
+        self.declare_parameter("execute_action_queue_action", "/execute_action_queue")
+        self.declare_parameter("executor_goal_response_timeout_sec", 30.0)
+        self.declare_parameter("instruction_point", "")
+        self.declare_parameter("return_after_completion", False)
+        self.declare_parameter("return_after_failure", False)
+        self.declare_parameter("default_skill_timeout_sec", 30.0)
+        self.declare_parameter("default_skill_retries", 0)
+        self.declare_parameter("enable_navigation", True)
+        self.declare_parameter("enable_perception", True)
+        self.declare_parameter("enable_manipulation", True)
+        self.declare_parameter("enable_tts", True)
+        self.declare_parameter("max_commands", 3)
+        self.declare_parameter("navigate_to_instruction_point_on_start", True)
+        self.declare_parameter("enable_error_recovery", True)
+        self.declare_parameter("error_recovery_max_attempts", 3)
+        self.declare_parameter("error_recovery_retry_delay_sec", 5.0)
+        self.declare_parameter("state_topic", "/gpsr/state")
+        self.declare_parameter("command_result_topic", "/gpsr/command_result")
+
+        # Section: Load deterministic vocabulary and mission policy.
+        self.config = self.load_runtime_config()
+
+        # Section: Guard the complete competition-command lifecycle across callback threads.
+        self.cycle = GpsrCycleController(int(self.get_parameter("max_commands").value))
+        self.initialization_started = False
+        self.error_recovery_attempts = 0
+        self.error_recovery_next_attempt_time = 0.0
+        self.error_recovery_exhaustion_logged = False
+
+        # Section: Publish complete dry-run or accepted plans for operator inspection.
+        self.plan_pub = self.create_publisher(String, str(self.get_parameter("plan_topic").value), 10)
+
+        # Section: Publish scheduler readiness and terminal command results for voice/operator nodes.
+        self.state_pub = self.create_publisher(String, str(self.get_parameter("state_topic").value), 10)
+        self.command_result_pub = self.create_publisher(
+            String,
+            str(self.get_parameter("command_result_topic").value),
+            10,
+        )
+
+        # Section: Subscribe to plain text commands when topic input mode is selected.
+        if str(self.get_parameter("command_input_mode").value) == "topic":
+            self.create_subscription(String, str(self.get_parameter("command_topic").value), self.command_callback, 10)
+
+        # Section: Keep action responses runnable while scheduler callbacks await their futures.
+        self.executor_callback_group = ReentrantCallbackGroup()
+        self.executor_client = ActionClient(
+            self,
+            ExecuteActionQueue,
+            str(self.get_parameter("execute_action_queue_action").value),
+            callback_group=self.executor_callback_group,
+        )
+
+        # Section: Expose service input for command schedulers that cannot use ROS actions directly.
+        self.schedule_service = self.create_service(
+            ScheduleCommand,
+            str(self.get_parameter("schedule_command_service").value),
+            self.schedule_service_callback,
+        )
+
+        # Section: Expose a guarded operator interface that re-arms ERROR recovery only.
+        self.reset_state_service = self.create_service(
+            Trigger,
+            str(self.get_parameter("reset_state_service").value),
+            self.reset_state_callback,
+        )
+
+        # Section: Expose top-level deterministic task scheduling action.
+        self.action_server = ActionServer(
+            self,
+            ExecuteTaskPlan,
+            str(self.get_parameter("execute_task_plan_action").value),
+            execute_callback=self.execute_callback,
+            goal_callback=self.goal_callback,
+            cancel_callback=self.cancel_callback,
+        )
+
+        # Section: Defer initial navigation until the separately launched queue executor is ready.
+        self.initialization_timer = self.create_timer(1.0, self.initialize_competition_cycle)
+        self.error_recovery_timer = self.create_timer(1.0, self.recover_from_error)
+        self.state_timer = self.create_timer(1.0, self.publish_cycle_state)
+        self.publish_cycle_state()
+
+        # Section: Log startup without claiming hardware integration.
+        self.get_logger().info(
+            "GPSR task scheduler ready: "
+            f"dry_run={self.get_parameter('dry_run').value}, "
+            f"command_topic={self.get_parameter('command_topic').value}, "
+            f"schedule_service={self.get_parameter('schedule_command_service').value}, "
+            f"executor={self.get_parameter('execute_action_queue_action').value}"
+        )
+
+    def default_config_path(self) -> str:
+        """Special function: Resolve installed scheduler YAML path if available."""
+        try:
+            return str(Path(get_package_share_directory("gpsr_task_scheduler")) / "config" / "scheduler.yaml")
+        except Exception:
+            return ""
+
+    def load_runtime_config(self) -> SchedulerConfig:
+        """Special function: Apply ROS launch parameters over YAML scheduler defaults."""
+        config = load_config(str(self.get_parameter("config_file").value))
+        instruction_point = str(self.get_parameter("instruction_point").value).strip()
+        if instruction_point:
+            config.instruction_point = instruction_point
+        config.return_after_completion = bool(self.get_parameter("return_after_completion").value) or bool(config.return_after_completion)
+        config.return_after_failure = bool(self.get_parameter("return_after_failure").value) or bool(config.return_after_failure)
+        config.default_skill_timeout_sec = float(self.get_parameter("default_skill_timeout_sec").value)
+        config.default_skill_retries = int(self.get_parameter("default_skill_retries").value)
+        config.actions["execute_action_queue"] = str(self.get_parameter("execute_action_queue_action").value)
+        return config
+
+    def command_callback(self, msg: String) -> None:
+        """Special function: Admit and execute one topic command through the guarded cycle."""
+        command_id = f"topic_{uuid.uuid4().hex}"
+        dry_run = bool(self.get_parameter("dry_run").value)
+        result = self.process_one_command(
+            command_id,
+            str(msg.data),
+            dry_run,
+            float(self.config.default_skill_timeout_sec or 300.0),
+        )
+        if not result["accepted"]:
+            self.get_logger().warn(f"GPSR command rejected: {result['message']}")
+        elif not result["success"]:
+            self.get_logger().warn(f"GPSR command failed: {result['message']}")
+
+    def schedule_service_callback(
+        self,
+        request: ScheduleCommand.Request,
+        response: ScheduleCommand.Response,
+    ) -> ScheduleCommand.Response:
+        """Special function: Process one service command without bypassing cycle admission."""
+        command_id = str(request.command_id or f"service_{uuid.uuid4().hex}")
+        instruction = str(request.instruction or "")
+        global_dry_run = bool(self.get_parameter("dry_run").value)
+        execute_requested = bool(request.execute)
+        dry_run = bool(request.dry_run) or global_dry_run or not execute_requested
+        processed = self.process_one_command(
+            command_id,
+            instruction,
+            dry_run,
+            max(1.0, float(request.overall_timeout_sec or 300.0)),
+        )
+        response.accepted = bool(processed["accepted"])
+        response.success = bool(processed["success"])
+        response.message = str(processed["message"])
+        response.plan_json = json.dumps(processed.get("plan", {}), sort_keys=True)
+        response.execution_log_json = json.dumps(processed, sort_keys=True)
+        return response
+
+    def reset_state_callback(
+        self,
+        _request: Trigger.Request,
+        response: Trigger.Response,
+    ) -> Trigger.Response:
+        """Special function: Re-arm guarded recovery without force-setting scheduler state."""
+        snapshot = self.cycle.snapshot()
+        if snapshot.state != SchedulerState.ERROR:
+            response.success = False
+            response.message = (
+                f"Reset rejected while scheduler is {snapshot.state.value}; "
+                "only ERROR can be reset."
+            )
+            return response
+        if not bool(self.get_parameter("enable_error_recovery").value):
+            response.success = False
+            response.message = "Reset rejected because enable_error_recovery is false."
+            return response
+
+        # Section: The recovery timer performs the verified return before reopening intake.
+        self.error_recovery_attempts = 0
+        self.error_recovery_next_attempt_time = 0.0
+        self.error_recovery_exhaustion_logged = False
+        response.success = True
+        response.message = (
+            "GPSR ERROR recovery re-armed; waiting for verified return to Instruction Point."
+        )
+        self.get_logger().warn(response.message)
+        self.publish_cycle_state()
+        return response
+
+    def goal_callback(self, goal_request: ExecuteTaskPlan.Goal) -> GoalResponse:
+        """Special function: Reject empty or concurrently submitted top-level goals."""
+        if not str(goal_request.original_instruction or goal_request.structured_task_json or "").strip():
+            return GoalResponse.REJECT
+        return (
+            GoalResponse.ACCEPT
+            if self.cycle.snapshot().state == SchedulerState.WAITING_FOR_COMMAND
+            else GoalResponse.REJECT
+        )
+
+    def cancel_callback(self, _goal_handle: Any) -> CancelResponse:
+        """Special function: Allow cancellation before or during queue dispatch."""
+        return CancelResponse.ACCEPT
+
+    async def execute_callback(self, goal_handle: Any) -> ExecuteTaskPlan.Result:
+        """Special function: Execute one admitted action command through the guarded cycle."""
+        goal = goal_handle.request
+        dry_run = bool(goal.dry_run) or bool(self.get_parameter("dry_run").value)
+        command_id = str(goal.command_id or f"goal_{uuid.uuid4().hex}")
+        processed = self.process_one_command(
+            command_id,
+            str(goal.original_instruction),
+            dry_run,
+            max(1.0, float(goal.overall_timeout_sec or 300.0)),
+        )
+        feedback = ExecuteTaskPlan.Feedback()
+        feedback.current_step = ""
+        feedback.current_skill = ""
+        feedback.completed_count = int(processed.get("completed_steps", 0))
+        feedback.total_count = len(processed.get("plan", {}).get("steps", []))
+        feedback.status_message = str(processed["message"])
+        goal_handle.publish_feedback(feedback)
+        result = ExecuteTaskPlan.Result()
+        result.success = bool(processed["success"])
+        result.completed_steps = int(processed.get("completed_steps", 0))
+        result.failed_step = str(processed.get("failed_step", ""))
+        result.failure_reason = "" if result.success else str(processed["message"])
+        result.execution_log_json = json.dumps(processed, sort_keys=True)
+        if result.success:
+            goal_handle.succeed()
+        else:
+            goal_handle.abort()
+        return result
+
+    def initialize_competition_cycle(self) -> None:
+        """Special function: Navigate once to the Instruction Point before accepting commands."""
+        if self.initialization_started:
+            return
+        self.initialization_started = True
+        self.initialization_timer.cancel()
+        self.cycle.start_initial_return()
+        self.publish_cycle_state()
+        # Section: Dry-run mode must never issue the otherwise-enabled physical return goal.
+        dry_run = bool(self.get_parameter("dry_run").value)
+        navigate_on_start = (
+            bool(self.get_parameter("navigate_to_instruction_point_on_start").value)
+            and not dry_run
+        )
+        return_result = (
+            self.submit_return_to_instruction_point("gpsr_initialization")
+            if navigate_on_start
+            else {
+                "success": True,
+                "message": (
+                    "Initial return skipped in dry-run mode."
+                    if dry_run
+                    else "Initial return disabled."
+                ),
+            }
+        )
+        self.cycle.finish_initial_return(bool(return_result["success"]))
+        self.publish_cycle_state()
+
+    def recover_from_error(self) -> None:
+        """Special function: Retry a guarded return and reopen intake only after success."""
+        if self.cycle.snapshot().state != SchedulerState.ERROR:
+            return
+        if not bool(self.get_parameter("enable_error_recovery").value):
+            return
+
+        # Section: Bound automatic motion retries while allowing zero to mean unlimited attempts.
+        max_attempts = max(
+            0,
+            int(self.get_parameter("error_recovery_max_attempts").value),
+        )
+        if max_attempts and self.error_recovery_attempts >= max_attempts:
+            if not self.error_recovery_exhaustion_logged:
+                self.get_logger().error(
+                    "GPSR error recovery exhausted; scheduler remains in ERROR."
+                )
+                self.error_recovery_exhaustion_logged = True
+            return
+        if time.monotonic() < self.error_recovery_next_attempt_time:
+            return
+        if not self.cycle.start_error_recovery():
+            return
+
+        # Section: RECOVERING rejects commands while the normal executor cleanup barrier runs.
+        self.error_recovery_attempts += 1
+        attempt = self.error_recovery_attempts
+        self.publish_cycle_state()
+        self.get_logger().warn(
+            f"GPSR recovery attempt {attempt}: returning to Instruction Point."
+        )
+        return_result = self.submit_return_to_instruction_point(
+            f"gpsr_error_recovery_{attempt}"
+        )
+        success = bool(return_result.get("success", False))
+        self.cycle.finish_error_recovery(success)
+        if success:
+            self.get_logger().info(
+                "GPSR recovery succeeded; command intake is available again."
+            )
+            self.error_recovery_attempts = 0
+            self.error_recovery_next_attempt_time = 0.0
+            self.error_recovery_exhaustion_logged = False
+        else:
+            retry_delay = max(
+                0.1,
+                float(self.get_parameter("error_recovery_retry_delay_sec").value),
+            )
+            self.error_recovery_next_attempt_time = time.monotonic() + retry_delay
+            self.get_logger().warn(
+                f"GPSR recovery attempt {attempt} failed: "
+                f"{return_result.get('message', 'unknown return failure')}; "
+                f"retrying after {retry_delay:.1f}s."
+            )
+        self.publish_cycle_state()
+
+    def process_one_command(
+        self,
+        command_id: str,
+        instruction: str,
+        dry_run: bool,
+        timeout_sec: float,
+    ) -> dict[str, Any]:
+        """Special function: Plan, execute, clean up, return, and reset one command."""
+        if not self.cycle.try_accept_command(command_id):
+            snapshot = self.cycle.snapshot()
+            return {
+                "accepted": False,
+                "success": False,
+                "command_id": command_id,
+                "message": f"Scheduler is {snapshot.state.value}; command not accepted.",
+                "state": snapshot.state.value,
+            }
+        self.publish_cycle_state()
+
+        # Section: Generate exactly one task plan from the admitted command.
+        planned = self.schedule(command_id, instruction, dry_run)
+        if not planned.get("valid"):
+            self.cycle.finish_planning(command_id, False)
+            self.publish_cycle_state()
+            return {
+                "accepted": False,
+                "success": False,
+                "command_id": command_id,
+                "message": json.dumps(planned.get("issues", []), sort_keys=True),
+                "failed_step": "planning",
+                "plan": planned,
+            }
+        if dry_run:
+            self.cycle.finish_planning(command_id, False)
+            self.publish_cycle_state()
+            return {
+                "accepted": True,
+                "success": True,
+                "command_id": command_id,
+                "message": "Plan generated; execution skipped because dry_run is true.",
+                "completed_steps": 0,
+                "plan": planned,
+            }
+
+        # Section: Execute all internal skills before initiating the single return transition.
+        self.cycle.finish_planning(command_id, True)
+        self.publish_cycle_state()
+        executable_plan = self.without_embedded_return(planned)
+        queue_result = self.submit_action_queue(command_id, executable_plan, timeout_sec)
+        self.cycle.finish_execution(command_id)
+        self.publish_cycle_state()
+
+        # Section: Return after either success or terminal task failure, then release admission.
+        return_result = self.submit_return_to_instruction_point(command_id)
+        self.cycle.finish_return(command_id, bool(return_result["success"]))
+        self.publish_cycle_state()
+        success = bool(queue_result["success"] and return_result["success"])
+        message = (
+            "Execution succeeded and robot returned to Instruction Point."
+            if success
+            else f"task={queue_result['message']}; return={return_result['message']}"
+        )
+        processed = {
+            "accepted": True,
+            "success": success,
+            "command_id": command_id,
+            "message": message,
+            "completed_steps": int(queue_result.get("completed_steps", 0)),
+            "failed_step": "" if success else (
+                "execute_action_queue" if not queue_result["success"] else "return_instruction_point"
+            ),
+            "plan": planned,
+            "execution": queue_result,
+            "return": return_result,
+            "state": self.cycle.snapshot().state.value,
+        }
+        result_msg = String()
+        result_msg.data = json.dumps(processed, sort_keys=True)
+        self.command_result_pub.publish(result_msg)
+        return processed
+
+    def without_embedded_return(self, planned: dict[str, Any]) -> dict[str, Any]:
+        """Special function: Keep return navigation outside the command's internal skill plan."""
+        executable = dict(planned)
+        executable["steps"] = [
+            step
+            for step in planned.get("steps", [])
+            if str(step.get("skill_name", "")) != "RETURN_TO_INSTRUCTION_POINT"
+        ]
+        return executable
+
+    def submit_return_to_instruction_point(self, command_id: str) -> dict[str, Any]:
+        """Special function: Request return navigation through the existing queue executor."""
+        return_plan = {
+            "steps": [{
+                "step_id": "return_to_instruction_point",
+                "skill_name": "RETURN_TO_INSTRUCTION_POINT",
+                "arguments": {"target_location": self.config.instruction_point},
+                "dependencies": [],
+                "timeout": float(self.config.timeout_for("RETURN_TO_INSTRUCTION_POINT")),
+                "retry_count": int(self.config.retries_for("RETURN_TO_INSTRUCTION_POINT")),
+                "result_variable": None,
+            }]
+        }
+        return self.submit_action_queue(
+            f"{command_id}_return",
+            return_plan,
+            max(1.0, float(self.config.timeout_for("RETURN_TO_INSTRUCTION_POINT"))),
+        )
+
+    def publish_cycle_state(self) -> None:
+        """Special function: Publish current readiness, identity, and competition count."""
+        snapshot = self.cycle.snapshot()
+        msg = String()
+        msg.data = json.dumps({
+            "state": snapshot.state.value,
+            "active_command_id": snapshot.active_command_id,
+            "completed_command_count": snapshot.completed_command_count,
+            "max_commands": snapshot.max_commands,
+            "error_recovery_attempts": self.error_recovery_attempts,
+            "error_recovery_max_attempts": max(
+                0,
+                int(self.get_parameter("error_recovery_max_attempts").value),
+            ),
+        }, sort_keys=True)
+        self.state_pub.publish(msg)
+
+    def schedule(self, command_id: str, instruction: str, dry_run: bool) -> dict[str, Any]:
+        """Special function: Build and publish one deterministic plan dictionary."""
+        result = schedule_command(command_id, instruction, self.config)
+        payload = plan_to_dict(result)
+        payload["dry_run"] = bool(dry_run)
+        msg = String()
+        msg.data = json.dumps(payload, sort_keys=True)
+        self.plan_pub.publish(msg)
+        self.get_logger().info(msg.data)
+        return payload
+
+    async def dispatch_queue(self, goal_handle: Any, command_id: str, planned: dict[str, Any]) -> ExecuteTaskPlan.Result:
+        """Special function: Submit a planned queue to the existing YASMIN executor."""
+        result = ExecuteTaskPlan.Result()
+        result.execution_log_json = json.dumps(planned, sort_keys=True)
+        queue_result = self.submit_action_queue(command_id, planned, max(1.0, float(goal_handle.request.overall_timeout_sec or 300.0)))
+        result.success = bool(queue_result["success"])
+        result.completed_steps = int(queue_result["completed_steps"])
+        result.failed_step = "" if result.success else "execute_action_queue"
+        result.failure_reason = "" if result.success else str(queue_result["message"])
+        if result.success:
+            goal_handle.succeed()
+        else:
+            goal_handle.abort()
+        return result
+
+    def submit_action_queue(self, command_id: str, planned: dict[str, Any], timeout_sec: float) -> dict[str, Any]:
+        """Special function: Submit an ActionQueue goal and return a JSON-friendly execution summary."""
+        if not self.executor_client.wait_for_server(timeout_sec=5.0):
+            return {
+                "success": False,
+                "completed_steps": 0,
+                "message": f"Executor action unavailable: {self.config.actions.get('execute_action_queue', '/execute_action_queue')}",
+                "outcome": "executor_unavailable",
+            }
+        queue_goal = ExecuteActionQueue.Goal()
+        queue_goal.queue = self.build_action_queue(command_id, planned)
+        queue_future = self.executor_client.send_goal_async(queue_goal)
+        # Section: Allow a deployment-configurable window for executor goal acknowledgement.
+        goal_response_timeout_sec = max(
+            0.1,
+            float(self.get_parameter("executor_goal_response_timeout_sec").value),
+        )
+        if not self.wait_for_future(queue_future, goal_response_timeout_sec):
+            return {
+                "success": False,
+                "completed_steps": 0,
+                "message": "Executor goal response timed out.",
+                "outcome": "goal_response_timeout",
+            }
+        queue_handle = queue_future.result()
+        if queue_handle is None or not queue_handle.accepted:
+            return {
+                "success": False,
+                "completed_steps": 0,
+                "message": "Executor rejected the queue goal.",
+                "outcome": "goal_rejected",
+            }
+        wrapped_future = queue_handle.get_result_async()
+        if not self.wait_for_future(wrapped_future, max(1.0, timeout_sec)):
+            queue_handle.cancel_goal_async()
+            return {
+                "success": False,
+                "completed_steps": 0,
+                "message": "Executor result timed out.",
+                "outcome": "result_timeout",
+            }
+        wrapped = wrapped_future.result()
+        queue_result = wrapped.result
+        outcome = str(queue_result.outcome)
+        success = bool(queue_result.success)
+        return {
+            "success": success,
+            "completed_steps": len(list(queue_result.results)),
+            "message": "Execution succeeded." if success else outcome,
+            "outcome": outcome,
+        }
+
+    def build_action_queue(self, command_id: str, planned: dict[str, Any]) -> ActionQueue:
+        """Special function: Convert scheduler plan JSON into an ActionQueue message."""
+        queue = ActionQueue()
+        queue.task_id = command_id
+        queue.steps = [self.build_action_step(command_id, step) for step in planned.get("steps", [])]
+        return queue
+
+    def build_action_step(self, command_id: str, step: dict[str, Any]) -> ActionStep:
+        """Special function: Convert one scheduled step into an ActionStep message."""
+        converted = step_to_action_step_dict(_dict_to_skill_step(step), command_id)
+        msg = ActionStep()
+        msg.step_id = converted["step_id"]
+        msg.action_type = converted["action_type"]
+        msg.task_id = converted["task_id"]
+        msg.task_family = converted["task_family"]
+        msg.target_object = converted["target_object"]
+        msg.target_person = converted["target_person"]
+        msg.target_location = converted["target_location"]
+        msg.target_category = converted["target_category"]
+        msg.parameters_json = converted["parameters_json"]
+        msg.timeout_sec = converted["timeout_sec"]
+        msg.max_retries = converted["max_retries"]
+        msg.requires_success = converted["requires_success"]
+        msg.requires_data = converted["requires_data"]
+        msg.result_variable = converted["result_variable"]
+        return msg
+
+    def wait_for_future(self, future: Any, timeout_sec: float) -> bool:
+        """Special function: Wait for a ROS future while executor threads continue spinning."""
+        deadline = time.monotonic() + max(0.1, timeout_sec)
+        while time.monotonic() < deadline:
+            if future.done():
+                return True
+            time.sleep(0.02)
+        return False
+
+
+def _dict_to_skill_step(data: dict[str, Any]):
+    """Special function: Rehydrate a SkillStep from JSON-friendly plan data."""
+    from gpsr_task_scheduler.models import SkillStep
+    return SkillStep(
+        step_id=str(data.get("step_id", "")),
+        skill_name=str(data.get("skill_name", "")),
+        arguments=dict(data.get("arguments", {})),
+        dependencies=list(data.get("dependencies", [])),
+        timeout=float(data.get("timeout", 0.0) or 0.0),
+        retry_count=int(data.get("retry_count", 0) or 0),
+        result_variable=data.get("result_variable"),
+    )
+
+
+def main(args: list[str] | None = None) -> None:
+    """Special function: Run the deterministic GPSR scheduler ROS node."""
+    rclpy.init(args=args)
+    node = GpsrTaskSchedulerNode()
+    executor = MultiThreadedExecutor(num_threads=4)
+    executor.add_node(node)
+    try:
+        executor.spin()
+    finally:
+        executor.remove_node(node)
+        node.destroy_node()
+        rclpy.shutdown()
+
+
+if __name__ == "__main__":
+    main()

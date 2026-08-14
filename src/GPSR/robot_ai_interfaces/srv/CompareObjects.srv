@@ -1,0 +1,9 @@
+# Section: Compare objects request/response.
+string category
+string location
+string property
+---
+bool success
+string selected_object_id
+string result_json
+string message

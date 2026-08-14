@@ -1,0 +1,10 @@
+# Goal
+string target_name
+---
+# Result
+bool success
+string message
+---
+# Feedback
+string stage
+float32 remaining_distance

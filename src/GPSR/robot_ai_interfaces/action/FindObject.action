@@ -1,0 +1,36 @@
+# Section: Complete compound object-search goal.
+string object_name
+string category
+string location
+string search_scope
+bool approach_target
+float32 stand_off_distance
+float32 timeout_sec
+---
+# Section: Stable mission result codes.
+uint8 SUCCESS=0
+uint8 NOT_FOUND=1
+uint8 FOUND_UNREACHABLE=2
+uint8 LOCALIZATION_FAILED=3
+uint8 NAVIGATION_FAILED=4
+uint8 PERCEPTION_FAILED=5
+uint8 TIMEOUT=6
+uint8 CANCELED=7
+bool found
+bool approached
+uint8 result_code
+geometry_msgs/PoseStamped object_pose
+geometry_msgs/PoseStamped observation_pose
+string object_id
+string found_room
+string found_viewpoint
+string[] viewpoints_searched
+uint32 navigation_failures
+string message
+---
+string phase
+string current_room
+string current_viewpoint
+uint8 search_tier
+float32 candidate_confidence
+float32 elapsed_sec

@@ -1,0 +1,4 @@
+# Empty request: return the server's most recently published semantic state.
+---
+# Structured response: identical to the current semantic-location topic payload.
+SemanticLocation current

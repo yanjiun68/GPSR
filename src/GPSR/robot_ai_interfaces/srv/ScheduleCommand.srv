@@ -1,0 +1,13 @@
+# Section: Service request for scheduling one GPSR instruction.
+string command_id
+string instruction
+bool dry_run
+bool execute
+float32 overall_timeout_sec
+---
+# Section: Service response carrying the plan and optional execution result.
+bool accepted
+bool success
+string message
+string plan_json
+string execution_log_json

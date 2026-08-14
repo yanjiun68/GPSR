@@ -1,0 +1,4 @@
+builtin_interfaces/Time stamp
+string[] names
+float32[] confidences
+float32[] ages_sec

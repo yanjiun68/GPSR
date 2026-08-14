@@ -1,0 +1,4 @@
+# Section: Complete non-ROS runtime dependencies for face and appearance nodes.
+-r requirements-face.txt
+ultralytics>=8.0,<9
+# Optional standalone RealSense backend: install pyrealsense2>=2.54,<3 separately.

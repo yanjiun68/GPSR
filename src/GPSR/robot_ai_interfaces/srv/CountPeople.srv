@@ -1,0 +1,8 @@
+# Section: Count people request/response.
+string location
+string filter_json
+---
+bool success
+int32 count
+string result_json
+string message

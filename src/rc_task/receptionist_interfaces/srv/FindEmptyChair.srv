@@ -1,0 +1,12 @@
+# The request is intentionally empty because chair selection is config-driven.
+---
+# The service reports whether an empty chair was found.
+bool success
+# The service also returns a short human-readable status message.
+string message
+# The service returns the chosen chair id from the receptionist layout config.
+string chair_id
+# The service returns the base-facing pose for the chosen chair.
+geometry_msgs/PoseStamped chair_pose
+# The service returns the safe pre-calibrated waist yaw for the chosen chair.
+float32 waist_yaw_rad

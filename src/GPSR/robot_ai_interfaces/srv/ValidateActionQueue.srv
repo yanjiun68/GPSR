@@ -1,0 +1,5 @@
+# Section: Validate symbolic queue request/response.
+robot_ai_interfaces/ActionQueue queue
+---
+bool valid
+string message

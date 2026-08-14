@@ -1,0 +1,19 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>rc_rx200</name>
+  <version>0.0.1</version>
+  <description>Staging package containing zip-origin RX200 files that differ from the local workspace.</description>
+
+  <maintainer email="yanjiun68@example.com">yanjiun68</maintainer>
+  <license>Proprietary</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+  <exec_depend>rx200_handbag_grasp</exec_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

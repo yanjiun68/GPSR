@@ -1,0 +1,106 @@
+# Section: GPSR named navigation poses in the map frame.
+waypoints:
+  # Section: Bedroom waypoint.
+  - id: 0
+    frame_id: map
+    name: bedroom
+    pose:
+      position:
+        x: 2.9910404682159424
+        y: 1.9086925983428955
+        z: 0.00400543212890625
+      orientation:
+        x: 0.0
+        y: 0.0
+        z: 0.06731589171294793
+        w: 0.9977317127980301
+
+  # Section: Living room waypoint.
+  - id: 1
+    frame_id: map
+    name: living_room
+    pose:
+      position:
+        x: 0.6347023844718933
+        y: -0.2995530962944031
+        z: 0.00421905517578125
+      orientation:
+        x: 0.0
+        y: 0.0
+        z: 0.06731589171294793
+        w: 0.9977317127980301
+
+  # Section: Kitchen waypoint.
+  - id: 2
+    frame_id: map
+    name: kitchen
+    pose:
+      position:
+        x: -1.1104427576065063
+        y: 0.6953654289245605
+        z: 0.00371551513671875
+      orientation:
+        x: 0.0
+        y: 0.0
+        z: 0.06731589171294793
+        w: 0.9977317127980301
+
+  # Section: Exit waypoint.
+  - id: 3
+    frame_id: map
+    name: exit
+    pose:
+      position:
+        x: -4.965038776397705
+        y: 0.10193938761949539
+        z: 0.0031719207763671875
+      orientation:
+        x: 0.0
+        y: 0.0
+        z: 0.06731589171294793
+        w: 0.9977317127980301
+
+  # Section: Entrance waypoint.
+  - id: 4
+    frame_id: map
+    name: entrance
+    pose:
+      position:
+        x: -3.496969223022461
+        y: -1.7686601877212524
+        z: 0.000774383544921875
+      orientation:
+        x: 0.0
+        y: 0.0
+        z: 0.06731589171294793
+        w: 0.9977317127980301
+
+  # Section: GPSR instruction point waypoint.
+  - id: 5
+    frame_id: map
+    name: instruction_point
+    pose:
+      position:
+        x: -0.2056081456294335
+        y: 0.3068929950210206
+        z: 0.0
+      orientation:
+        x: 0.0
+        y: 0.0
+        z: -0.8015671642936966
+        w: 0.5979047425185404
+
+  # Section: Dining room waypoint.
+  - id: 6
+    frame_id: map
+    name: dining_room
+    pose:
+      position:
+        x: 2.2612569332122803
+        y: -0.1384436935186386
+        z: 0.003650665283203125
+      orientation:
+        x: 0.0
+        y: 0.0
+        z: 0.06731589171294793
+        w: 0.9977317127980301

@@ -1,0 +1,29 @@
+# Camera TF Configuration for Eye-in-Hand Mode
+# Camera is mounted on gripper servo (rx200/camera_mount_link)
+# This file defines the transform from mount point to camera_link
+# Camera direction is aligned with gripper - when gripper points down, camera points down
+
+camera_transform:
+  # Parent frame: camera mount point on gripper (from URDF)
+  parent_frame: rx200/camera_mount_link
+  # Child frame: RealSense camera link
+  child_frame: camera_link
+
+  # Identity transform - camera is aligned with gripper as designed
+  translation:
+    x: 0.0
+    y: 0.0
+    z: 0.0
+  rotation_euler:
+    roll: 0.0
+    pitch: 0.0
+    yaw: 0.0
+  rotation_quaternion:
+    x: 0.0
+    y: 0.0
+    z: 0.0
+    w: 1.0
+
+# Calibration mode setting
+calibration:
+  mode: eye_in_hand

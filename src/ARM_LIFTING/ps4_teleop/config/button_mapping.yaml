@@ -1,0 +1,22 @@
+# PS4 Controller Button Mapping
+# Indices may vary depending on driver (ds4drv, evdev, etc.)
+
+ps4_controller:
+  ros__parameters:
+    # Button indices (default for standard joy driver)
+    button_cross: 0       # ✕ - Close gripper
+    button_circle: 1      # ○ - Open gripper
+    button_triangle: 2    # △ - Execute grasp
+    button_square: 3      # □ - Go home
+    button_l1: 4          # Lift up
+    button_r1: 5          # Lift down
+    button_l2: 6
+    button_r2: 7
+    button_share: 8
+    button_options: 9     # Home lift
+    button_ps: 10         # E-STOP
+    button_l3: 11
+    button_r3: 12
+
+    # Debounce time (seconds)
+    debounce_time: 0.3

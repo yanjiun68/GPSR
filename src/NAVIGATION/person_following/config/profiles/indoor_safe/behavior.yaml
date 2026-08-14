@@ -1,0 +1,25 @@
+# follow_behavior_manager.py
+/**:
+  ros__parameters:
+    # HIGH IMPACT
+    follow_distance_m: 0.85
+    lock_confirm_sec: 0.35
+    target_soft_timeout_sec: 1.0
+    target_hard_timeout_sec: 1.8
+    search_timeout_sec: 6.0
+    follow_confidence_min: 0.78
+    cautious_confidence_min: 0.6
+    stop_distance_m: 0.5
+    hold_distance_m: 1.0
+    nominal_speed_mps: 0.4
+    cautious_speed_mps: 0.22
+
+    # NORMAL TUNING
+    face_hold_sec: 10.0
+    translate_staleness_sec: 0.45
+    rotate_bearing_deg: 22.0
+    search_rotate_speed_rad_s: 0.35
+
+    # NODE-LOCAL WIRING
+    behavior_status_topic: /person_follow/behavior_status
+    target_distance_topic: /person_follow/target_distance_m

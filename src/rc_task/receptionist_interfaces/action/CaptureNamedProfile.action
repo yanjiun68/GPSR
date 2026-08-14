@@ -1,0 +1,14 @@
+# Goal
+string profile_id
+string role
+string name
+---
+# Result
+bool success
+string message
+receptionist_interfaces/PersonProfile profile
+---
+# Feedback
+bool face_detected
+int32 stable_sample_count
+receptionist_interfaces/GuestAppearance latest_appearance

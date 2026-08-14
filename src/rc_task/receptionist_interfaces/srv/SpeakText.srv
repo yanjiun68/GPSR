@@ -1,0 +1,7 @@
+# The caller provides one text string that should be spoken aloud.
+string text
+---
+# The service reports whether Piper playback succeeded.
+bool success
+# The service also returns a short human-readable status message.
+string message

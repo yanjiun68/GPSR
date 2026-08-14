@@ -1,0 +1,10 @@
+string source_profile_id
+string[] target_profile_ids
+bool include_description_bonus
+# Phase 2: recognition strategy hint that affects speech templates.
+# Values: "" (face), "face", "clothes_color", "register_order", "seat_position"
+string fallback_strategy
+---
+bool success
+string message
+string[] spoken_lines

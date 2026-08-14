@@ -1,0 +1,30 @@
+Imported from zip because they differ from local or are zip-only:
+
+rx200_handbag_grasp/CMakeLists.txt.snapshot
+rx200_handbag_grasp/package.xml.snapshot
+rx200_handbag_grasp/README.md
+rx200_handbag_grasp/requirements.txt
+rx200_handbag_grasp/config/camera_tf.yaml
+rx200_handbag_grasp/config/combined.srdf.xacro
+rx200_handbag_grasp/config/grasp_params.yaml
+rx200_handbag_grasp/launch/all_in_one.launch.py
+rx200_handbag_grasp/launch/point.launch.py
+rx200_handbag_grasp/launch/step1_startup.launch.py
+rx200_handbag_grasp/launch/step2_perception.launch.py
+rx200_handbag_grasp/launch/step3_point.launch.py
+rx200_handbag_grasp/scripts/camera_tf_publisher.py
+rx200_handbag_grasp/scripts/camera_viewer.py
+rx200_handbag_grasp/scripts/step3_chair_pointing.py
+rx200_handbag_grasp/scripts/yolo_handle_detector.py
+lift_bridge/lift_bridge/joint_state_merger.py
+lift_bridge/lift_bridge/lift_serial_driver.py
+lift_bridge/test_lift_hardware.py
+lift_moveit_config/launch/demo.launch.py
+
+Ignored because they already match local copies:
+
+lift_description/*
+rx200_official_grasp/*
+moveit_visual_tools/*
+most files under lift_bridge/*
+most files under lift_moveit_config/*

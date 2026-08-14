@@ -1,0 +1,10 @@
+build/
+install/
+log/
+*.zip
+*.pt
+# Keep the vision package's required person tracker model as a runtime asset.
+!vision/models/yolo11n.pt
+__pycache__/
+*.pyc
+*.pyo

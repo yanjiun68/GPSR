@@ -1,0 +1,10 @@
+# Section: Pick goal.
+string object_id
+geometry_msgs/PoseStamped object_pose
+float32 timeout_sec
+---
+bool success
+string held_object_id
+string message
+---
+string status

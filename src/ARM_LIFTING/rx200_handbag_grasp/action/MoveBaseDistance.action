@@ -1,0 +1,7 @@
+float32 distance_m
+---
+bool success
+float32 moved_m
+string message
+---
+float32 remaining_m

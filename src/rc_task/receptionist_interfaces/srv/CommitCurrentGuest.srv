@@ -1,0 +1,6 @@
+string new_profile_id
+---
+bool success
+string message
+int32 confirmed_guest_count
+string[] committed_guest_ids

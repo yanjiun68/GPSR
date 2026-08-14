@@ -1,0 +1,144 @@
+/**:
+  ros__parameters:
+    rgb_topic: /camera/camera/color/image_raw
+    enhanced_rgb_topic: /bag_selection/image_enhanced
+    depth_topic: /camera/camera/aligned_depth_to_color/image_raw
+    camera_info_topic: /camera/camera/color/camera_info
+    scan_topic: /scan
+    bag_selection_action_name: /bag_selection/select
+    bag_selection_default_timeout_sec: 30.0
+    bag_selection_feedback_heartbeat_sec: 0.5
+    bag_selection_voice_enabled: false
+    bag_selection_voice_piper_bin: piper
+    bag_selection_voice_piper_model_path: "/home/yanjiun68/workspace/phase1/src/voice/voice/models/en_US-lessac-medium.onnx"
+    bag_selection_voice_aplay_bin: aplay
+    bag_selection_left_text: Left bag selected
+    bag_selection_right_text: Right bag selected
+    bag_viz_enabled: true
+    bag_viz_topic: /bag_selection/annotated_image
+    bag_viz_show_window: true
+    bag_viz_window_name: Bag Selection Debug
+    bag_viz_use_pose_debug: false
+    camera_frame: camera_color_optical_frame
+    base_frame: base_link
+    camera_manual_exposure: 70.0
+    gamma_enable: true
+    gamma_value: 0.9
+    clahe_enable: false
+    clahe_clip_limit: 2.0
+    clahe_tile_grid_size: [8, 8]
+    yolo_model_path: "models/best.pt"
+    bag_class_ids: [1,2]
+    required_bag_count: 2
+    pointing_confirm_sec: 0.7
+    pointing_timeout_sec: 5.0
+    bag_detection_timeout_sec: 3.0
+    camera_cluster_timeout_sec: 3.0
+    fusion_timeout_sec: 2.0
+    approach_timeout_sec: 30.0
+    final_alignment_timeout_sec: 10.0
+    max_bbox_age_sec: 0.6
+    max_depth_age_sec: 0.6
+    max_lidar_age_sec: 0.75
+    max_cross_sensor_skew_sec: 0.35
+    target_stale_timeout_sec: 0.6
+    max_pointed_bag_age_sec: 0.75
+    pose_debug_enabled: false
+    pose_debug_publish_image: false
+    pose_debug_show_window: false
+    pose_debug_window_name: MediaPipe Pose Debug
+    pose_debug_topic: /bag_selection/pose_debug_image
+    pose_debug_max_age_sec: 0.5
+    hand_max_num_hands: 1
+    hand_min_detection_confidence: 0.7
+    hand_min_tracking_confidence: 0.7
+    index_straight_angle_min_deg: 160.0
+    pointing_ray_forward_dot_min: 0.3
+    pointing_ray_max_anchor_distance_px: 90.0
+    pointing_target_confirm_frames: 8
+    pointing_target_release_frames: 5
+    pointing_min_image_plane_ratio: 0.35
+    bag_conf_thresh: 0.6
+    bag_iou_thresh: 0.5
+    bag_bbox_edge_margin_px: 8
+    bag_detection_max_age_sec: 0.3
+    camera_watchdog_sec: 2.0
+    bag_bbox_min_area_px: 100
+    bag_bbox_max_area_ratio: 0.70
+    bag_bbox_min_aspect: 0.30
+    bag_bbox_max_aspect: 2.50
+    raw_object_detections_topic: /perception/raw_object_detections
+    object_name_overrides: []
+    input_detections_topic: /perception/raw_object_detections
+    stable_items_topic: /perception/recognized_items
+    get_visible_items_service: /perception/get_visible_items
+    min_confidence: 0.50
+    window_size: 5
+    min_votes: 3
+    stale_timeout_sec: 1.0
+    publish_rate_hz: 5.0
+    publish_empty_lists: true
+    bbox_shrink_factor: 0.12
+    min_depth_m: 0.20
+    max_depth_m: 3.50
+    depth_sampling_stride_px: 2
+    min_valid_depth_points: 40
+    camera_cluster_min_points: 20
+    camera_cluster_target_points: 140
+    point_cloud_cluster_tolerance_m: 0.08
+    camera_cluster_variance_scale_m2: 0.015
+    camera_cluster_stability_scale_m: 0.15
+    min_camera_cluster_confidence: 0.35
+    min_fused_confidence: 0.35
+    camera_confidence_high: 0.70
+    camera_confidence_low: 0.35
+    lidar_cluster_dist_thresh: 0.11
+    front_sector_half_angle_deg: 60.0
+    min_cluster_points: 8
+    lidar_cluster_markers_enabled: true
+    lidar_cluster_markers_topic: /lidar_clusters_markers
+    lidar_cluster_marker_scale_m: 0.10
+    lidar_cluster_text_scale_m: 0.10
+    lidar_cluster_marker_alpha: 0.9
+    lidar_cluster_marker_lifetime_sec: 0.0
+    lidar_match_max_dist_m: 0.30
+    lidar_assist_timeout_sec: 1.25
+    camera_fusion_weight_high: 0.85
+    camera_fusion_weight_low: 0.65
+    min_tracking_confidence_to_move: 0.35
+    heading_tolerance_rad: 0.16
+    approach_heading_deadband_rad: 0.35
+    prealign_distance_m: 0.80
+    final_stop_distance_m: 0.35
+    max_forward_speed_mps: 0.16
+    final_approach_speed_mps: 0.05
+    max_angular_speed_radps: 0.30
+    turn_kp: 0.8
+    approach_linear_kp: 0.35
+    approach_angular_kp: 1.1
+    visual_center_kp: 0.0018
+    image_centering_tolerance_px: 25
+    cmd_vel_topic: /cmd_vel_safe
+    reached_topic: /bag_ready_for_pickup
+    reset_topic: /bag_selection/reset
+    obstacle_sector_half_angle_deg: 18.0
+    obstacle_stop_distance_m: 0.38
+    obstacle_rotation_clearance_m: 0.20
+
+bag_image_preprocessor_node:
+  ros__parameters:
+    rgb_topic: /camera/camera/color/image_raw
+    enhanced_rgb_topic: /bag_selection/image_enhanced
+    gamma_enable: true
+    gamma_value: 1.25
+    clahe_enable: true
+    clahe_clip_limit: 2.0
+    clahe_tile_grid_size: [8, 8]
+
+bag_detector_node:
+  ros__parameters:
+    rgb_topic: /bag_selection/image_enhanced
+
+pose_pointing_node:
+  ros__parameters:
+    rgb_topic: /bag_selection/image_enhanced

@@ -1,0 +1,12 @@
+<?xml version="1.0"?>
+<robot name="d435i_test" xmlns:xacro="http://ros.org/wiki/xacro">
+
+  <link name="base_link" />
+
+  <xacro:include filename="$(find robot_description)/urdf/d435i.urdf.xacro"/>
+
+  <xacro:sensor_d435i parent="base_link" name="camera" use_nominal_extrinsics="true">
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </xacro:sensor_d435i>
+
+</robot>

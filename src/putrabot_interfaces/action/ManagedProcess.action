@@ -1,0 +1,9 @@
+bool force_restart
+---
+bool success
+bool already_running
+string message
+string generation
+---
+string state
+string detail

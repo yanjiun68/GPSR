@@ -1,0 +1,28 @@
+# follow_person.py
+/**:
+  ros__parameters:
+    # HIGH IMPACT
+    publish_markers: true
+    min_range_m: 0.2
+    max_range_m: 6.0
+    min_x_m: 0.2
+    max_x_m: 3.5
+    min_y_m: -1.5
+    max_y_m: 1.5
+    cluster_dist_m: 0.16
+    min_cluster_points: 5
+    max_cluster_points: 80
+    min_cluster_size_m: 0.05
+    max_cluster_size_m: 0.6
+
+    # NORMAL TUNING
+    tf_timeout_sec: 0.1
+    marker_scale_m: 0.2
+    marker_lifetime_sec: 0.1
+    lidar_candidate_max_age_sec: 0.8
+    lidar_candidate_min_persistence_frames: 4
+    lidar_width_person_min_m: 0.1
+    lidar_width_person_max_m: 0.60
+    lidar_width_stability_max_std: 0.14
+    lidar_candidate_assoc_gate_m: 0.30
+    lidar_person_likeness_min: 0.66

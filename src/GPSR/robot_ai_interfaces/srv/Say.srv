@@ -1,0 +1,5 @@
+# Section: Short speech request/response.
+string text
+---
+bool success
+string message

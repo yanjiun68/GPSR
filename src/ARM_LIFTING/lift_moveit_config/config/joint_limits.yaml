@@ -1,0 +1,17 @@
+# joint_limits.yaml allows the dynamics properties specified in the URDF to be overwritten or augmented as needed
+# 升降轴行程: 0 ~ 275mm
+
+default_velocity_scaling_factor: 0.1
+default_acceleration_scaling_factor: 0.1
+
+joint_limits:
+  lift_joint:
+    has_position_limits: true
+    min_position: 0.0
+    max_position: 0.275  # 275mm 行程
+
+    has_velocity_limits: true
+    max_velocity: 0.05  # 50mm/s
+
+    has_acceleration_limits: false
+    max_acceleration: 0.0

@@ -1,0 +1,53 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>putrabot_bringup</name>
+  <version>0.1.0</version>
+  <description>Centralized bringup launch files for base and RPLIDAR drivers.</description>
+  <maintainer email="yanjiun68@todo.todo">yanjiun68</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <exec_depend>ament_index_python</exec_depend>
+  <exec_depend>controller_manager_msgs</exec_depend>
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+  <exec_depend>dio13_serial_bridge</exec_depend>
+  <exec_depend>face_detection</exec_depend>
+  <exec_depend>llm_pkg</exec_depend>
+  <exec_depend>my_tts_system</exec_depend>
+  <exec_depend>my_robot_nav</exec_depend>
+  <exec_depend>nav2_msgs</exec_depend>
+  <exec_depend>person_follower_master</exec_depend>
+  <exec_depend>person_following</exec_depend>
+  <exec_depend>python3-serial</exec_depend>
+  <exec_depend>putrabot_interfaces</exec_depend>
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>realsense2_camera</exec_depend>
+  <exec_depend>receptionist_nodes</exec_depend>
+  <exec_depend>rc_rx200</exec_depend>
+  <exec_depend>rx200_handbag_grasp</exec_depend>
+  <exec_depend>robot_description</exec_depend>
+  <exec_depend>robot_yasmin_tasks</exec_depend>
+  <exec_depend>gpsr_task_scheduler</exec_depend>
+  <exec_depend>sm_receptionist</exec_depend>
+  <exec_depend>twist_mux</exec_depend>
+  <exec_depend>vision</exec_depend>
+  <exec_depend>voice</exec_depend>
+  <exec_depend>yasmin_receptionist</exec_depend>
+  <exec_depend>yasmin_viewer</exec_depend>
+  <!-- <exec_depend>rplidar_ros</exec_depend> -->
+  <exec_depend>voice_interfaces</exec_depend>
+  <exec_depend>yasmin_receptionist</exec_depend>
+  <exec_depend>yasmin_viewer</exec_depend>
+  <exec_depend>dio13_monitor_example</exec_depend>
+
+  <test_depend>ament_lint_auto</test_depend>
+  <test_depend>ament_lint_common</test_depend>
+  <test_depend>ament_cmake_pytest</test_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

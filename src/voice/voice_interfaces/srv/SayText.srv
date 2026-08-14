@@ -1,0 +1,6 @@
+# Request
+string text   # Text to synthesize
+---
+# Response
+bool success
+string message

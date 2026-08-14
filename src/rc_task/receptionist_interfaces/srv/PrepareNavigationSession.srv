@@ -1,0 +1,8 @@
+# The request is intentionally empty because startup pose capture is internal.
+---
+# The service reports whether navigation is ready for a receptionist session.
+bool success
+# The service also returns a short human-readable status message.
+string message
+# The service tells the caller whether a startup pose was captured.
+bool start_pose_captured

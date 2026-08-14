@@ -1,0 +1,23 @@
+chairs:
+  occupancy_radius_m: 0.6
+  host_chair_id: host_chair
+  guest_1_chair_id: guest_1_chair
+  slots:
+    - id: host_chair
+      frame_id: map
+      x: 3.4973
+      y: 0.5235
+      yaw: 1.589
+      waist_yaw_rad: 0.0
+    - id: guest_1_chair
+      frame_id: map
+      x: 3.54398
+      y: 0.559932
+      yaw: 0.758
+      waist_yaw_rad: 0.45
+    - id: guest_2_chair
+      frame_id: map
+      x: 3.58324
+      y: 0.484948
+      yaw: -0.842
+      waist_yaw_rad: -0.45

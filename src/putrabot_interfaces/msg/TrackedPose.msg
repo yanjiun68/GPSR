@@ -1,0 +1,51 @@
+std_msgs/Header header
+uint32 track_id
+geometry_msgs/Pose pose
+
+uint8 TRACK_TENTATIVE=0
+uint8 TRACK_CONFIRMED=1
+uint8 TRACK_OCCLUDED=2
+uint8 TRACK_LOST=3
+uint8 TRACK_DELETED=4
+
+uint8 LOCK_NONE=0
+uint8 LOCK_LOCKED=1
+uint8 LOCK_TEMP_OCCLUDED=2
+uint8 LOCK_TEMP_LOST=3
+uint8 LOCK_REACQUIRE=4
+
+uint8 PUB_OK=0
+uint8 SUPPRESS_AMBIGUOUS=1
+uint8 SUPPRESS_REACQUIRE=2
+uint8 SUPPRESS_PREDICTED_ONLY=3
+uint8 SUPPRESS_CONTRADICTION=4
+uint8 SUPPRESS_STALE=5
+uint8 SUPPRESS_LOW_CONF=6
+uint8 SUPPRESS_INVALID_TARGET=7
+
+uint8 track_state
+float32 track_score
+float32 conf_app
+float32 conf_motion
+float32 lock_confidence
+float32 detection_confidence
+float32 geometry_confidence
+float32 identity_confidence
+float32 motion_confidence
+float32 visibility_confidence
+float32 freshness_confidence
+float32 combined_confidence
+float32 staleness_sec
+bool predicted
+bool reacquire_active
+bool contradictory_candidate
+bool crossover_active
+bool selected
+bool valid
+bool publishable
+bool camera_visible
+bool lidar_support
+float32 facing01
+bool facing_robot
+uint8 lock_state
+uint8 suppression_code

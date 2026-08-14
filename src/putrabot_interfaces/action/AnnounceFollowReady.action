@@ -1,0 +1,11 @@
+string text
+float32 timeout_sec
+---
+bool success
+string message
+---
+bool session_active
+bool safety_ok
+bool target_locked
+bool speaking
+string waiting_on

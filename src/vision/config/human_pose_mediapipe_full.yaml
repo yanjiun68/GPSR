@@ -1,0 +1,88 @@
+# Section: MediaPipe Pose Landmarker Full defaults for human_skeleton_detection_node.py.
+human_skeleton_detection_node:
+  ros__parameters:
+    image_topic: /camera/image_raw
+    model_path: models/pose_landmarker_full.task
+    num_poses: 2
+    min_detection_confidence: 0.60
+    min_presence_confidence: 0.60
+    min_tracking_confidence: 0.65
+    process_every_n_frames: 1
+    publish_debug_image: true
+    show_gui: false
+    gui_window_name: MediaPipe Human Pose
+    enable_tts: false
+    tts_service_name: /voice/tts/say
+    tts_min_interval_sec: 5.0
+    tts_on_change_only: true
+    tts_speak_unreliable: true
+    tts_speak_no_detection: false
+    min_usable_landmarks: 12
+    min_torso_landmark_confidence: 0.50
+    min_pose_bbox_area_ratio: 0.02
+    duplicate_iou_threshold: 0.35
+    duplicate_center_distance_ratio: 0.18
+    prefer_single_person_mode: false
+    poses_topic: /human_pose/poses
+    debug_image_topic: /human_pose/debug_image
+    pose_summary_topic: /perception/human_poses
+    gestures_topic: /human_pose/gestures
+    legacy_skeletons_topic: /perception/human_skeletons
+
+    # Section: Lower-body-only posture scoring and temporal stability thresholds.
+    posture_landmark_min_visibility: 0.55
+    sitting_knee_angle_max: 135.0
+    standing_knee_angle_min: 160.0
+    sitting_hip_angle_max: 145.0
+    hip_knee_sitting_ratio_max: 0.45
+    hip_knee_standing_ratio_min: 0.65
+    posture_confirm_frames: 3
+    posture_release_frames: 4
+    posture_debug: false
+    posture_debug_interval_sec: 2.0
+    standing_leg_extension_min: 0.90
+    torso_vertical_ratio_min: 0.45
+    posture_minimum_evidence: 2
+    lying_torso_angle_max: 25.0
+    lying_vertical_ratio_max: 0.35
+    lying_body_aspect_min: 1.8
+    lying_score_threshold: 3
+    lying_confirm_frames: 4
+    lying_release_frames: 4
+    posture_min_score: 0.60
+    posture_min_margin: 0.15
+    standing_knee_full_score_angle: 170.0
+    standing_knee_partial_angle: 145.0
+    sitting_knee_full_score_angle: 100.0
+    sitting_knee_partial_angle: 145.0
+    lying_torso_full_score_angle: 12.0
+    lying_torso_partial_angle: 30.0
+    posture_history_size: 5
+
+    # Section: Upper-body-only raised-arm and temporal waving thresholds.
+    arm_landmark_min_visibility: 0.55
+    raised_arm_vertical_margin: 0.04
+    raised_arm_elbow_margin: 0.08
+    wave_window_seconds: 1.5
+    wave_min_horizontal_range: 0.12
+    wave_min_direction_changes: 2
+    wave_max_vertical_drift: 0.15
+    wave_history_timeout_seconds: 2.0
+    gesture_detection:
+      enabled: true
+      min_visibility: 0.55
+      mirror_input: false
+      raised_margin: 0.15
+      pointing_min_elbow_angle_deg: 145.0
+      pointing_min_extension: 0.55
+      pointing_max_vertical_offset: 0.30
+      wave_window_sec: 1.2
+      wave_min_samples: 8
+      wave_min_span: 0.22
+      wave_direction_deadband: 0.05
+      wave_min_direction_changes: 2
+      stability_frames: 3
+      result_hold_sec: 0.30
+      history_reset_sec: 0.50
+      tie_margin: 0.10
+      landmark_smoothing_alpha: 0.45

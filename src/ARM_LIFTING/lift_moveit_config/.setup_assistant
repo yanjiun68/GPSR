@@ -1,0 +1,10 @@
+moveit_setup_assistant_config:
+  urdf:
+    package: lift_description
+    relative_path: urdf/lift.urdf.xacro
+  srdf:
+    relative_path: config/lift.srdf
+  package_settings:
+    author_name: ""
+    author_email: ""
+    generated_timestamp: 1765614165

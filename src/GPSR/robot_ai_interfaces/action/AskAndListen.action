@@ -1,0 +1,11 @@
+# Section: Ask-and-listen goal.
+string question
+float32 timeout_sec
+---
+bool success
+bool timed_out
+bool need_clarification
+string answer
+string message
+---
+string status

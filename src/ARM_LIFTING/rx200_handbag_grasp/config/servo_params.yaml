@@ -1,0 +1,44 @@
+/**:
+  ros__parameters:
+    use_gazebo: false
+    
+    # What type of topic does your robot driver expect?
+    # Currently supported are std_msgs/Float64MultiArray or trajectory_msgs/JointTrajectory
+    command_out_type: trajectory_msgs/JointTrajectory
+    
+    # What to publish? Can save some bandwidth as most robots only require positions or velocities
+    publish_joint_positions: true
+    publish_joint_velocities: false
+    publish_joint_accelerations: false
+    
+    # Configure handling of singularities and joint limits
+    lower_singularity_threshold:  17.0  # Start decelerating when the condition number hits this (close to singularity)
+    hard_singularity_threshold:    30.0 # Stop when the condition number hits this
+    joint_limit_margin: 0.1 # added as a buffer to joint limits [radians]. If moving quickly, make this larger.
+    leaving_singularity_threshold_multiplier: 2.0
+    
+    # Topic names
+    status_topic: ~/status # Publish status to this topic
+    command_out_topic: /rx200/arm_controller/joint_trajectory # Publish commands to this topic
+    command_in_type: "speed_units" # "unitless"> in the range [-1:1], as if from joystick. "speed_units"> cmds are in m/s and rad/s
+
+    command_in_topic: ~/delta_twist_cmds
+    joint_topic: ~/delta_joint_cmds
+    robot_link_command_frame: rx200/base_link  # commands must be given in this frame
+    ee_frame_name: rx200/gripper_link  # the frame holding the tool
+    
+    # Collision setup
+    check_collisions: false
+    collision_check_rate: 10.0 # [Hz]
+    scene_collision_proximity_threshold: 0.01 # [m]
+    joint_collision_proximity_threshold: 0.01 # [m]
+
+    # Motion smoothing
+    # scale limits
+    scale:
+      linear:  0.15 # Max linear speed. Meters per publish_period.
+      rotational:  0.3 # Max angular speed. Rads per publish_period.
+      joint: 0.3 # Max joint angular speed. Rads per publish_period.
+    
+    low_pass_filter_coeff: 2.0  # smoothing (larger is more aggresive filtering)
+    publish_period: 0.010  # 1 / 100Hz

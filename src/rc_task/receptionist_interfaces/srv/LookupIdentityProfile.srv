@@ -1,0 +1,10 @@
+# Section: Resolve a persisted face identity by human-readable name.
+string name
+---
+# Section: Distinguish an absent profile from an unusable profile record.
+bool found
+bool usable
+string profile_id
+string name
+uint32 template_count
+string message

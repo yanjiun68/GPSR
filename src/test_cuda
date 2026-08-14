@@ -1,0 +1,64 @@
+#!/usr/bin/env python3
+import argparse
+from pathlib import Path
+
+import onnxruntime as ort
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Check whether ONNX Runtime can actually create a CUDA-backed session."
+    )
+    parser.add_argument(
+        "model",
+        nargs="?",
+        help="Path to an ONNX model file. If omitted, only provider availability is shown.",
+    )
+    parser.add_argument(
+        "--require-cuda",
+        action="store_true",
+        help="Exit with code 1 unless CUDAExecutionProvider becomes the active provider.",
+    )
+    return parser.parse_args()
+
+
+def main():
+    args = parse_args()
+
+    print("onnxruntime version:", ort.__version__)
+    print("available providers:", ort.get_available_providers())
+
+    if not args.model:
+        print("No model path provided. Skipping session creation.")
+        return 0
+
+    model_path = Path(args.model).expanduser().resolve()
+    if not model_path.is_file():
+        print(f"Model not found: {model_path}")
+        return 2
+
+    requested_providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+    print("requested providers:", requested_providers)
+    print("creating session for:", model_path)
+
+    try:
+        session = ort.InferenceSession(str(model_path), providers=requested_providers)
+    except Exception as exc:
+        print(f"Failed to create session: {exc}")
+        return 1
+
+    active_providers = session.get_providers()
+    print("session providers:", active_providers)
+
+    if active_providers and active_providers[0] == "CUDAExecutionProvider":
+        print("CUDA session is active.")
+        return 0
+
+    print("CUDA session is not active. ONNX Runtime fell back to CPU or another provider.")
+    if args.require_cuda:
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

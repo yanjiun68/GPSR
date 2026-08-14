@@ -1,0 +1,154 @@
+<?xml version="1.0"?>
+<robot name="omni_robot" xmlns:xacro="http://ros.org/wiki/xacro">
+  <material name="gray">
+    <color rgba="0.5 0.5 0.5 1"/>
+  </material>
+
+  <material name="black">
+    <color rgba="0 0 0 1"/>
+  </material>
+
+  <material name="white">
+    <color rgba="1 1 1 1"/>
+  </material>
+
+  <material name="blue">
+    <color rgba="0 0 1 1"/>
+  </material>
+
+
+  <link name="base_footprint"/>
+
+  <link name="base_link">
+    <visual>
+      <geometry>
+        <mesh filename="package://robot_description/urdf/main/meshes/base_link.stl" />
+      </geometry>
+      <material name="gray"/>
+    </visual>
+    <collision>
+      <geometry>
+        <mesh filename="package://robot_description/urdf/main/meshes/base_link.stl" />
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="base_footprint_joint" type="fixed">
+    <parent link="base_footprint"/>
+    <child link="base_link"/>
+    <origin xyz="0 0 0.04667" rpy="0 0 0"/>
+  </joint>
+
+  <link name="baseup_link">
+    <visual>
+      <geometry>
+        <mesh filename="package://robot_description/urdf/main/meshes/baseup_link.stl" />
+      </geometry>
+      <material name="white"/>
+    </visual>
+    <collision>
+      <geometry>
+        <mesh filename="package://robot_description/urdf/main/meshes/baseup_link.stl" />
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="baseup_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="baseup_link"/>
+    <origin xyz="0 0 0.04068" rpy="0 0 0"/> </joint>
+
+  <xacro:macro name="omni_wheel" params="wheel_name x y z roll pitch yaw">
+    <link name="${wheel_name}">
+      <visual>
+        <geometry>
+          <cylinder radius="0.05" length="0.03804"/>  
+        </geometry>
+        <!-- Rotate cylinder so axis (Z) aligns with Y -->
+        <origin xyz="0 0 0" rpy="1.5708 0 0"/>
+        <material name="black"/>
+      </visual>
+    </link>
+
+    <joint name="joint_${wheel_name}" type="continuous">
+      <parent link="base_link"/>
+      <child link="${wheel_name}"/>
+      <origin xyz="${x} ${y} ${z}" rpy="${roll} ${pitch} ${yaw}"/>
+      <axis xyz="1 0 0"/>
+    </joint>
+  </xacro:macro>
+
+  <xacro:omni_wheel wheel_name="Rear_Left" x="-0.1842" y="0.1842" z="0" roll="0" pitch="0" yaw="+0.785398"/>
+  <xacro:omni_wheel wheel_name="Front_Right" x="0.1842" y="-0.1842" z="0" roll="0" pitch="0" yaw="+0.785398"/>
+  <xacro:omni_wheel wheel_name="Front_Left" x="0.1842" y="0.1842" z="0" roll="0" pitch="0" yaw="-0.785398"/>
+  <xacro:omni_wheel wheel_name="Rear_Right" x="-0.1842" y="-0.1842" z="0" roll="0" pitch="0" yaw="-0.785398"/>
+
+  <link name="lidar_link">
+    <visual>
+      <geometry>
+        <cylinder radius="0.03785" length="0.0413"/>  </geometry>
+      <material name="blue"/>
+    </visual>
+  </link>
+
+  <joint name="lidar_joint" type="fixed">
+    <parent link="baseup_link"/>
+    <child link="lidar_link"/>
+    <origin xyz="0.137 0 0.077" rpy="0 0 0"/>
+  </joint>
+
+  <!-- >>> NEW LASER FRAME <<< -->
+  <link name="laser">
+    <!-- simple inertial so URDF is valid; values are tiny -->
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <mass value="0.001"/>
+      <inertia
+        ixx="1e-6" ixy="0" ixz="0"
+        iyy="1e-6" iyz="0"
+        izz="1e-6"/>
+    </inertial>
+    <visual>
+      <geometry>
+        <cylinder radius="0.02" length="0.02"/>
+      </geometry>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <material name="blue"/>
+    </visual>
+  </link>
+
+  <joint name="laser_joint" type="fixed">
+    <parent link="lidar_link"/>
+    <child link="laser"/>
+    <!-- if the scan origin is not exactly the same as lidar_link, adjust xyz/rpy here -->
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+  <!-- <<< END LASER FRAME >>> -->
+
+  <xacro:include filename="$(find robot_description)/urdf/vision_voice/realsense_camera/_d435i.urdf.xacro" />
+
+    <!-- D435i at the actual hardware mount: 0.149 m forward of
+         baseup_link, 1.272 m above it (≈ 1.36 m off the floor once
+         base_footprint + base_link + baseup_link stacks up), mounted
+         HORIZONTAL (pitch = 0). Matches the sim URDF
+         (my_robot_nav/urdf/my_car.urdf.xacro) exactly so TF →
+         world-projection of YOLO detections is identical between sim
+         and real. Previously the URDF had pitch = 0.562 rad (32°
+         downward) at 0.984 m — a stale configuration from an earlier
+         mount; YOLO ped-positions were projected 30-40 cm off as a
+         result. -->
+    <xacro:sensor_d435i parent="baseup_link" name="camera" use_nominal_extrinsics="true">
+      <origin xyz="0.149 0 1.272" rpy="0 0 0"/>
+    </xacro:sensor_d435i>
+</robot>
+
+  <!-- <joint name="camera_joint" type="fixed">
+    <parent link="baseup_link"/>  <child link="camera_link"/>
+    <origin xyz="0.154 0 0.749" rpy="0 0 0"/>  </joint>
+  <link name="camera_link">
+  <visual>
+    <geometry>
+      <box size="0.04257 0.11525 0.04009"/>  </geometry>
+    <material name="blue"/>
+  </visual>
+</link> -->

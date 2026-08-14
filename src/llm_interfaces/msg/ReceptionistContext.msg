@@ -1,0 +1,10 @@
+string task_id
+string current_state
+int32 guest_index
+int32 target_guest_count
+string profile_id
+string guest_name
+string favorite_drink
+string[] target_profile_ids
+string last_error
+bool dry_run

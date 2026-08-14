@@ -1,0 +1,115 @@
+# Goal section: starts the Receptionist action server workflow.
+# Precaution: set summary_only to true only when all guest fields below are already known.
+bool summary_only
+
+# Replay section: when true, summary_only mode ignores all guest fields in this goal and reuses node memory.
+# Precaution: this only works after one successful interview while receptionist_node.py is still running.
+bool replay_last_profile
+
+# Audio section: controls the microphone capture duration for interview mode.
+# Precaution: record_sec is ignored when summary_only is true.
+float32 record_sec
+
+# Audio section: ALSA microphone device used by arecord during interview mode.
+# Precaution: leave this as a valid ALSA device name, for example "default" or "plughw:1,0".
+string mic_device
+
+# TTS section: Piper voice model used for every spoken prompt and final summary.
+# Precaution: final summary delivery fails if this path is empty or invalid.
+string piper_model_path
+
+# STT section: faster-whisper model name used during interview mode.
+# Precaution: larger models improve recognition but increase CPU latency.
+string whisper_model
+
+# STT section: language hint used during interview mode.
+# Precaution: use an empty string for auto-detection when the language is not fixed.
+string whisper_language
+
+# Summary-only section: known guest name for direct introduction.
+# Precaution: this field is used only when summary_only is true.
+string guest_name
+
+# Summary-only section: known guest age for direct introduction.
+# Precaution: use 0 when the age is unknown.
+int32 guest_age
+
+# Summary-only section: known guest gender for direct introduction.
+# Precaution: use "male" or "female" when possible for standard RoboCup output.
+string guest_gender
+
+# Summary-only section: known favorite drink for direct introduction.
+# Precaution: use the dataset drink spelling when possible, for example "orange juice".
+string favorite_drink
+---
+# Result section: reports whether the receptionist workflow completed.
+# Precaution: success means the action reached the requested delivery stage, not that every answer was heard.
+bool success
+
+# Result section: machine-readable error or operator-facing diagnostic.
+# Precaution: empty string means no action-level error was detected.
+string error
+
+# Guest section: normalized guest name collected or introduced by the server.
+# Precaution: empty string means the name was skipped or not provided.
+string guest_name
+
+# Guest section: normalized guest age collected or introduced by the server.
+# Precaution: 0 means the age was skipped or not provided.
+int32 guest_age
+
+# Guest section: normalized guest gender collected or introduced by the server.
+# Precaution: empty string means the gender was skipped or not provided.
+string guest_gender
+
+# Guest section: normalized favorite drink collected or introduced by the server.
+# Precaution: empty string means the drink was skipped or not provided.
+string favorite_drink
+
+# Transcript section: raw speech transcript for the name answer.
+# Precaution: empty string is expected in summary_only mode.
+string raw_name
+
+# Transcript section: raw speech transcript for the age answer.
+# Precaution: empty string is expected in summary_only mode.
+string raw_age
+
+# Transcript section: raw speech transcript for the gender answer.
+# Precaution: empty string is expected in summary_only mode.
+string raw_gender
+
+# Transcript section: raw speech transcript for the favorite-drink answer.
+# Precaution: empty string is expected in summary_only mode.
+string raw_drink
+
+# Compatibility section: keeps older state-machine checks working during migration.
+# Precaution: this is true when the receptionist action accepted the guest information flow.
+bool arrived
+
+# Compatibility section: keeps older handover checks working during migration.
+# Precaution: this is true when the final guest information delivery was attempted.
+bool handover_ok
+
+# Compatibility section: mirrors the name transcript for older clients.
+# Precaution: prefer raw_name in new code.
+string transcript_arrived
+
+# Compatibility section: mirrors the drink transcript for older clients.
+# Precaution: prefer raw_drink in new code.
+string transcript_handover
+
+# Delivery section: exact final summary sentence sent to Piper.
+# Precaution: log this field during tests to verify the robot speaks the expected guest information.
+string final_summary
+---
+# Feedback section: current high-level receptionist stage.
+# Precaution: clients should treat unknown stages as informational, not fatal.
+string stage
+
+# Feedback section: human-readable progress message.
+# Precaution: this text is for logging and UI display only.
+string info
+
+# Feedback section: preview of the final summary when the FINAL_SUMMARY stage is reached.
+# Precaution: this remains empty until the final delivery stage.
+string final_summary

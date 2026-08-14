@@ -1,0 +1,18 @@
+bool navigate_to_bag
+bool announce_selection
+float32 timeout_sec
+---
+bool success
+string selected_side
+string final_state
+string message
+bool has_bag_point
+geometry_msgs/PointStamped bag_point
+bool has_front_goal
+geometry_msgs/PoseStamped front_goal
+---
+string current_state
+string selected_side
+string nav_status
+bool bag_ready
+string detail_message

@@ -1,0 +1,16 @@
+# Goal
+float32 record_sec
+string mic_device
+string whisper_model
+string whisper_language
+string wav_path
+---
+# Result
+bool success
+string transcript
+string message
+string wav_path
+---
+# Feedback
+string stage
+string message

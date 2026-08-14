@@ -1,0 +1,12 @@
+std_msgs/Header header
+int32 track_id
+string state
+float64 x
+float64 y
+float64 vx
+float64 vy
+float64 distance
+float64 bearing
+float32 reid_similarity
+float32 time_since_last_seen
+bool is_locked

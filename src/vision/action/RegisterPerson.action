@@ -1,0 +1,19 @@
+int32 person_id
+bool use_nearest
+int32 requested_track_id
+float32 capture_duration
+bool require_walking
+---
+bool success
+int32 person_id
+int32 registered_track_id
+int32 prototypes_saved
+float32 average_quality
+string message
+---
+int32 active_person_id
+int32 active_track_id
+int32 frames_collected
+float32 elapsed_time
+float32 pose_quality
+string current_phase

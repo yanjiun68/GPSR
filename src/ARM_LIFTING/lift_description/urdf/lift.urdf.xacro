@@ -1,0 +1,135 @@
+<?xml version="1.0"?>
+<robot name="lift" xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <!-- ====== 参数（单位：m）====== -->
+  <xacro:property name="H" value="0.50"/>      <!-- 外框总高度 50cm -->
+  <xacro:property name="W" value="0.0795"/>    <!-- 外框宽 79.5mm -->
+  <xacro:property name="D" value="0.0795"/>    <!-- 外框深 79.5mm -->
+  <xacro:property name="eps" value="0.001"/>  <!-- 1mm 安全间隙 -->
+
+  <xacro:property name="t_tb" value="0.012"/>  <!-- 顶/底板厚 12mm -->
+  <xacro:property name="t_lr" value="0.020"/>  <!-- 左/右板厚 20mm -->
+  <xacro:property name="t_back" value="0.020"/><!-- 背板厚 20mm -->
+
+  <!-- 移动模块（竖直贴在开口面上） -->
+  <xacro:property name="car_side" value="0.077"/>    <!-- 77mm (在 X-Z 平面) -->
+  <xacro:property name="car_th"   value="0.0059"/>   <!-- 5.9mm (沿 Y 厚度) -->
+
+  <!-- 矩形承载平台（水平放置，安装在移动模块中心） -->
+  <xacro:property name="plat_length" value="0.26"/>   <!-- 平台长度 26cm (沿 X) -->
+  <xacro:property name="plat_width"  value="0.20"/>   <!-- 平台宽度 20cm (沿 Y) -->
+  <xacro:property name="plat_th"     value="0.0056"/> <!-- 平台厚度 5.6mm (沿 Z) -->
+
+  <!-- ====== 软件零点定义 ====== -->
+  <!-- 定义：lift_joint = 0 时，模块底面距离"底板上表面" = 65mm（光电传感器归零位置） -->
+  <xacro:property name="zero_gap" value="0.065"/>
+
+  <!-- 升降行程: 0 ~ 275mm -->
+  <xacro:property name="joint_lower" value="0.0"/>
+  <xacro:property name="joint_upper" value="0.275"/>
+
+  <!-- lift_joint=0 时模块“中心”Z坐标：
+       底板上表面高度 = t_tb
+       模块底面高度 = t_tb + zero_gap
+       模块中心高度 = t_tb + zero_gap + car_side/2
+  -->
+  <xacro:property name="z0" value="${t_tb + zero_gap + car_side/2.0}"/>
+
+  <!-- 几何检查：模块顶面在最大行程时的高度（用于你自己判断是否会穿模） -->
+  <!-- 模块顶面 = (底板上表面 t_tb) + (zero_gap + joint_upper) + car_side -->
+  <xacro:property name="top_at_max" value="${t_tb + (zero_gap + joint_upper) + car_side}"/>
+  <!-- 顶板下表面高度 = H - t_tb -->
+  <xacro:property name="top_plate_inner" value="${H - t_tb}"/>
+
+  <!-- ===================== 0) world -> lift_base_link (可选，但更稳) ===================== -->
+  <link name="world"/>
+  <joint name="world_to_lift" type="fixed">
+    <parent link="world"/>
+    <child link="lift_base_link"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <!-- ===================== 1) 固定框架：5个面（正面 +Y 开口） ===================== -->
+  <link name="lift_base_link">
+
+    <!-- 底板 -->
+    <visual>
+      <origin xyz="0 0 ${t_tb/2}" rpy="0 0 0"/>
+      <geometry><box size="${W} ${D} ${t_tb}"/></geometry>
+    </visual>
+
+    <!-- 顶板 -->
+    <visual>
+      <origin xyz="0 0 ${H - t_tb/2}" rpy="0 0 0"/>
+      <geometry><box size="${W} ${D} ${t_tb}"/></geometry>
+    </visual>
+
+    <!-- 左侧板（厚度沿 X） -->
+    <visual>
+      <origin xyz="${-W/2 + t_lr/2} 0 ${H/2}" rpy="0 0 0"/>
+      <geometry><box size="${t_lr} ${D} ${H - 2*t_tb}"/></geometry>
+    </visual>
+
+    <!-- 右侧板 -->
+    <visual>
+      <origin xyz="${W/2 - t_lr/2} 0 ${H/2}" rpy="0 0 0"/>
+      <geometry><box size="${t_lr} ${D} ${H - 2*t_tb}"/></geometry>
+    </visual>
+
+    <!-- 背板（厚度沿 Y，正面开口：+Y 方向不放板） -->
+    <visual>
+      <origin xyz="0 ${-D/2 + t_back/2} ${H/2}" rpy="0 0 0"/>
+      <geometry><box size="${W} ${t_back} ${H - 2*t_tb}"/></geometry>
+    </visual>
+
+    <!-- 简化碰撞体（避免MoveIt警告；真实碰撞你后面再细化） -->
+   <!-- ✅ 简化碰撞体 -->
+<collision>
+  <origin xyz="0 0 ${H/2}" rpy="0 0 0"/>
+  <geometry>
+    <box size="${W} ${D} ${H}"/>
+  </geometry>
+</collision>
+
+  </link>
+
+  <!-- ===================== 2) 移动模块（竖直贴在开口面 +Y） ===================== -->
+  <link name="lift_top_link">
+    <!-- 原移动模块 -->
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry><box size="${car_side} ${car_th} ${car_side}"/></geometry>
+    </visual>
+
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry><box size="${car_side} ${car_th} ${car_side}"/></geometry>
+    </collision>
+
+    <!-- 矩形承载平台（水平放置，从移动模块表面向 +Y 延伸） -->
+    <visual>
+      <origin xyz="0 ${car_th/2 + plat_width/2} 0" rpy="0 0 0"/>
+      <geometry><box size="${plat_length} ${plat_width} ${plat_th}"/></geometry>
+    </visual>
+
+    <collision>
+      <origin xyz="0 ${car_th/2 + plat_width/2} 0" rpy="0 0 0"/>
+      <geometry><box size="${plat_length} ${plat_width} ${plat_th}"/></geometry>
+    </collision>
+  </link>
+
+  <!-- ===================== 3) 关节：沿 Z 上下移动 ===================== -->
+  <joint name="lift_joint" type="prismatic">
+    <parent link="lift_base_link"/>
+    <child link="lift_top_link"/>
+
+    <!-- ✅ 关键：joint=0 时模块底面距底板上表面 65mm -->
+    <origin xyz="0 ${D/2 + car_th/2 + eps} ${z0}" rpy="0 0 0"/>
+
+    <axis xyz="0 0 1"/>
+
+    <!-- ✅ 关键：0~0.275m -->
+    <limit lower="${joint_lower}" upper="${joint_upper}" effort="200" velocity="0.05"/>
+  </joint>
+
+</robot>
