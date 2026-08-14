@@ -1,0 +1,55 @@
+src/NAVIGATION/iaig*
+src/NAVIGATION/aig*
+src/ThirdParty/kobuki_core
+src/ThirdParty/kobuki_ros
+src/kobuki
+src/ThirdParty/openni2_camera
+src/ThirdParty/ros_astra_camera
+<<<<<<< Updated upstream
+**.vscode
+# Created by https://www.toptal.com/developers/gitignore/api/ros2
+# Edit at https://www.toptal.com/developers/gitignore?templates=ros2
+
+### ROS2 ###
+**/install/
+**/log/
+**/build/
+
+# Ignore generated docs
+**/*.dox
+**/.wikidoc
+
+# Archive / compressed files
+*.zip
+*.tar.gz
+*.tgz
+*.tar
+*.gz
+*.7z
+*.rar
+*.pt
+
+# eclipse stuff
+**/.project
+**/.cproject
+
+# qcreator stuff
+**/CMakeLists.txt.user
+
+**/srv/_*.py
+**/*.pcd
+**/*.pyc
+**/qtcreator-*
+**/*.user
+
+**/*~
+
+# Emacs
+**/.#*
+
+# End of https://www.toptal.com/developers/gitignore/api/ros2
+=======
+src/yasmin
+src/waypoint_editor
+>>>>>>> Stashed changes
+src/ARM_LIFTING/rx200_handbag_grasp/models/nice.pt
