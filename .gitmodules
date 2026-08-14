@@ -1,0 +1,7 @@
+[submodule "src/package/sllidar_ros2"]
+	path = src/package/sllidar_ros2
+	url = https://github.com/Slamtec/sllidar_ros2.git
+[submodule "rplidar_ros"]
+	path = src/ThirdParty/rplidar_ros
+	url = https://github.com/Juancams/rplidar_ros.git
+	branch = ros2
