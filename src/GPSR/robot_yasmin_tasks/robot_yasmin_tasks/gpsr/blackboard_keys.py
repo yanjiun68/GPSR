@@ -36,6 +36,9 @@ HELD_OBJECT = "held_object"
 DIALOGUE_ANSWER = "dialogue_answer"
 SELECTED_OBJECT = "selected_object"
 EXTRACTED_PERSON_INFO = "extracted_person_info"
+# Section: Cross-node GPSR guest-memory references returned by mandatory service writes.
+GPSR_GUEST_MEMORY_ID = "gpsr_guest_memory_id"
+GPSR_GUEST_MEMORY_REVISION = "gpsr_guest_memory_revision"
 
 # Section: Failure and recovery keys.
 FAILURE_REASON = "failure_reason"

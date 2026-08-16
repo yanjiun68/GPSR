@@ -3,7 +3,7 @@
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
 from launch.conditions import IfCondition
-from launch.substitutions import LaunchConfiguration
+from launch.substitutions import LaunchConfiguration, OrSubstitution
 from launch.substitutions import PathJoinSubstitution
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch_ros.actions import LifecycleNode, Node
@@ -20,14 +20,21 @@ def generate_launch_description() -> LaunchDescription:
     command_topic = LaunchConfiguration("command_topic")
     schedule_command_service = LaunchConfiguration("schedule_command_service")
     reset_state_service = LaunchConfiguration("reset_state_service")
+    skill_registry_file = LaunchConfiguration("skill_registry_file")
+    default_skill_registry_file = PathJoinSubstitution(
+        [FindPackageShare("robot_yasmin_tasks"), "config", "skill_registry.yaml"]
+    )
 
     # Section: Optional integrated runtime nodes.
     start_executor = LaunchConfiguration("start_executor")
     start_count_people_pipeline = LaunchConfiguration("start_count_people_pipeline")
     start_count_objects_pipeline = LaunchConfiguration("start_count_objects_pipeline")
+    start_find_object_pipeline = LaunchConfiguration("start_find_object_pipeline")
     start_find_person_pipeline = LaunchConfiguration("start_find_person_pipeline")
+    start_find_person_attribute_pipeline = LaunchConfiguration("start_find_person_attribute_pipeline")
     start_voice_tts = LaunchConfiguration("start_voice_tts")
     start_voice_stt = LaunchConfiguration("start_voice_stt")
+    allow_simulated_primitives = LaunchConfiguration("allow_simulated_primitives")
 
     # Section: Shared perception launch-time controls.
     rgb_topic = LaunchConfiguration("rgb_topic")
@@ -66,6 +73,19 @@ def generate_launch_description() -> LaunchDescription:
     enable_perception = LaunchConfiguration("enable_perception")
     enable_manipulation = LaunchConfiguration("enable_manipulation")
     enable_tts = LaunchConfiguration("enable_tts")
+    enable_scheduler_viewer = LaunchConfiguration("enable_scheduler_viewer")
+
+    # Section: FIND_OBJECT and COUNT_OBJECTS share exactly one lifecycle detector process.
+    start_shared_object_detector = OrSubstitution(
+        start_count_objects_pipeline,
+        start_find_object_pipeline,
+    )
+
+    # Section: COUNT_PEOPLE and attribute FIND_PERSON share human and pose inference nodes.
+    start_shared_human_pose = OrSubstitution(
+        start_count_people_pipeline,
+        start_find_person_attribute_pipeline,
+    )
 
     # Section: Main deterministic scheduler entrypoint.
     scheduler_node = Node(
@@ -81,6 +101,8 @@ def generate_launch_description() -> LaunchDescription:
                 "command_topic": command_topic,
                 "schedule_command_service": schedule_command_service,
                 "reset_state_service": reset_state_service,
+                "skill_registry_file": skill_registry_file,
+                "allow_simulated_primitives": ParameterValue(allow_simulated_primitives, value_type=bool),
                 "instruction_point": instruction_point,
                 "return_after_completion": return_after_completion,
                 "return_after_failure": return_after_failure,
@@ -100,6 +122,7 @@ def generate_launch_description() -> LaunchDescription:
                 "enable_perception": enable_perception,
                 "enable_manipulation": enable_manipulation,
                 "enable_tts": enable_tts,
+                "enable_scheduler_viewer": ParameterValue(enable_scheduler_viewer, value_type=bool),
             }
         ],
     )
@@ -111,6 +134,10 @@ def generate_launch_description() -> LaunchDescription:
         name="gpsr_executor",
         output="screen",
         condition=IfCondition(start_executor),
+        parameters=[{
+            "skill_registry_file": skill_registry_file,
+            "allow_simulated_primitives": ParameterValue(allow_simulated_primitives, value_type=bool),
+        }],
     )
 
     # Section: Every executor ActionStep resolves resource policy through one manager.
@@ -118,6 +145,19 @@ def generate_launch_description() -> LaunchDescription:
         package="robot_yasmin_tasks",
         executable="gpsr_lifecycle_manager",
         name="gpsr_lifecycle_manager",
+        output="screen",
+        condition=IfCondition(start_executor),
+        parameters=[{
+            "registry_file": skill_registry_file,
+            "allow_simulated_primitives": ParameterValue(allow_simulated_primitives, value_type=bool),
+        }],
+    )
+
+    # Section: Persistent GPSR-only guest memory remains available across all ActionSteps.
+    gpsr_guest_memory_node = Node(
+        package="robot_yasmin_tasks",
+        executable="gpsr_guest_memory_node",
+        name="gpsr_guest_memory_node",
         output="screen",
         condition=IfCondition(start_executor),
     )
@@ -159,7 +199,7 @@ def generate_launch_description() -> LaunchDescription:
         name="gpsr_human_detection_node",
         namespace="",
         output="screen",
-        condition=IfCondition(start_count_people_pipeline),
+        condition=IfCondition(start_shared_human_pose),
         parameters=[{
             "rgb_topic": rgb_topic,
             "detections_topic": "/perception/raw_human_detections",
@@ -205,7 +245,7 @@ def generate_launch_description() -> LaunchDescription:
         name="gpsr_object_detection_node",
         namespace="",
         output="screen",
-        condition=IfCondition(start_count_objects_pipeline),
+        condition=IfCondition(start_shared_object_detector),
         parameters=[{
             "rgb_topic": rgb_topic,
             "detections_topic": "/perception/raw_object_detections",
@@ -247,13 +287,81 @@ def generate_launch_description() -> LaunchDescription:
         name="human_skeleton_detection_node",
         namespace="",
         output="screen",
-        condition=IfCondition(start_count_people_pipeline),
+        condition=IfCondition(start_shared_human_pose),
         parameters=[{
             "image_topic": rgb_topic,
             "model_path": default_pose_model_path,
             "show_gui": show_gui,
             "enable_tts": False,
             "legacy_skeletons_topic": "/perception/human_skeletons",
+        }],
+    )
+
+    # Section: Canonical tracked person IDs and registered profile hints are lifecycle-owned.
+    gpsr_human_identity_node = LifecycleNode(
+        package="vision",
+        executable="gpsr_human_identity_lifecycle_node.py",
+        name="gpsr_human_identity_node",
+        namespace="",
+        output="screen",
+        condition=IfCondition(start_find_person_attribute_pipeline),
+        parameters=[{
+            "image_topic": rgb_topic,
+            "output_topic": "/human_identity/recognized_people",
+            "person_model": "yolo11n.pt",
+            "device": "0",
+        }],
+    )
+
+    # Section: Reuse receptionist appearance estimators for every canonical visible track.
+    gpsr_tracked_appearance_node = LifecycleNode(
+        package="face_detection",
+        executable="tracked_appearance_lifecycle",
+        name="gpsr_tracked_appearance_node",
+        namespace="",
+        output="screen",
+        condition=IfCondition(start_find_person_attribute_pipeline),
+        parameters=[{
+            "image_topic": rgb_topic,
+            "identity_topic": "/human_identity/recognized_people",
+            "skeleton_topic": "/perception/human_skeletons",
+            "pose_summary_topic": "/perception/human_poses",
+            "output_topic": "/appearance/tracked_people",
+            "appearance_device": "0",
+        }],
+    )
+
+    # Section: The lifecycle server owns the complete FIND_PERSON_BY_ATTRIBUTE YASMIN mission.
+    find_person_by_attribute_skill_server = LifecycleNode(
+        package="robot_yasmin_tasks",
+        executable="find_person_by_attribute_skill_server",
+        name="find_person_by_attribute_skill_server",
+        namespace="",
+        output="screen",
+        condition=IfCondition(start_find_person_attribute_pipeline),
+        parameters=[{
+            "action_name": "/gpsr/find_person_by_attribute",
+            "appearance_topic": "/appearance/tracked_people",
+            "memory_save_service": "/gpsr/guest_memory/save",
+            "confirmation_min_frames": ParameterValue(confirmation_min_frames, value_type=int),
+            "enabled_wearable_predicates": ["glasses"],
+        }],
+    )
+
+    # Section: The extraction server enriches and re-saves the same GPSR guest record.
+    extract_person_info_skill_server = LifecycleNode(
+        package="robot_yasmin_tasks",
+        executable="extract_person_info_skill_server",
+        name="extract_person_info_skill_server",
+        namespace="",
+        output="screen",
+        condition=IfCondition(start_find_person_attribute_pipeline),
+        parameters=[{
+            "action_name": "/gpsr/extract_guest_info",
+            "appearance_topic": "/appearance/tracked_people",
+            "memory_get_service": "/gpsr/guest_memory/get",
+            "memory_save_service": "/gpsr/guest_memory/save",
+            "profile_get_service": "/gpsr/identity/get_profile",
         }],
     )
 
@@ -264,7 +372,7 @@ def generate_launch_description() -> LaunchDescription:
         name="find_object_skill_server",
         namespace="",
         output="screen",
-        condition=IfCondition(start_count_objects_pipeline),
+        condition=IfCondition(start_find_object_pipeline),
         parameters=[{
             "detections_topic": "/perception/raw_object_detections",
             "depth_topic": depth_topic,
@@ -305,8 +413,19 @@ def generate_launch_description() -> LaunchDescription:
             "enable_depth": "false",
             "enable_profile_capture": "true",
             "enable_identification": "true",
+            "enable_appearance_node": "false",
             "show_appearance_gui": show_gui,
         }.items(),
+    )
+
+    # Section: Identity availability marker makes the name pipeline switch lifecycle-visible.
+    find_person_identity_resource = LifecycleNode(
+        package="robot_yasmin_tasks",
+        executable="skill_availability_resource",
+        name="find_person_identity_resource",
+        namespace="",
+        output="screen",
+        condition=IfCondition(start_find_person_pipeline),
     )
 
     # Section: Optional people count reporter that speaks stable human quantities.
@@ -352,12 +471,16 @@ def generate_launch_description() -> LaunchDescription:
             DeclareLaunchArgument("command_topic", default_value="/gpsr/command", description="Plain text GPSR command input topic."),
             DeclareLaunchArgument("schedule_command_service", default_value="/gpsr/schedule_command", description="Service endpoint for one-shot GPSR command scheduling."),
             DeclareLaunchArgument("reset_state_service", default_value="/gpsr/reset_state", description="Guarded service that re-arms recovery from scheduler ERROR."),
+            DeclareLaunchArgument("skill_registry_file", default_value=default_skill_registry_file, description="Authoritative executable primitive capability registry."),
             DeclareLaunchArgument("start_executor", default_value="true", description="Start the GPSR action queue executor."),
             DeclareLaunchArgument("start_count_people_pipeline", default_value="true", description="Start people detection, people count service, and people count action bridge."),
             DeclareLaunchArgument("start_count_objects_pipeline", default_value="true", description="Start object detection, object count service, and object count action bridge."),
+            DeclareLaunchArgument("start_find_object_pipeline", default_value="true", description="Start the compound FIND_OBJECT server and its shared object detector."),
             DeclareLaunchArgument("start_find_person_pipeline", default_value="true", description="Start shared YuNet/SFace identity, lookup, and enrollment interfaces."),
+            DeclareLaunchArgument("start_find_person_attribute_pipeline", default_value="true", description="Start real human pose resources for FIND_PERSON_BY_ATTRIBUTE."),
             DeclareLaunchArgument("start_voice_tts", default_value="true", description="Start the local /voice/tts/say service."),
             DeclareLaunchArgument("start_voice_stt", default_value="true", description="Start local STT used by verbal FIND_PERSON confirmation."),
+            DeclareLaunchArgument("allow_simulated_primitives", default_value="false", description="Test-only opt-in for registry entries explicitly marked simulated."),
             DeclareLaunchArgument("rgb_topic", default_value="/camera/camera/color/image_raw", description="RGB image topic for GPSR perception detectors."),
             DeclareLaunchArgument("depth_topic", default_value="/camera/camera/aligned_depth_to_color/image_raw", description="Aligned depth topic for managed FIND_OBJECT."),
             DeclareLaunchArgument("camera_info_topic", default_value="/camera/camera/color/camera_info", description="Color CameraInfo topic for managed FIND_OBJECT."),
@@ -388,7 +511,9 @@ def generate_launch_description() -> LaunchDescription:
             DeclareLaunchArgument("enable_perception", default_value="true", description="Expose perception dependency policy to scheduler."),
             DeclareLaunchArgument("enable_manipulation", default_value="true", description="Expose manipulation dependency policy to scheduler."),
             DeclareLaunchArgument("enable_tts", default_value="true", description="Expose TTS dependency policy to scheduler."),
+            DeclareLaunchArgument("enable_scheduler_viewer", default_value="true", description="Publish the GPSR scheduler cycle, including ERROR, to YASMIN Viewer."),
             scheduler_node,
+            gpsr_guest_memory_node,
             gpsr_lifecycle_manager,
             gpsr_executor_node,
             count_people_skill_server,
@@ -398,10 +523,15 @@ def generate_launch_description() -> LaunchDescription:
             gpsr_object_detector,
             count_objects_perception_server,
             human_skeleton_detector,
+            gpsr_human_identity_node,
+            gpsr_tracked_appearance_node,
+            find_person_by_attribute_skill_server,
+            extract_person_info_skill_server,
             find_object_skill_server,
             voice_tts_node,
             voice_stt_node,
             find_person_pipeline,
+            find_person_identity_resource,
             count_people_blackboard_tts_node,
             count_objects_blackboard_tts_node,
         ]

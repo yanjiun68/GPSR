@@ -1,0 +1,17 @@
+# Section: Resolve requested guest fields from GPSR memory and live perception.
+string memory_id
+string person_ref_json
+string command_id
+string source_step_id
+string[] fields
+float32 timeout_sec
+---
+bool success
+string outcome
+string memory_id
+uint64 memory_revision
+string info_json
+string[] missing_fields
+string message
+---
+string status

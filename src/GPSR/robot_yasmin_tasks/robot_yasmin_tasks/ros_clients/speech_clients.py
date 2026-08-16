@@ -1,10 +1,13 @@
 """Section: Local TTS service client wrapper."""
 
+import re
 import time
 from typing import Any
 
 from robot_yasmin_tasks.gpsr.models import ActionStepData, make_skill_result
 from robot_yasmin_tasks.gpsr.outcomes import FAILED, SUCCESS
+from robot_yasmin_tasks.gpsr import blackboard_keys as bb
+from robot_yasmin_tasks.gpsr.blackboard_utils import bb_get
 
 try:
     from voice_interfaces.srv import SayText
@@ -22,11 +25,25 @@ class SpeechClients:
         self.service_name = service_name
         self.client = node.create_client(SayText, service_name) if node is not None and not simulate and SayText is not None else None
 
-    def say(self, _blackboard: Any, action: ActionStepData) -> Any:
+    def say(self, blackboard: Any, action: ActionStepData) -> Any:
         """Special function: Send text to local TTS service."""
         text = action.parameters.get("text") or action.parameters.get("text_template", "")
         if not text:
             return make_skill_result(action.action_type, FAILED, "Speech text missing.", recoverable=True)
+        # Section: Resolve only explicit dotted placeholders from one named result variable.
+        substitution = str(action.parameters.get("substitution", "")).strip()
+        if substitution:
+            variables = dict(bb_get(blackboard, bb.RESULT_VARIABLES, {}))
+            source = variables.get(substitution, bb_get(blackboard, substitution, {}))
+            text, missing = self.resolve_template(str(text), source)
+            if missing:
+                return make_skill_result(
+                    action.action_type,
+                    FAILED,
+                    f"Speech substitution fields are missing: {missing}.",
+                    {"missing_fields": missing},
+                    recoverable=True,
+                )
         if self.simulate or self.client is None:
             return make_skill_result(action.action_type, SUCCESS, "Simulated speech completed.", {"text": text})
         if not self.client.wait_for_service(timeout_sec=3.0):
@@ -43,3 +60,27 @@ class SpeechClients:
                 return make_skill_result(action.action_type, FAILED, getattr(response, "message", "TTS failed."), recoverable=True)
             time.sleep(0.05)
         return make_skill_result(action.action_type, FAILED, "TTS response timed out.", recoverable=True)
+
+    @staticmethod
+    def resolve_template(template: str, source: Any) -> tuple[str, list[str]]:
+        """Special function: Resolve safe result.foo placeholders without evaluating expressions."""
+        missing: list[str] = []
+
+        def replacement(match: Any) -> str:
+            """Special function: Resolve one dotted path against dictionary-only data."""
+            path = str(match.group(1))
+            parts = path.split(".")
+            if parts and parts[0] == "result":
+                parts = parts[1:]
+            value = source
+            for part in parts:
+                if not isinstance(value, dict) or part not in value:
+                    missing.append(path)
+                    return match.group(0)
+                value = value[part]
+            if isinstance(value, (dict, list)):
+                return str(value)
+            return str(value)
+
+        rendered = re.sub(r"\{([A-Za-z_][A-Za-z0-9_.]*)\}", replacement, str(template))
+        return rendered, missing

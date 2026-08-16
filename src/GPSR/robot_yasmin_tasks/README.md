@@ -55,7 +55,39 @@ The competition scheduler publishes its command-cycle state on `/gpsr/state`, li
 human transcripts only in `WAITING_FOR_COMMAND`, and uses `/nav/navigate_named_pose` to
 confirm initial arrival at and final return to the configured `instruction_point`.
 
-## Two-Mode FIND_PERSON
+## Separate Person Search Routes
+
+```text
+FIND_PERSON
+    -> name selector only
+    -> registered face or verbal identity confirmation
+
+FIND_PERSON_BY_ATTRIBUTE
+    -> pose, gesture, or any-person selector only
+    -> real /perception/human_poses evidence
+```
+
+## GPSR tracked appearance and guest memory
+
+The GPSR launch owns a RAM-only `gpsr_guest_memory_node`. Its YASMIN blackboard
+is process-local; every other process must use these ROS interfaces:
+
+```bash
+ros2 service call /gpsr/guest_memory/get robot_ai_interfaces/srv/GetGpsrGuest "{memory_id: ''}"
+ros2 service call /gpsr/guest_memory/list robot_ai_interfaces/srv/ListGpsrGuests "{}"
+ros2 service call /gpsr/guest_memory/clear std_srvs/srv/Trigger "{}"
+```
+
+`/gpsr/reset_state` does not clear guest memory. Clearing it is always explicit.
+The lifecycle manager activates canonical identity tracking, skeleton perception,
+tracked appearance, and the selected person skill server in dependency order.
+It cleans them in reverse order after the ActionStep; stored guest snapshots remain
+available for subsequent commands and for `EXTRACT_PERSON_INFO`.
+
+Glasses matching is enabled by default. Hat and face-mask matching stay disabled
+until a validated positive-class model is added to the tracked appearance model
+paths, the scheduler `supported_person_attributes`, and the find server's
+`enabled_wearable_predicates` parameter.
 
 For `selector.type: name`, `FindPersonSkillSM` queries
 `/appearance/lookup_identity_profile`. A usable profile selects registered SFace
@@ -64,8 +96,15 @@ selects candidate-by-candidate verbal confirmation through the existing voice to
 question is always `Are you <name>?`; yes/no parsing is deterministic and an unclear answer
 gets one retry. A verbally confirmed face is enrolled best-effort through
 `/appearance/capture_named_profile`. Enrollment failure is reported but does not discard the
-confirmed person. Existing description, pose, gesture, clothing, and any-person selectors
-continue through the legacy selection adapter.
+confirmed person. Non-name selectors are rejected by this state machine so they cannot enter
+identity resolution accidentally.
+
+The lifecycle `find_person_by_attribute_skill_server` accepts `pose`, `gesture`,
+`shirt_color`, enabled positive wearables, `any_person`, and logical-AND combinations. It
+waits for fresh `/appearance/tracked_people` observations and requires three matching frames
+for the same canonical YOLO track before saving the match. Free-form descriptions and
+negative wearables remain unsupported and return `invalid_input`; no real execution path
+fabricates a person result.
 
 Runtime interfaces:
 
@@ -79,6 +118,7 @@ Runtime interfaces:
 - `/voice/tts/say` (`voice_interfaces/srv/SayText`)
 - `/voice/stt/start` (`std_msgs/msg/Float32`)
 - `/voice/stt/transcript` (`std_msgs/msg/String`)
+- `/perception/human_poses` (`std_msgs/msg/String`, JSON pose/gesture summary)
 
 Build and launch the integrated runtime:
 
@@ -86,7 +126,7 @@ Build and launch the integrated runtime:
 cd /home/yanjiun68/workspace/WS1/PutrabotUPM-project
 colcon build --packages-up-to receptionist_interfaces face_detection robot_yasmin_tasks gpsr_task_scheduler
 source install/setup.bash
-ros2 launch gpsr_task_scheduler gpsr_scheduler.launch.py dry_run:=false start_find_person_pipeline:=true start_voice_stt:=true
+ros2 launch gpsr_task_scheduler gpsr_scheduler.launch.py dry_run:=false start_find_person_pipeline:=true start_find_person_attribute_pipeline:=true start_voice_stt:=true
 ```
 
 Inspect the mode-selection and candidate interfaces:
@@ -128,7 +168,9 @@ ros2 launch robot_yasmin_tasks gpsr_executor.launch.py use_llm_parser:=true
 Add action type -> create skill file -> register lifecycle policy -> update dispatcher -> add tests
 ```
 
-Every dispatcher action type must have one entry in `config/skill_registry.yaml`. List
-transient lifecycle nodes in dependency order; use an empty list only for persistent or
-simulation-only dependencies. The queue executor always calls manager `prepare_skill` before
-dispatch and `cleanup_skill` before committing the result.
+Every canonical executable primitive must have one entry in `config/skill_registry.yaml`.
+List transient lifecycle nodes in dependency order and declare `implementation` plus
+`production_enabled`. Empty lifecycle lists are valid for persistent real endpoints, but a
+missing or simulated implementation must remain disabled in production. The scheduler and
+executor both reject disabled primitives. The queue executor always calls manager
+`prepare_skill` before dispatch and `cleanup_skill` before committing the result.

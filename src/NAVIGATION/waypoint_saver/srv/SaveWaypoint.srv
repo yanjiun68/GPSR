@@ -1,0 +1,13 @@
+# Section: Select the waypoint name and exact YAML file to update.
+string name
+string yaml_path
+# Section: Use -1 to allocate the next ID, or provide a non-negative ID.
+int32 id
+# Section: Permit replacement only when the caller explicitly requests it.
+bool overwrite
+---
+# Section: Return the save result, assigned ID, and captured current pose.
+bool success
+string message
+int32 id
+geometry_msgs/PoseStamped pose

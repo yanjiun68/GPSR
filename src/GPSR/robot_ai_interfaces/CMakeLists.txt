@@ -5,12 +5,15 @@ project(robot_ai_interfaces)
 find_package(ament_cmake REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
 find_package(geometry_msgs REQUIRED)
+find_package(builtin_interfaces REQUIRED)
+find_package(receptionist_interfaces REQUIRED)
 
 # Section: Generate GPSR action queue interfaces.
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/ActionStep.msg"
   "msg/ActionQueue.msg"
   "msg/SkillResult.msg"
+  "msg/GpsrGuestRecord.msg"
   "action/ExecuteActionQueue.action"
   "action/ExecuteTaskPlan.action"
   "action/FindObject.action"
@@ -23,16 +26,21 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "action/AskAndListen.action"
   "action/CountObjects.action"
   "action/CountPeople.action"
+  "action/FindPersonByAttribute.action"
+  "action/ExtractGuestInfo.action"
   "srv/CountObjects.srv"
   "srv/CountPeople.srv"
   "srv/CompareObjects.srv"
   "srv/ExtractPersonInfo.srv"
+  "srv/SaveGpsrGuest.srv"
+  "srv/GetGpsrGuest.srv"
+  "srv/ListGpsrGuests.srv"
   "srv/ManageLifecycleSkill.srv"
   "srv/GetLifecycleSkillState.srv"
   "srv/Say.srv"
   "srv/ScheduleCommand.srv"
   "srv/ValidateActionQueue.srv"
-  DEPENDENCIES geometry_msgs
+  DEPENDENCIES geometry_msgs builtin_interfaces receptionist_interfaces
 )
 
 # Section: Export generated runtime dependencies.

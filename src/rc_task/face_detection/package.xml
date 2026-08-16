@@ -18,6 +18,7 @@
   <depend>message_filters</depend>
   <depend>receptionist_interfaces</depend>
   <depend>putrabot_interfaces</depend>
+  <depend>vision</depend>
   <depend>yasmin</depend>
   <depend>yasmin_ros</depend>
 

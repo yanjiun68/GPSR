@@ -18,6 +18,8 @@
   <exec_depend>std_srvs</exec_depend>
   <exec_depend>robot_ai_interfaces</exec_depend>
   <exec_depend>robot_yasmin_tasks</exec_depend>
+  <exec_depend>yasmin</exec_depend>
+  <exec_depend>yasmin_viewer</exec_depend>
   <exec_depend>vision</exec_depend>
   <exec_depend>face_detection</exec_depend>
   <exec_depend>voice</exec_depend>

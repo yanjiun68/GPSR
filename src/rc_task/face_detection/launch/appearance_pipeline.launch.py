@@ -12,6 +12,7 @@ LAUNCH_DEFAULTS = {
     'personal_test_mode': 'false',
     'enable_profile_capture': 'true',
     'enable_identification': 'true',
+    'enable_appearance_node': 'true',
 
     # External camera topic settings
     'image_topic': '/camera/camera/color/image_raw',
@@ -84,6 +85,7 @@ LAUNCH_DESCRIPTIONS = {
     ),
     'enable_profile_capture': 'If true, start the action server that saves named guest profiles.',
     'enable_identification': 'If true, start the node that matches visible guests against saved profiles.',
+    'enable_appearance_node': 'If true, start the legacy single-person appearance publisher.',
     'image_topic': 'External color image topic consumed by face_perception and appearance_node.',
     'enable_depth': 'If true, subscribe to synchronized depth for face distance estimation.',
     'depth_topic': 'External aligned depth topic consumed by face_perception.',
@@ -168,6 +170,7 @@ def generate_launch_description():
     personal_test_mode = LaunchConfiguration('personal_test_mode')
     enable_profile_capture = LaunchConfiguration('enable_profile_capture')
     enable_identification = LaunchConfiguration('enable_identification')
+    enable_appearance_node = LaunchConfiguration('enable_appearance_node')
     image_topic = LaunchConfiguration('image_topic')
     enable_depth = LaunchConfiguration('enable_depth')
     depth_topic = LaunchConfiguration('depth_topic')
@@ -273,6 +276,7 @@ def generate_launch_description():
         executable='appearance_receptionist',
         name='appearance_node',
         output='screen',
+        condition=IfCondition(enable_appearance_node),
         parameters=[
             {
                 'image_topic': effective_image_topic,
@@ -386,6 +390,7 @@ def generate_launch_description():
             declare_launch_argument('personal_test_mode'),
             declare_launch_argument('enable_profile_capture'),
             declare_launch_argument('enable_identification'),
+            declare_launch_argument('enable_appearance_node'),
             declare_launch_argument('image_topic'),
             declare_launch_argument('enable_depth'),
             declare_launch_argument('depth_topic'),

@@ -2,7 +2,12 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, SetEnvironmentVariable, TimerAction
+from launch.actions import (
+    DeclareLaunchArgument,
+    IncludeLaunchDescription,
+    SetEnvironmentVariable,
+    TimerAction,
+)
 from launch.conditions import IfCondition, UnlessCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, PythonExpression
@@ -16,6 +21,11 @@ def generate_launch_description():
 
     default_map = os.path.join(pkg_share, 'maps', 'my_map_new.yaml')
     default_nav2_params = os.path.join(pkg_share, 'config', 'nav2_params.yaml')
+    default_waypoints_file = os.path.join(
+        pkg_share,
+        'config',
+        'gpsr_waypoint.yaml',
+    )
     default_rviz_config_file = os.path.join(
         pkg_share, 'rviz', 'my_nav_minimal.rviz')
     nav_to_pose_bt_xml = os.path.join(
@@ -28,6 +38,10 @@ def generate_launch_description():
     use_sim_time = LaunchConfiguration('use_sim_time', default='false')
     use_external_drivers = LaunchConfiguration('use_external_drivers', default='false')
     map_yaml_file = LaunchConfiguration('map', default=default_map)
+    waypoints_file = LaunchConfiguration(
+        'waypoints_file',
+        default=default_waypoints_file,
+    )
     # Allows the IAIG-Nav launch (or any other caller) to swap in an
     # alternative Nav2 params file — e.g. one with controller_server
     # removed from the lifecycle manager when the DRL local planner
@@ -96,7 +110,10 @@ def generate_launch_description():
     )
     serial_port = LaunchConfiguration(
         'serial_port',
-        default='/dev/serial/by-id/usb-Silicon_Labs_CP2102_USB_to_UART_Bridge_Controller_0001-if00-port0',
+        default=(
+            '/dev/serial/by-id/'
+            'usb-Silicon_Labs_CP2102_USB_to_UART_Bridge_Controller_0001-if00-port0'
+        ),
     )
     arduino_port = LaunchConfiguration(
         'arduino_port',
@@ -113,10 +130,19 @@ def generate_launch_description():
     configured_nav2_params = RewrittenYaml(
         source_file=nav2_params_file_arg,
         param_rewrites={
-            'bt_navigator.ros__parameters.default_nav_to_pose_bt_xml': nav_to_pose_bt_xml,
-            'bt_navigator.ros__parameters.default_nav_through_poses_bt_xml': nav_through_poses_bt_xml,
-            'controller_server.ros__parameters.FollowPath.desired_linear_vel': nav_desired_linear_vel,
-            'controller_server.ros__parameters.FollowPath.rotate_to_heading_angular_vel': nav_rotate_to_heading_angular_vel,
+            'bt_navigator.ros__parameters.default_nav_to_pose_bt_xml': (
+                nav_to_pose_bt_xml
+            ),
+            'bt_navigator.ros__parameters.default_nav_through_poses_bt_xml': (
+                nav_through_poses_bt_xml
+            ),
+            'controller_server.ros__parameters.FollowPath.desired_linear_vel': (
+                nav_desired_linear_vel
+            ),
+            (
+                'controller_server.ros__parameters.FollowPath.'
+                'rotate_to_heading_angular_vel'
+            ): nav_rotate_to_heading_angular_vel,
         },
         convert_types=True,
     )
@@ -310,6 +336,12 @@ def generate_launch_description():
             'fine_yaw_step': 0.015,
             'translation_penalty': 4.0,
             'rotation_penalty': 2.0,
+            # Section: Bound the full session correction and reject wall-overlapping poses.
+            'max_correction_distance': 0.15,
+            'max_correction_yaw': 0.15,
+            'min_score_improvement_per_beam': 0.01,
+            'minimum_pose_clearance': 0.35,
+            'treat_unknown_as_occupied': True,
         }],
         output='screen',
     )
@@ -326,8 +358,9 @@ def generate_launch_description():
             'output_timestamp_offset_sec': 0.25,
             'publish_count': 2,
             'publish_interval_sec': 0.3,
-            'max_correction_distance': 2.50,
-            'max_correction_yaw': 3.14,
+            # Section: Apply the same hard bounds again before publishing to AMCL.
+            'max_correction_distance': 0.15,
+            'max_correction_yaw': 0.15,
             'tf_stamp_margin_sec': 0.10,
         }],
         output='screen',
@@ -338,7 +371,8 @@ def generate_launch_description():
         executable='navigate_named_pose_server.py',
         name='navigate_named_pose_server',
         parameters=[{
-            'waypoints_file': os.path.join(pkg_share, 'config', 'gpsr_waypoint.yaml'),
+            # Section: Honor the caller-provided waypoint file instead of hardcoding install space.
+            'waypoints_file': waypoints_file,
             'action_name': '/nav/navigate_named_pose',
             'navigate_to_pose_action': '/navigate_to_pose',
             'navigate_to_pose_server_timeout_sec': navigate_to_pose_server_timeout_sec,
@@ -362,6 +396,11 @@ def generate_launch_description():
             'map',
             default_value=default_map,
             description='Full path to map yaml file',
+        ),
+        DeclareLaunchArgument(
+            'waypoints_file',
+            default_value=default_waypoints_file,
+            description='Full path to named navigation waypoints yaml',
         ),
         DeclareLaunchArgument(
             'nav2_params_file',
@@ -394,12 +433,18 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'nav2_autostart',
             default_value='false',
-            description='Autostart Nav2 immediately; keep false to wait for 2D Pose Estimate first',
+            description=(
+                'Autostart Nav2 immediately; keep false to wait for '
+                '2D Pose Estimate first'
+            ),
         ),
         DeclareLaunchArgument(
             'navigate_to_pose_server_timeout_sec',
             default_value='30.0',
-            description='Seconds named-pose navigation waits for /navigate_to_pose to appear',
+            description=(
+                'Seconds named-pose navigation waits for '
+                '/navigate_to_pose to appear'
+            ),
         ),
         DeclareLaunchArgument(
             'use_nav2_stack',
@@ -413,7 +458,9 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'use_startup_gate',
             default_value='true',
-            description='Start Nav2 only after odom and a 2D Pose Estimate are available',
+            description=(
+                'Start Nav2 only after odom and a 2D Pose Estimate are available'
+            ),
         ),
         DeclareLaunchArgument(
             'require_nav2_transform',
@@ -443,7 +490,10 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'global_localize_on_start',
             default_value='false',
-            description='Request AMCL global localization at startup when no initial pose is known',
+            description=(
+                'Request AMCL global localization at startup when no initial '
+                'pose is known'
+            ),
         ),
         DeclareLaunchArgument(
             'global_localization_delay',
@@ -507,7 +557,11 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument(
             'serial_port',
-            default_value='/dev/serial/by-id/usb-Silicon_Labs_CP2102_USB_to_UART_Bridge_Controller_0001-if00-port0',
+            default_value=(
+                '/dev/serial/by-id/'
+                'usb-Silicon_Labs_CP2102_USB_to_UART_Bridge_Controller_0001-'
+                'if00-port0'
+            ),
             description='Serial port for Lidar',
         ),
         DeclareLaunchArgument(

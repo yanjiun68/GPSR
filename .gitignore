@@ -1,7 +1,6 @@
 src/NAVIGATION/iaig*
 src/NAVIGATION/aig*
-src/ThirdParty/kobuki_core
-src/ThirdParty/kobuki_ros
+src/llm
 src/kobuki
 src/ThirdParty/openni2_camera
 src/ThirdParty/ros_astra_camera

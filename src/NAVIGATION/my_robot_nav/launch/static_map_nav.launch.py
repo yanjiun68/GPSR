@@ -33,6 +33,7 @@ def generate_launch_description():
     pkg_share = get_package_share_directory(pkg_name)
 
     default_map = os.path.join(pkg_share, 'maps', 'new_my_map.yaml')
+    default_waypoints_file = os.path.join(pkg_share, 'config', 'gpsr_waypoint.yaml')
     default_semantic_locations = resolve_default_semantic_locations_file(
         pkg_share,
         pkg_name,
@@ -41,6 +42,7 @@ def generate_launch_description():
     use_sim_time = LaunchConfiguration('use_sim_time', default='false')
     use_external_drivers = LaunchConfiguration('use_external_drivers', default='false')
     map_yaml_file = LaunchConfiguration('map', default=default_map)
+    waypoints_file = LaunchConfiguration('waypoints_file', default=default_waypoints_file)
     use_realsense_imu = LaunchConfiguration('use_realsense_imu', default='false')
     use_rviz = LaunchConfiguration('use_rviz', default='true')
     nav2_delay = LaunchConfiguration('nav2_delay', default='10.0')
@@ -105,7 +107,10 @@ def generate_launch_description():
     )
     serial_port = LaunchConfiguration(
         'serial_port',
-        default='/dev/serial/by-id/usb-Silicon_Labs_CP2102_USB_to_UART_Bridge_Controller_0001-if00-port0',
+        default=(
+            '/dev/serial/by-id/'
+            'usb-Silicon_Labs_CP2102_USB_to_UART_Bridge_Controller_0001-if00-port0'
+        ),
     )
     arduino_port = LaunchConfiguration(
         'arduino_port',
@@ -126,6 +131,8 @@ def generate_launch_description():
         launch_arguments={
             'use_sim_time': use_sim_time,
             'map': map_yaml_file,
+            # Section: Forward the requested waypoint file to the named-pose server.
+            'waypoints_file': waypoints_file,
             'use_realsense_imu': use_realsense_imu,
             'use_rviz': use_rviz,
             'nav2_delay': nav2_delay,
@@ -192,6 +199,11 @@ def generate_launch_description():
             description='Full path to map yaml file',
         ),
         DeclareLaunchArgument(
+            'waypoints_file',
+            default_value=default_waypoints_file,
+            description='Full path to named navigation waypoints yaml',
+        ),
+        DeclareLaunchArgument(
             'use_realsense_imu',
             default_value='false',
             description='Enable the RealSense IMU in the robot odom pipeline',
@@ -209,7 +221,10 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'nav2_autostart',
             default_value='false',
-            description='Autostart Nav2 immediately; keep false to wait for 2D Pose Estimate first',
+            description=(
+                'Autostart Nav2 immediately; keep false to wait for '
+                '2D Pose Estimate first'
+            ),
         ),
         DeclareLaunchArgument(
             'navigate_to_pose_server_timeout_sec',
@@ -323,7 +338,11 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument(
             'serial_port',
-            default_value='/dev/serial/by-id/usb-Silicon_Labs_CP2102_USB_to_UART_Bridge_Controller_0001-if00-port0',
+            default_value=(
+                '/dev/serial/by-id/'
+                'usb-Silicon_Labs_CP2102_USB_to_UART_Bridge_Controller_0001-'
+                'if00-port0'
+            ),
             description='Serial port for Lidar',
         ),
         DeclareLaunchArgument(

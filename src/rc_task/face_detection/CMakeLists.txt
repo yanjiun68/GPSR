@@ -21,6 +21,7 @@ function(install_python_node node_name)
 endfunction()
 
 install_python_node(appearance_receptionist)
+install_python_node(tracked_appearance_lifecycle)
 install_python_node(detection_receptionist)
 install_python_node(face_perception)
 install_python_node(guest_database)
@@ -74,17 +75,23 @@ install(DIRECTORY
     PATTERN "*.py"
 )
 
-set(VISION_GLASSES_MODEL "${CMAKE_CURRENT_SOURCE_DIR}/../../vision/models/glasses.pt")
-if(EXISTS "${VISION_GLASSES_MODEL}")
+set(VISION_APPEARANCE_MODELS
+  "${CMAKE_CURRENT_SOURCE_DIR}/../../vision/models/glasses.pt"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../../vision/models/tshirt.pt"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../../vision/models/facce.pt"
+)
+foreach(VISION_APPEARANCE_MODEL ${VISION_APPEARANCE_MODELS})
+if(EXISTS "${VISION_APPEARANCE_MODEL}")
   install(FILES
-    "${VISION_GLASSES_MODEL}"
+    "${VISION_APPEARANCE_MODEL}"
     DESTINATION share/${PROJECT_NAME}/detection_pt
   )
   install(FILES
-    "${VISION_GLASSES_MODEL}"
+    "${VISION_APPEARANCE_MODEL}"
     DESTINATION share/${PROJECT_NAME}/models
   )
 endif()
+endforeach()
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
@@ -108,6 +115,12 @@ if(BUILD_TESTING)
   ament_add_pytest_test(
     test_yasmin_profile_states
     test/test_yasmin_profile_states.py
+    APPEND_ENV PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}
+  )
+  # Section: Shared estimator tests verify ROI, HSV, and per-track temporal behavior.
+  ament_add_pytest_test(
+    test_appearance_estimators
+    test/test_appearance_estimators.py
     APPEND_ENV PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}
   )
 endif()

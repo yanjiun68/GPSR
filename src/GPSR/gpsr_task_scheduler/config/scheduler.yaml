@@ -43,6 +43,11 @@ supported_human_poses:
   - sitting
   - standing
   - lying
+supported_person_attributes:
+  shirt_color: [red, orange, yellow, green, blue, purple, white, black, gray]
+  # Section: Wearable matching is positive-only; missing detections remain UNKNOWN.
+  glasses: ["yes"]
+  # Section: Add hat/face_mask: [yes] only with validated positive-class model files.
 instruction_point: instruction_point
 return_after_completion: false
 return_after_failure: false
@@ -52,15 +57,31 @@ skill_timeouts:
   NAVIGATE: 60.0
   FIND_OBJECT: 300.0
   FIND_PERSON: 20.0
+  FIND_PERSON_BY_ATTRIBUTE: 20.0
+  EXTRACT_PERSON_INFO: 10.0
   COUNT_OBJECTS: 10.0
   COUNT_PEOPLE: 10.0
+  PICK_OBJECT: 20.0
+  PLACE_OBJECT: 20.0
+  HANDOVER_OBJECT: 20.0
+  FOLLOW_PERSON: 60.0
+  GUIDE_PERSON: 60.0
   SAY: 8.0
+  ASK_AND_LISTEN: 15.0
 skill_retries:
   NAVIGATE: 1
   FIND_OBJECT: 0
   FIND_PERSON: 0
+  FIND_PERSON_BY_ATTRIBUTE: 0
+  EXTRACT_PERSON_INFO: 0
   COUNT_OBJECTS: 0
   COUNT_PEOPLE: 0
+  PICK_OBJECT: 0
+  PLACE_OBJECT: 0
+  HANDOVER_OBJECT: 0
+  FOLLOW_PERSON: 0
+  GUIDE_PERSON: 0
   SAY: 0
+  ASK_AND_LISTEN: 0
 actions:
   execute_action_queue: /execute_action_queue

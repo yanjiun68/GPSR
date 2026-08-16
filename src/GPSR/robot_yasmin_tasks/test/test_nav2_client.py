@@ -89,7 +89,7 @@ def test_named_navigation_requires_confirmed_success() -> None:
     client = real_client_with(fake)
     blackboard = Blackboard()
     action = ActionStepData(
-        "RETURN_TO_INSTRUCTION_POINT",
+        "NAVIGATE",
         target_location="instruction_point",
         timeout_sec=10.0,
     )

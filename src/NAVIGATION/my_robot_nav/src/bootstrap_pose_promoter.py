@@ -8,7 +8,13 @@ from geometry_msgs.msg import PoseWithCovarianceStamped
 from rclpy.duration import Duration
 from rclpy.node import Node
 from rclpy.time import Time
-from tf2_ros import Buffer, ConnectivityException, ExtrapolationException, LookupException, TransformListener
+from tf2_ros import (
+    Buffer,
+    ConnectivityException,
+    ExtrapolationException,
+    LookupException,
+    TransformListener,
+)
 
 
 def _yaw_from_pose(msg: PoseWithCovarianceStamped) -> float:
@@ -34,8 +40,9 @@ class BootstrapPosePromoter(Node):
         self.declare_parameter('publish_interval_sec', 0.3)
         self.declare_parameter('odom_frame', 'odom')
         self.declare_parameter('base_frame', 'base_footprint')
-        self.declare_parameter('max_correction_distance', 0.35)
-        self.declare_parameter('max_correction_yaw', 0.35)
+        # Section: Conservative defaults prevent an otherwise valid manual seed entering a wall.
+        self.declare_parameter('max_correction_distance', 0.15)
+        self.declare_parameter('max_correction_yaw', 0.15)
         self.declare_parameter('tf_stamp_margin_sec', 0.10)
 
         self.seed_topic = self.get_parameter('seed_topic').value

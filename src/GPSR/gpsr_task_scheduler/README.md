@@ -29,7 +29,14 @@ Section: Full GPSR scheduler, executor, and CV perception launch.
 
 ```bash
 source install/setup.bash
-ros2 launch gpsr_task_scheduler gpsr_scheduler.launch.py dry_run:=false start_executor:=true start_count_people_pipeline:=true start_count_objects_pipeline:=true
+ros2 launch gpsr_task_scheduler gpsr_scheduler.launch.py \
+  dry_run:=false \
+  start_executor:=true \
+  start_find_object_pipeline:=true \
+  start_count_objects_pipeline:=true \
+  start_count_people_pipeline:=true \
+  start_find_person_pipeline:=true \
+  start_find_person_attribute_pipeline:=true
 ```
 
 This starts the scheduler, the central GPSR lifecycle manager, `/execute_action_queue`,
@@ -37,6 +44,63 @@ This starts the scheduler, the central GPSR lifecycle manager, `/execute_action_
 and the transient person/object/pose detector nodes. The transient nodes start
 `UNCONFIGURED`; the manager activates only the selected state-machine resource group and
 returns it to `UNCONFIGURED` before the queue advances.
+
+Section: Runtime state-machine selection.
+
+```text
+/gpsr/command
+      |
+      v
+scheduler parser and planner
+      |
+      v
+ActionStep.action_type
+      |
+      v
+executor dispatcher -> matching SkillSM
+      |
+      v
+lifecycle manager -> configure -> activate -> execute -> deactivate -> cleanup
+```
+
+Every pipeline switch defaults to `true`, so the single scheduler launch can accept any
+implemented perception command without a restart. `FIND_OBJECT` and `COUNT_OBJECTS` have
+independent switches but share one `/gpsr_object_detection_node`; the detector process starts
+when either pipeline is enabled. Lifecycle activation still occurs only for the state machine
+selected by the executor.
+
+Section: Primitive-only ActionQueue vocabulary.
+
+Natural-language verbs are parser aliases and never enter `ActionStep.action_type`. The
+planner emits only the canonical primitives declared as constants in
+`robot_ai_interfaces/msg/ActionStep` and registered in
+`robot_yasmin_tasks/config/skill_registry.yaml`. Compound commands such as `take` and
+`bring` are expanded into ordered find, pick, navigate, and handover primitives by the
+planner. If any required primitive is not a real production-enabled capability, the plan is
+retained for diagnostics but rejected with `primitive_unavailable` before queue submission.
+
+Temporary queue aliases (`PICK`, `PLACE`, `GIVE`, `FOLLOW`, `GUIDE`, `ASK`, `REPORT`,
+`GREET`, and `RETURN_TO_INSTRUCTION_POINT`) are normalized at executor admission and emit a
+deprecation warning. Newly generated scheduler queues use only explicit primitive names.
+
+Name and attribute person searches use separate symbolic actions and lifecycle groups:
+
+```text
+selector.type=name
+      |
+      v
+FIND_PERSON -> FIND_PERSON_SKILL_SM
+
+selector.type=pose|gesture|any_person
+      |
+      v
+FIND_PERSON_BY_ATTRIBUTE -> FIND_PERSON_BY_ATTRIBUTE_SM
+```
+
+`start_find_person_pipeline` controls face identity and verbal confirmation.
+`start_find_person_attribute_pipeline` independently controls the shared human detector,
+MediaPipe pose detector, and real `/perception/human_poses` attribute evidence. A disabled
+route fails lifecycle preparation with `skill_unavailable`; it never uses simulated success.
 
 Section: Required dependent nodes for full execution.
 
@@ -55,15 +119,42 @@ bounded attempt. Configure this behavior with `enable_error_recovery`,
 indefinitely. `executor_goal_response_timeout_sec` controls the executor acknowledgement wait
 and defaults to 30 seconds. Dry-run startup always skips physical initial navigation.
 
-Re-arm recovery after an exhausted attempt budget:
+Reset an exhausted or unwanted `ERROR` state back to command intake:
 
 ```bash
 ros2 service call /gpsr/reset_state std_srvs/srv/Trigger "{}"
 ```
 
-The service accepts only while the scheduler is `ERROR`. It does not force
-`WAITING_FOR_COMMAND`; it clears the recovery attempt budget and requires a verified return
-through `RECOVERING_TO_INSTRUCTION_POINT` before command intake reopens.
+The service accepts only while the scheduler is `ERROR`. It clears stale command ownership
+and changes the cycle directly to `WAITING_FOR_COMMAND`; it does not command recovery motion.
+
+Section: YASMIN scheduler-cycle viewer.
+
+```text
+INITIALIZING -> GO_TO_INSTRUCTION_POINT -> WAITING_FOR_COMMAND
+                                           |
+                                           v
+                                     PLANNING -> EXECUTING
+                                           |          |
+                                           |          v
+                                           +----> RETURNING_TO_INSTRUCTION_POINT
+                                                        | failure
+                                                        v
+                                                      ERROR
+                                                        | /gpsr/reset_state
+                                                        v
+                                               WAITING_FOR_COMMAND
+```
+
+`gpsr_scheduler.launch.py` publishes this supervisory machine as
+`GPSR_SCHEDULER_CYCLE` on `/fsm_viewer` by default. Start the web viewer with:
+
+```bash
+ros2 run yasmin_viewer yasmin_viewer_node
+```
+
+Open `http://localhost:5000`, then select `GPSR_SCHEDULER_CYCLE`. Set
+`enable_scheduler_viewer:=false` only when visualization is not wanted.
 
 Section: Dry-run command example.
 
@@ -127,4 +218,4 @@ SAY(text='I counted {result.count} people.')
 
 Section: Launch parameters.
 
-The scheduler launch exposes `use_sim_time`, `dry_run`, `command_input_mode`, `command_topic`, `schedule_command_service`, `start_executor`, `start_count_people_pipeline`, `start_count_objects_pipeline`, `start_voice_tts`, `rgb_topic`, `show_gui`, `enable_count_report_tts`, `yolo_model_path`, `confirmation_window_sec`, `confirmation_required_ratio`, `confirmation_confidence_threshold`, `confirmation_last_seen_timeout_sec`, `confirmation_min_frames`, `instruction_point`, `return_after_completion`, `return_after_failure`, `navigation_action`, `find_object_action`, `find_person_action`, `tts_action`, `default_skill_timeout_sec`, `default_skill_retries`, `enable_navigation`, `enable_perception`, `enable_manipulation`, `enable_tts`, `enable_error_recovery`, `error_recovery_max_attempts`, and `error_recovery_retry_delay_sec`.
+The scheduler launch exposes `use_sim_time`, `dry_run`, `command_input_mode`, `command_topic`, `schedule_command_service`, `start_executor`, `start_find_object_pipeline`, `start_count_people_pipeline`, `start_count_objects_pipeline`, `start_find_person_pipeline`, `start_find_person_attribute_pipeline`, `start_voice_tts`, `start_voice_stt`, `rgb_topic`, `depth_topic`, `camera_info_topic`, `show_gui`, `enable_count_report_tts`, `yolo_model_path`, `confirmation_window_sec`, `confirmation_required_ratio`, `confirmation_confidence_threshold`, `confirmation_last_seen_timeout_sec`, `confirmation_min_frames`, `instruction_point`, `return_after_completion`, `return_after_failure`, `navigation_action`, `find_object_action`, `find_person_action`, `tts_action`, `default_skill_timeout_sec`, `default_skill_retries`, `enable_navigation`, `enable_perception`, `enable_manipulation`, `enable_tts`, `enable_scheduler_viewer`, `enable_error_recovery`, `error_recovery_max_attempts`, and `error_recovery_retry_delay_sec`.

@@ -1,5 +1,5 @@
    #ifndef COMMANDS_H
-  #define COMMANDS_H
+   #define COMMANDS_H
   
   // ----- Basic I/O commands -----
   #define ANALOG_READ        'a'

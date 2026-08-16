@@ -1,4 +1,4 @@
-"""Section: Two-mode FIND_PERSON identity-resolution state machine."""
+"""Section: Name-only FIND_PERSON identity-resolution state machine."""
 
 from __future__ import annotations
 
@@ -21,7 +21,6 @@ from robot_yasmin_tasks.gpsr.outcomes import (
     TIMEOUT,
 )
 from robot_yasmin_tasks.ros_clients.find_person_clients import FindPersonClients
-from robot_yasmin_tasks.ros_clients.perception_clients import PerceptionClients
 
 
 # Section: Private task-local keys prevent partially resolved identities leaking to consumers.
@@ -167,11 +166,11 @@ def _store_result(
 
 
 class ValidateAndRouteState(State):
-    """Special function: Validate selector input and choose name or legacy behavior."""
+    """Special function: Validate that FIND_PERSON carries only a name selector."""
 
     def __init__(self) -> None:
         """Special function: Declare the initial routing outcomes."""
-        super().__init__(["name", "legacy", INVALID_INPUT, CANCELED])
+        super().__init__(["name", INVALID_INPUT, CANCELED])
 
     def execute(self, blackboard: Blackboard) -> str:
         """Special function: Normalize FIND_PERSON goal fields and initialize task-local state."""
@@ -196,24 +195,26 @@ class ValidateAndRouteState(State):
         if selector_type == "name":
             target_name = str(selector_value or action.target_person).strip()
         elif selector_type:
-            target_name = ""
+            _store_result(
+                blackboard,
+                action,
+                INVALID_INPUT,
+                f"FIND_PERSON accepts only a name selector, not '{selector_type}'.",
+                fatal=True,
+            )
+            return INVALID_INPUT
         else:
             target_name = str(action.target_person).strip()
         if selector_type == "name" and not target_name:
             _store_result(blackboard, action, INVALID_INPUT, "Name selector requires a non-empty value.", fatal=True)
             return INVALID_INPUT
-        # Section: Existing description, pose, gesture, clothing, and any-person selectors stay on legacy behavior.
-        has_legacy_selector = bool(
-            action.parameters.get("description") or
-            action.target_location or
-            (selector_type and selector_type != "name")
-        )
-        if not target_name and not has_legacy_selector:
+        # Section: Empty or description-only calls cannot enter identity resolution.
+        if not target_name:
             _store_result(
                 blackboard,
                 action,
                 INVALID_INPUT,
-                "FIND_PERSON requires a name or an existing non-name selector.",
+                "FIND_PERSON requires a non-empty name selector.",
                 fatal=True,
             )
             return INVALID_INPUT
@@ -225,41 +226,8 @@ class ValidateAndRouteState(State):
             "confirmed": None,
         }
         blackboard[FALLBACK_REASON] = ""
-        if target_name:
-            blackboard[TARGET_NAME] = target_name
-            return "name"
-        return "legacy"
-
-
-class LegacySelectorState(State):
-    """Special function: Preserve the existing non-name FIND_PERSON callback contract."""
-
-    def __init__(self, legacy_client: PerceptionClients) -> None:
-        """Special function: Store the unchanged legacy perception client."""
-        super().__init__(SKILL_OUTCOMES)
-        self.legacy_client = legacy_client
-
-    def execute(self, blackboard: Blackboard) -> str:
-        """Special function: Execute pose, gesture, clothing, description, or any-person selection."""
-        action = normalize_action_step(bb_get(blackboard, bb.CURRENT_ACTION, {}))
-        if _is_canceled(blackboard):
-            return _store_result(blackboard, action, CANCELED, "FIND_PERSON canceled.", fatal=True)
-        try:
-            result = self.legacy_client.find_person(blackboard, action)
-        except Exception as exc:  # noqa: BLE001
-            return _store_result(
-                blackboard,
-                action,
-                FAILED,
-                f"Legacy person selector failed: {exc}",
-                recoverable=True,
-            )
-        result_dict = result.to_dict() if hasattr(result, "to_dict") else dict(result)
-        blackboard[bb.LAST_SKILL_RESULT] = result_dict
-        outcome = str(result_dict.get("outcome", FAILED))
-        blackboard[bb.DISPATCH_OUTCOME] = outcome
-        _clear_task_state(blackboard)
-        return outcome
+        blackboard[TARGET_NAME] = target_name
+        return "name"
 
 
 class CheckProfileState(State):
@@ -554,34 +522,25 @@ class EnrollAndStoreState(State):
 
 
 class FindPersonSkillSM(StateMachine):
-    """Special function: Route FIND_PERSON between registered and verbal identity resolution."""
+    """Special function: Resolve a named person by registered or verbal identity."""
 
     def __init__(
         self,
         client: FindPersonClients | None = None,
-        legacy_client: PerceptionClients | None = None,
     ) -> None:
         """Special function: Build the explicit two-mode YASMIN state graph."""
         super().__init__(outcomes=SKILL_OUTCOMES)
         self.set_name("FIND_PERSON_SKILL_SM")
         identity_client = client or FindPersonClients()
-        legacy = legacy_client or PerceptionClients()
-        # Section: Validation preserves legacy selectors and routes names to identity mode selection.
+        # Section: Validation admits only names before identity mode selection.
         self.add_state(
             "VALIDATE_AND_ROUTE",
             ValidateAndRouteState(),
             transitions={
                 "name": "CHECK_PROFILE",
-                "legacy": "LEGACY_SELECTOR",
                 INVALID_INPUT: INVALID_INPUT,
                 CANCELED: CANCELED,
             },
-        )
-        # Section: Non-name selection retains the original implementation and outcomes.
-        self.add_state(
-            "LEGACY_SELECTOR",
-            LegacySelectorState(legacy),
-            transitions={outcome: outcome for outcome in SKILL_OUTCOMES},
         )
         # Section: Profile availability is the sole deterministic identity-mode decision.
         self.add_state(

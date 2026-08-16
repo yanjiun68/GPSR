@@ -1,0 +1,6 @@
+# Section: Return every GPSR guest record in insertion order.
+---
+bool success
+robot_ai_interfaces/GpsrGuestRecord[] records
+string active_memory_id
+string message

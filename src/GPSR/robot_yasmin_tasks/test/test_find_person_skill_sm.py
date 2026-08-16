@@ -8,8 +8,8 @@ from typing import Any
 from yasmin import Blackboard
 
 from robot_yasmin_tasks.gpsr import blackboard_keys as bb
-from robot_yasmin_tasks.gpsr.models import ActionStepData, make_skill_result
-from robot_yasmin_tasks.gpsr.outcomes import CANCELED, NOT_FOUND, SUCCESS, TIMEOUT
+from robot_yasmin_tasks.gpsr.models import ActionStepData
+from robot_yasmin_tasks.gpsr.outcomes import CANCELED, INVALID_INPUT, NOT_FOUND, SUCCESS, TIMEOUT
 from robot_yasmin_tasks.skills.find_person_skill_sm import (
     FindPersonSkillSM,
     classify_binary_confirmation,
@@ -70,20 +70,6 @@ class FakeIdentityClient:
         """Special function: Count and return the scripted best-effort enrollment result."""
         self.enrollment_calls += 1
         return dict(self.enrollment)
-
-
-class LegacySelectorSpy:
-    """Special function: Verify non-name selectors retain their original client path."""
-
-    def __init__(self) -> None:
-        """Special function: Initialize the legacy call counter."""
-        self.calls = 0
-
-    def find_person(self, blackboard: Blackboard, action: ActionStepData) -> Any:
-        """Special function: Store the legacy target exactly like the prior placeholder."""
-        self.calls += 1
-        blackboard[bb.TARGET_PERSON] = action.parameters.get("description", "person")
-        return make_skill_result(action.action_type, SUCCESS, "Legacy selector completed.")
 
 
 def run_name_skill(
@@ -249,10 +235,9 @@ def test_enrollment_failure_keeps_confirmed_person_success() -> None:
     assert blackboard[bb.LAST_SKILL_RESULT]["result"]["warning"] == "PROFILE_ENROLLMENT_FAILED"
 
 
-def test_non_name_selector_regression_uses_legacy_client() -> None:
-    """Special function: Clothing/description selection does not enter identity resolution."""
+def test_non_name_selector_is_rejected_by_name_skill() -> None:
+    """Special function: Clothing selection cannot enter name identity resolution."""
     identity = FakeIdentityClient()
-    legacy = LegacySelectorSpy()
     blackboard = Blackboard()
     blackboard[bb.CURRENT_ACTION] = ActionStepData(
         "FIND_PERSON",
@@ -262,17 +247,15 @@ def test_non_name_selector_regression_uses_legacy_client() -> None:
         },
     )
 
-    outcome = FindPersonSkillSM(identity, legacy)(blackboard)
+    outcome = FindPersonSkillSM(identity)(blackboard)
 
-    assert outcome == SUCCESS
-    assert legacy.calls == 1
+    assert outcome == INVALID_INPUT
     assert identity.enrollment_calls == 0
 
 
-def test_structured_non_name_selector_overrides_legacy_target_person_field() -> None:
-    """Special function: Explicit gesture selection cannot accidentally enter name mode."""
+def test_mixed_name_and_gesture_selector_is_rejected() -> None:
+    """Special function: Explicit gesture plus target name cannot enter either hidden route."""
     identity = FakeIdentityClient()
-    legacy = LegacySelectorSpy()
     blackboard = Blackboard()
     blackboard[bb.CURRENT_ACTION] = ActionStepData(
         "FIND_PERSON",
@@ -280,27 +263,24 @@ def test_structured_non_name_selector_overrides_legacy_target_person_field() -> 
         parameters={"selector": {"type": "gesture", "value": "waving"}},
     )
 
-    outcome = FindPersonSkillSM(identity, legacy)(blackboard)
+    outcome = FindPersonSkillSM(identity)(blackboard)
 
-    assert outcome == SUCCESS
-    assert legacy.calls == 1
+    assert outcome == INVALID_INPUT
     assert identity.enrollment_calls == 0
 
 
-def test_pose_selector_regression_uses_legacy_client() -> None:
-    """Special function: Standing-person pose selection retains the existing path."""
+def test_pose_selector_is_rejected_by_name_skill() -> None:
+    """Special function: Pose selection must use FIND_PERSON_BY_ATTRIBUTE instead."""
     identity = FakeIdentityClient()
-    legacy = LegacySelectorSpy()
     blackboard = Blackboard()
     blackboard[bb.CURRENT_ACTION] = ActionStepData(
         "FIND_PERSON",
         parameters={"selector": {"type": "pose", "value": "standing"}},
     )
 
-    outcome = FindPersonSkillSM(identity, legacy)(blackboard)
+    outcome = FindPersonSkillSM(identity)(blackboard)
 
-    assert outcome == SUCCESS
-    assert legacy.calls == 1
+    assert outcome == INVALID_INPUT
     assert identity.enrollment_calls == 0
 
 

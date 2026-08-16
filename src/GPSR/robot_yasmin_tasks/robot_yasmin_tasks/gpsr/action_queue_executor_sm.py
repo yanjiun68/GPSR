@@ -15,7 +15,12 @@ from yasmin_viewer import YasminViewerPub
 
 from robot_yasmin_tasks.gpsr import blackboard_keys as bb
 from robot_yasmin_tasks.gpsr.action_dispatcher_state import ActionDispatcherState
-from robot_yasmin_tasks.gpsr.action_types import ALLOWED_ACTION_TYPES
+from robot_yasmin_tasks.gpsr.action_types import (
+    ALLOWED_ACTION_TYPES,
+    PrimitiveCapability,
+    load_primitive_registry,
+    unavailable_primitives,
+)
 from robot_yasmin_tasks.gpsr.blackboard_utils import bb_get
 from robot_yasmin_tasks.gpsr.models import make_skill_result, normalize_action_step
 from robot_yasmin_tasks.gpsr.outcomes import (
@@ -24,6 +29,7 @@ from robot_yasmin_tasks.gpsr.outcomes import (
     FAILED,
     INVALID_INPUT,
     RECOVERABLE_FAILURE,
+    SKILL_UNAVAILABLE,
     SUCCESS,
     is_recoverable,
 )
@@ -92,9 +98,17 @@ class CheckQueueState(State):
 class SelectNextActionState(State):
     """Special function: Select the next action from the queue."""
 
-    def __init__(self) -> None:
-        """Special function: Declare selection outcomes."""
+    def __init__(
+        self,
+        capability_registry: dict[str, PrimitiveCapability] | None = None,
+        allow_simulated: bool = False,
+        warning_logger: Callable[[str], None] | None = None,
+    ) -> None:
+        """Special function: Declare selection outcomes and fail-closed capability policy."""
         super().__init__([SUCCESS, INVALID_INPUT])
+        self.capability_registry = capability_registry or load_primitive_registry()
+        self.allow_simulated = bool(allow_simulated)
+        self.warning_logger = warning_logger
 
     def execute(self, blackboard: Blackboard) -> str:
         """Special function: Store CURRENT_ACTION from the committed queue index."""
@@ -108,8 +122,23 @@ class SelectNextActionState(State):
             return INVALID_INPUT
         action = normalize_action_step(queue[index])
         blackboard[bb.CURRENT_ACTION] = action
+        legacy = str(action.parameters.get("_legacy_action_type", ""))
+        if legacy and self.warning_logger is not None:
+            self.warning_logger(
+                f"Deprecated GPSR action '{legacy}' normalized to '{action.action_type}'."
+            )
         if action.action_type not in ALLOWED_ACTION_TYPES:
             blackboard[bb.FAILURE_REASON] = f"Action type {action.action_type} is not allowed."
+            return INVALID_INPUT
+        unavailable = unavailable_primitives(
+            [action.action_type],
+            self.capability_registry,
+            self.allow_simulated,
+        )
+        if unavailable:
+            blackboard[bb.FAILURE_REASON] = (
+                f"Primitive unavailable in this executor mode: {unavailable}."
+            )
             return INVALID_INPUT
         return SUCCESS
 
@@ -192,11 +221,13 @@ class StartSkillResourcesState(State):
         cleanup_confirmed = bool(
             bb_get(blackboard, bb.START_CLEANUP_CONFIRMED, True)
         )
-        outcome = (
-            CANCELED
-            if self._cancel_requested(blackboard) and cleanup_confirmed
-            else FATAL_FAILURE
-        )
+        # Section: Distinguish an absent launch-time capability from uncertain teardown.
+        if self._cancel_requested(blackboard) and cleanup_confirmed:
+            outcome = CANCELED
+        elif not cleanup_confirmed:
+            outcome = FATAL_FAILURE
+        else:
+            outcome = SKILL_UNAVAILABLE
         result = make_skill_result(
             action.action_type,
             outcome,
@@ -366,6 +397,9 @@ class ActionQueueExecutorSM(StateMachine):
         self,
         factories: dict[str, Callable[[], Any]] | None = None,
         resource_manager: Any | None = None,
+        capability_registry: dict[str, PrimitiveCapability] | None = None,
+        allow_simulated: bool = False,
+        warning_logger: Callable[[str], None] | None = None,
     ) -> None:
         """Special function: Extend the existing graph without replacing its dispatcher."""
         super().__init__(
@@ -374,6 +408,7 @@ class ActionQueueExecutorSM(StateMachine):
         )
         dispatcher = ActionDispatcherState(factories)
         resources = resource_manager or NullSkillResourceManager()
+        registry = capability_registry or load_primitive_registry()
 
         # Section: Start and stop states surround every dispatch, including retries.
         self.add_state(
@@ -383,7 +418,7 @@ class ActionQueueExecutorSM(StateMachine):
         )
         self.add_state(
             "SELECT_NEXT_ACTION",
-            SelectNextActionState(),
+            SelectNextActionState(registry, allow_simulated, warning_logger),
             transitions={SUCCESS: "CHECK_PREREQUISITES", INVALID_INPUT: INVALID_INPUT},
         )
         self.add_state(
@@ -450,19 +485,22 @@ def main() -> None:
     from robot_ai_interfaces.msg import SkillResult
     from robot_yasmin_tasks.gpsr.action_dispatcher_state import ACTION_TYPE_TO_SKILL
     from robot_yasmin_tasks.gpsr.action_types import (
-        ASK,
+        ASK_AND_LISTEN,
         COUNT_OBJECTS,
         COUNT_PEOPLE,
+        EXTRACT_PERSON_INFO,
         FIND_OBJECT,
         FIND_PERSON,
-        GREET,
+        FIND_PERSON_BY_ATTRIBUTE,
         NAVIGATE,
-        REPORT,
-        RETURN_TO_INSTRUCTION_POINT,
         SAY,
     )
     from robot_yasmin_tasks.ros_clients.dialogue_clients import DialogueClients
     from robot_yasmin_tasks.ros_clients.find_person_clients import FindPersonClients
+    from robot_yasmin_tasks.ros_clients.person_attribute_action_clients import (
+        ExtractGuestInfoActionClient,
+        FindPersonByAttributeActionClient,
+    )
     from robot_yasmin_tasks.ros_clients.lifecycle_client import LifecycleSkillResourceClient
     from robot_yasmin_tasks.ros_clients.nav2_client import Nav2Client
     from robot_yasmin_tasks.ros_clients.perception_clients import PerceptionClients
@@ -471,38 +509,52 @@ def main() -> None:
     from robot_yasmin_tasks.skills.count_people_skill_sm import CountPeopleSkillSM
     from robot_yasmin_tasks.skills.dialogue_skill_sm import DialogueSkillSM
     from robot_yasmin_tasks.skills.find_object_skill_sm import FindObjectSkillSM
+    from robot_yasmin_tasks.skills.find_person_by_attribute_sm import FindPersonByAttributeSM
+    from robot_yasmin_tasks.skills.extract_person_info_skill_sm import ExtractPersonInfoSkillSM
     from robot_yasmin_tasks.skills.find_person_skill_sm import FindPersonSkillSM
-    from robot_yasmin_tasks.skills.greet_person_skill_sm import GreetPersonClient, GreetPersonSkillSM
     from robot_yasmin_tasks.skills.navigation_skill_sm import NavigationSkillSM
-    from robot_yasmin_tasks.skills.report_skill_sm import ReportClient, ReportSkillSM
-    from robot_yasmin_tasks.skills.return_instruction_point_sm import ReturnInstructionPointClient, ReturnInstructionPointSM
     from robot_yasmin_tasks.skills.speech_skill_sm import SpeechSkillSM
 
     # Section: Persistent executor clients remain shared while skill stacks are ephemeral.
     rclpy.init()
     node = rclpy.create_node("gpsr_executor")
+    node.declare_parameter("skill_registry_file", "")
+    node.declare_parameter("allow_simulated_primitives", False)
+    registry_file = str(node.get_parameter("skill_registry_file").value).strip()
+    capability_registry = load_primitive_registry(registry_file or None)
     speech = SpeechClients(node=node, simulate=False)
     dialogue = DialogueClients(node=node, simulate=False, speech_client=speech)
     perception = PerceptionClients(node=node, simulate=False)
     # Section: FIND_PERSON reuses the persistent face identity and shared TTS/STT clients.
     find_person = FindPersonClients(node=node, simulate=False, dialogue=dialogue)
+    # Section: Thin clients forward person work to lifecycle servers that own the real state machines.
+    find_person_attribute = FindPersonByAttributeActionClient(node=node)
+    extract_guest_info = ExtractGuestInfoActionClient(node=node)
     navigation = Nav2Client(node=node, simulate=False)
     resources = LifecycleSkillResourceClient(node=node)
     factories = dict(ACTION_TYPE_TO_SKILL)
     factories[SAY] = lambda: SpeechSkillSM(speech)
-    factories[ASK] = lambda: DialogueSkillSM(dialogue)
-    factories[GREET] = lambda: GreetPersonSkillSM(GreetPersonClient(speech))
-    factories[REPORT] = lambda: ReportSkillSM(ReportClient(speech))
+    factories[ASK_AND_LISTEN] = lambda: DialogueSkillSM(dialogue)
     factories[NAVIGATE] = lambda: NavigationSkillSM(navigation)
-    factories[RETURN_TO_INSTRUCTION_POINT] = lambda: ReturnInstructionPointSM(
-        ReturnInstructionPointClient(navigation)
-    )
     factories[FIND_OBJECT] = lambda: FindObjectSkillSM(node=node)
-    factories[FIND_PERSON] = lambda: FindPersonSkillSM(find_person, perception)
+    # Section: Persistent person state machines make mutually exclusive routing visible in YASMIN Viewer.
+    find_person_sm = FindPersonSkillSM(find_person)
+    find_person_attribute_sm = FindPersonByAttributeSM(find_person_attribute)
+    factories[FIND_PERSON] = lambda: find_person_sm
+    factories[FIND_PERSON_BY_ATTRIBUTE] = lambda: find_person_attribute_sm
+    factories[EXTRACT_PERSON_INFO] = lambda: ExtractPersonInfoSkillSM(extract_guest_info)
     factories[COUNT_OBJECTS] = lambda: CountObjectsSkillSM(perception)
     factories[COUNT_PEOPLE] = lambda: CountPeopleSkillSM(perception)
-    sm = ActionQueueExecutorSM(factories, resources)
-    YasminViewerPub(sm, "GPSR_ACTION_QUEUE_EXECUTOR")
+    sm = ActionQueueExecutorSM(
+        factories,
+        resources,
+        capability_registry,
+        bool(node.get_parameter("allow_simulated_primitives").value),
+        node.get_logger().warn,
+    )
+    YasminViewerPub(sm, "GPSR_ACTION_QUEUE_EXECUTOR", node=node)
+    YasminViewerPub(find_person_sm, "GPSR_FIND_PERSON_BY_NAME", node=node)
+    YasminViewerPub(find_person_attribute_sm, "GPSR_FIND_PERSON_BY_ATTRIBUTE", node=node)
 
     # Section: Goal admission is serialized independently of executor thread count.
     admission = QueueAdmissionGuard()

@@ -10,7 +10,7 @@ from robot_yasmin_tasks.gpsr.action_queue_executor_sm import (
 )
 from robot_yasmin_tasks.gpsr.blackboard_utils import bb_get
 from robot_yasmin_tasks.gpsr.models import make_skill_result
-from robot_yasmin_tasks.gpsr.outcomes import CANCELED, FATAL_FAILURE, FAILED, SUCCESS, TIMEOUT
+from robot_yasmin_tasks.gpsr.outcomes import CANCELED, FATAL_FAILURE, FAILED, INVALID_INPUT, SKILL_UNAVAILABLE, SUCCESS, TIMEOUT
 
 
 class SequenceSkill:
@@ -54,6 +54,28 @@ def test_select_next_action_normalizes_and_stores_current_action() -> None:
     assert selected.action_type == "FIND_OBJECT"
     assert selected.target_object == "bottle"
     assert selected.parameters["search_scope"] == "GLOBAL"
+
+
+def test_legacy_report_normalizes_to_say_with_warning() -> None:
+    """Special function: Temporary aliases normalize once at queue admission."""
+    warnings: list[str] = []
+    blackboard = Blackboard()
+    blackboard[bb.ACTION_QUEUE] = [{"action_type": "REPORT", "parameters": {"text": "Done."}}]
+    blackboard[bb.CURRENT_ACTION_INDEX] = 0
+    state = SelectNextActionState(warning_logger=warnings.append)
+    assert state.execute(blackboard) == SUCCESS
+    assert blackboard[bb.CURRENT_ACTION].action_type == "SAY"
+    assert blackboard[bb.CURRENT_ACTION].parameters["text"] == "Done."
+    assert "REPORT" in warnings[0] and "SAY" in warnings[0]
+
+
+def test_disabled_legacy_pick_is_rejected_before_dispatch() -> None:
+    """Special function: Legacy aliases cannot bypass production capability policy."""
+    blackboard = Blackboard()
+    blackboard[bb.ACTION_QUEUE] = [{"action_type": "PICK", "target_object": "coke"}]
+    blackboard[bb.CURRENT_ACTION_INDEX] = 0
+    assert SelectNextActionState().execute(blackboard) == INVALID_INPUT
+    assert "PICK_OBJECT" in blackboard[bb.FAILURE_REASON]
 
 
 def test_multiple_actions_execute_in_order() -> None:
@@ -171,6 +193,27 @@ def test_teardown_failure_does_not_advance_queue() -> None:
     assert ActionQueueExecutorSM(factories, resources)(blackboard) == FATAL_FAILURE
     assert blackboard[bb.CURRENT_ACTION_INDEX] == 0
     assert events == ["start:generation-1", "execute:COUNT_OBJECTS", "stop:generation-1"]
+
+
+def test_missing_launch_pipeline_reports_skill_unavailable() -> None:
+    """Special function: Failed lifecycle preparation exposes a capability-specific result."""
+    class MissingPipelineManager:
+        """Special function: Reject resource startup as if its launch switch were false."""
+
+        def start(self, _blackboard, _action_type):
+            """Special function: Return a confirmed absent-capability failure."""
+            return False, "required lifecycle node is unavailable"
+
+        def stop(self, _blackboard):
+            """Special function: Confirm that no partial resource generation remains."""
+            return True, "nothing prepared"
+
+    blackboard = Blackboard()
+    blackboard[bb.ACTION_QUEUE] = [{"action_type": "FIND_PERSON_BY_ATTRIBUTE"}]
+    outcome = ActionQueueExecutorSM({}, MissingPipelineManager())(blackboard)
+    assert outcome == FATAL_FAILURE
+    assert blackboard[bb.LAST_SKILL_RESULT]["outcome"] == SKILL_UNAVAILABLE
+    assert blackboard[bb.CURRENT_ACTION_INDEX] == 0
 
 
 def test_recoverable_retry_uses_fresh_generation() -> None:

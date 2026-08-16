@@ -1,4 +1,4 @@
-"""Section: PICK skill."""
+"""Section: PICK_OBJECT executable primitive skill."""
 from yasmin import Blackboard
 from robot_yasmin_tasks.gpsr import blackboard_keys as bb
 from robot_yasmin_tasks.gpsr.blackboard_utils import bb_get
@@ -21,5 +21,5 @@ def validate_pick(blackboard: Blackboard, action: ActionStepData) -> tuple[bool,
 class PickObjectSkillSM(SimpleSkillSM):
     """Special function: Pick object and update held_object."""
     def __init__(self, client: ManipulationClients | None = None) -> None:
-        """Special function: Build PICK state machine."""
+        """Special function: Build PICK_OBJECT state machine."""
         super().__init__("PICK_OBJECT_SKILL_SM", (client or ManipulationClients()).pick_object, validate_pick)

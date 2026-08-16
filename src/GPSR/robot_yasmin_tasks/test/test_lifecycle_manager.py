@@ -20,13 +20,48 @@ def test_registry_covers_every_dispatchable_skill_state_machine() -> None:
     assert set(registry) == ALLOWED_ACTION_TYPES
 
 
+def test_person_routes_use_real_disjoint_lifecycle_servers() -> None:
+    """Special function: Name and attribute actions cannot prepare through the other server."""
+    # Section: Load production policy rather than duplicating its node lists in the test.
+    manager = object.__new__(GpsrLifecycleManager)
+    registry_path = Path(__file__).parents[1] / "config" / "skill_registry.yaml"
+    registry = manager.load_registry(str(registry_path))
+    identity_nodes = set(registry["FIND_PERSON"].lifecycle_nodes)
+    attribute_nodes = set(registry["FIND_PERSON_BY_ATTRIBUTE"].lifecycle_nodes)
+    assert "/find_person_identity_resource" in identity_nodes
+    assert "/find_person_by_attribute_skill_server" in attribute_nodes
+    assert "/gpsr_tracked_appearance_node" in attribute_nodes
+    assert identity_nodes.isdisjoint(attribute_nodes)
+
+
+def test_extract_person_info_reuses_tracked_perception_and_owns_its_server() -> None:
+    """Special function: Extraction shares perception but dispatches through a dedicated server."""
+    manager = object.__new__(GpsrLifecycleManager)
+    registry_path = Path(__file__).parents[1] / "config" / "skill_registry.yaml"
+    registry = manager.load_registry(str(registry_path))
+    find_nodes = set(registry["FIND_PERSON_BY_ATTRIBUTE"].lifecycle_nodes)
+    extract_nodes = set(registry["EXTRACT_PERSON_INFO"].lifecycle_nodes)
+    assert {"/gpsr_human_identity_node", "/human_skeleton_detection_node", "/gpsr_tracked_appearance_node"} <= find_nodes & extract_nodes
+    assert "/extract_person_info_skill_server" in extract_nodes
+
+
 def test_registry_rejects_a_skill_without_lifecycle_policy(tmp_path: Path) -> None:
     """Special function: Prevent newly dispatched state machines from bypassing the manager."""
     registry_path = tmp_path / "incomplete_registry.yaml"
     registry_path.write_text('{"skills": {"SAY": {"lifecycle_nodes": []}}}', encoding="utf-8")
     manager = object.__new__(GpsrLifecycleManager)
-    with pytest.raises(RuntimeError, match="Lifecycle registry/action mismatch"):
+    with pytest.raises(RuntimeError, match="Primitive registry/action mismatch"):
         manager.load_registry(str(registry_path))
+
+
+def test_missing_physical_primitives_are_disabled_in_production() -> None:
+    """Special function: Registry metadata prevents simulation-only production success."""
+    manager = object.__new__(GpsrLifecycleManager)
+    registry_path = Path(__file__).parents[1] / "config" / "skill_registry.yaml"
+    registry = manager.load_registry(str(registry_path))
+    for primitive in {"PICK_OBJECT", "PLACE_OBJECT", "HANDOVER_OBJECT", "FOLLOW_PERSON", "GUIDE_PERSON"}:
+        assert registry[primitive].implementation == "missing"
+        assert registry[primitive].production_enabled is False
 
 
 class FakeLogger:

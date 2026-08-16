@@ -25,6 +25,8 @@ class TaskRequest:
     return_location: str | None
     target: dict[str, Any] = field(default_factory=dict)
     filters: list[dict[str, Any]] = field(default_factory=list)
+    person_selector: dict[str, Any] = field(default_factory=dict)
+    requested_person_fields: list[str] = field(default_factory=list)
     recipient: dict[str, Any] | None = None
     output_template: str | None = None
     return_after_completion: bool = False

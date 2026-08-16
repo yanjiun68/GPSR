@@ -56,6 +56,77 @@ def pose_delta(old_pose: Pose2D, new_pose: Pose2D) -> Pose2D:
     return pose_compose(pose_inverse(old_pose), new_pose)
 
 
+# Section: Pure bootstrap helpers kept outside the ROS node for deterministic testing.
+def predict_pose_from_anchors(
+    seed_map_pose: Pose2D,
+    seed_odom_pose: Pose2D | None,
+    current_odom_pose: Pose2D | None,
+) -> Pose2D:
+    """Propagate one immutable map seed using only odometry accumulated since seeding."""
+    if seed_odom_pose is None or current_odom_pose is None:
+        return Pose2D(seed_map_pose.x, seed_map_pose.y, seed_map_pose.yaw)
+
+    odom_delta = pose_delta(seed_odom_pose, current_odom_pose)
+    return pose_compose(seed_map_pose, odom_delta)
+
+
+def correction_is_within_limits(
+    reference_pose: Pose2D,
+    candidate_pose: Pose2D,
+    max_distance: float,
+    max_yaw: float,
+) -> tuple[bool, float, float]:
+    """Return whether a scan-match correction stays inside the configured safety bounds."""
+    correction = pose_delta(reference_pose, candidate_pose)
+    correction_distance = math.hypot(correction.x, correction.y)
+    correction_yaw = abs(wrap_angle(correction.yaw))
+    accepted = correction_distance <= max_distance and correction_yaw <= max_yaw
+    return accepted, correction_distance, correction_yaw
+
+
+def pose_has_clearance(
+    unsafe_map: np.ndarray,
+    resolution: float,
+    origin_x: float,
+    origin_y: float,
+    pose: Pose2D,
+    minimum_clearance: float,
+) -> bool:
+    """Reject poses outside the map or within a circular clearance of unsafe cells."""
+    if unsafe_map.ndim != 2 or resolution <= 0.0:
+        return False
+
+    map_height, map_width = unsafe_map.shape
+    center_x = int(math.floor((pose.x - origin_x) / resolution))
+    center_y = int(math.floor((pose.y - origin_y) / resolution))
+    if center_x < 0 or center_x >= map_width or center_y < 0 or center_y >= map_height:
+        return False
+
+    clearance_cells = max(0, int(math.ceil(minimum_clearance / resolution)))
+    x_min = max(0, center_x - clearance_cells)
+    x_max = min(map_width - 1, center_x + clearance_cells)
+    y_min = max(0, center_y - clearance_cells)
+    y_max = min(map_height - 1, center_y + clearance_cells)
+
+    # Section: Treat clearance extending beyond the map as unsafe for initial localization.
+    if (
+        center_x - clearance_cells < 0
+        or center_x + clearance_cells >= map_width
+        or center_y - clearance_cells < 0
+        or center_y + clearance_cells >= map_height
+    ):
+        return False
+
+    local_unsafe = unsafe_map[y_min:y_max + 1, x_min:x_max + 1]
+    local_y, local_x = np.ogrid[y_min:y_max + 1, x_min:x_max + 1]
+    distance_squared = (
+        ((local_x - center_x) * resolution) ** 2
+        + ((local_y - center_y) * resolution) ** 2
+    )
+    clearance_mask = distance_squared <= minimum_clearance ** 2
+    return not bool(np.any(local_unsafe & clearance_mask))
+
+
 class LidarLocalizer(Node):
     def __init__(self):
         super().__init__('lidar_loc')
@@ -86,6 +157,13 @@ class LidarLocalizer(Node):
         self.declare_parameter('max_range', 12.0)
         self.declare_parameter('translation_penalty', 1.5)
         self.declare_parameter('rotation_penalty', 0.7)
+        # Section: Bound total refinement relative to the immutable manual seed prediction.
+        self.declare_parameter('max_correction_distance', 0.15)
+        self.declare_parameter('max_correction_yaw', 0.15)
+        self.declare_parameter('min_score_improvement_per_beam', 0.01)
+        # Section: Keep the full robot footprint plus margin away from static map obstacles.
+        self.declare_parameter('minimum_pose_clearance', 0.35)
+        self.declare_parameter('treat_unknown_as_occupied', True)
 
         self.map_frame = self.get_parameter('map_frame').value
         self.odom_frame = self.get_parameter('odom_frame').value
@@ -109,16 +187,38 @@ class LidarLocalizer(Node):
         self.max_range = float(self.get_parameter('max_range').value)
         self.translation_penalty = float(self.get_parameter('translation_penalty').value)
         self.rotation_penalty = float(self.get_parameter('rotation_penalty').value)
+        self.max_correction_distance = max(
+            0.0,
+            float(self.get_parameter('max_correction_distance').value),
+        )
+        self.max_correction_yaw = max(
+            0.0,
+            float(self.get_parameter('max_correction_yaw').value),
+        )
+        self.min_score_improvement_per_beam = float(
+            self.get_parameter('min_score_improvement_per_beam').value
+        )
+        self.minimum_pose_clearance = max(
+            0.0,
+            float(self.get_parameter('minimum_pose_clearance').value),
+        )
+        self.treat_unknown_as_occupied = bool(
+            self.get_parameter('treat_unknown_as_occupied').value
+        )
 
         self.weight_map = None
+        self.unsafe_map = None
         self.map_resolution = None
         self.map_origin_x = None
         self.map_origin_y = None
         self.map_width = None
         self.map_height = None
         self.current_odom_pose = None
-        self.last_odom_pose = None
+        # Section: These anchors remain fixed for one complete bootstrap session.
+        self.seed_map_pose = None
+        self.seed_odom_pose = None
         self.map_to_base_pose = None
+        self.best_refined_score = -math.inf
         self.have_initial_pose = False
         self.initial_pose_time_sec = None
         self.last_scan_time_ns = None
@@ -171,6 +271,7 @@ class LidarLocalizer(Node):
         height = msg.info.height
         data = np.asarray(msg.data, dtype=np.int16).reshape((height, width))
         occupied = data >= self.occupied_threshold
+        unknown = data < 0
         weight_map = self.build_weight_map(occupied, msg.info.resolution)
 
         self.map_width = width
@@ -179,6 +280,7 @@ class LidarLocalizer(Node):
         self.map_origin_x = float(msg.info.origin.position.x)
         self.map_origin_y = float(msg.info.origin.position.y)
         self.weight_map = weight_map
+        self.unsafe_map = occupied | unknown if self.treat_unknown_as_occupied else occupied
 
         self.get_logger().info(
             f'Loaded map for lidar localization: {width}x{height} @ {self.map_resolution:.4f} m'
@@ -187,14 +289,19 @@ class LidarLocalizer(Node):
     def build_weight_map(self, occupied: np.ndarray, resolution: float) -> np.ndarray:
         radius_m = float(self.get_parameter('score_radius').value)
         radius_cells = max(1, int(math.ceil(radius_m / resolution)))
-        kernel = np.zeros((radius_cells * 2 + 1, radius_cells * 2 + 1), dtype=np.float32)
+        kernel = np.zeros(
+            (radius_cells * 2 + 1, radius_cells * 2 + 1),
+            dtype=np.float32,
+        )
 
         for dy in range(-radius_cells, radius_cells + 1):
             for dx in range(-radius_cells, radius_cells + 1):
                 dist = math.hypot(dx, dy)
                 if dist > radius_cells:
                     continue
-                kernel[dy + radius_cells, dx + radius_cells] = 1.0 - (dist / max(1.0, radius_cells))
+                kernel[dy + radius_cells, dx + radius_cells] = 1.0 - (
+                    dist / max(1.0, radius_cells)
+                )
 
         weight_map = np.zeros_like(occupied, dtype=np.float32)
         ys, xs = np.nonzero(occupied)
@@ -227,25 +334,42 @@ class LidarLocalizer(Node):
             y=float(msg.pose.pose.position.y),
             yaw=yaw,
         )
+        # Section: Capture a late odometry anchor without changing an existing session anchor.
+        if self.have_initial_pose and self.seed_odom_pose is None:
+            self.seed_odom_pose = Pose2D(
+                self.current_odom_pose.x,
+                self.current_odom_pose.y,
+                self.current_odom_pose.yaw,
+            )
 
     def initial_pose_callback(self, msg: PoseWithCovarianceStamped):
         yaw = quat_to_yaw(
             msg.pose.pose.orientation.z,
             msg.pose.pose.orientation.w,
         )
-        self.map_to_base_pose = Pose2D(
+        seed_pose = Pose2D(
             x=float(msg.pose.pose.position.x),
             y=float(msg.pose.pose.position.y),
             yaw=yaw,
         )
-        self.last_odom_pose = self.current_odom_pose
+        # Section: Reset all refinement state and preserve immutable map/odom anchors.
+        self.seed_map_pose = seed_pose
+        self.seed_odom_pose = None if self.current_odom_pose is None else Pose2D(
+            self.current_odom_pose.x,
+            self.current_odom_pose.y,
+            self.current_odom_pose.yaw,
+        )
+        self.map_to_base_pose = seed_pose
+        self.best_refined_score = -math.inf
         self.have_initial_pose = True
         self.initial_pose_time_sec = self.get_clock().now().nanoseconds / 1e9
         if self.publish_tf:
             self.publish_transform(msg.header.stamp)
         self.get_logger().info(
             f'Seeded lidar localization from /initialpose: '
-            f'x={self.map_to_base_pose.x:.3f} y={self.map_to_base_pose.y:.3f} yaw={self.map_to_base_pose.yaw:.3f}'
+            f'x={self.map_to_base_pose.x:.3f} '
+            f'y={self.map_to_base_pose.y:.3f} '
+            f'yaw={self.map_to_base_pose.yaw:.3f}'
         )
 
     def scan_callback(self, msg: LaserScan):
@@ -264,6 +388,7 @@ class LidarLocalizer(Node):
         if beams is None:
             return
 
+        # Section: Always search around the original seed propagated by odometry.
         predicted_pose = self.predict_pose()
         coarse_pose, coarse_score = self.search_pose(
             predicted_pose,
@@ -283,14 +408,69 @@ class LidarLocalizer(Node):
         )
 
         if fine_score <= -1e8:
-            self.get_logger().warn('No valid lidar localization candidate found', throttle_duration_sec=2.0)
+            self.get_logger().warn(
+                'No valid lidar localization candidate found',
+                throttle_duration_sec=2.0,
+            )
             return
 
+        # Section: Reject accumulated or implausibly large corrections before map checks.
+        correction_ok, correction_distance, correction_yaw = correction_is_within_limits(
+            predicted_pose,
+            fine_pose,
+            self.max_correction_distance,
+            self.max_correction_yaw,
+        )
+        if not correction_ok:
+            self.get_logger().warn(
+                'Rejecting lidar bootstrap candidate outside correction limits: '
+                f'dxy={correction_distance:.3f} m, dyaw={correction_yaw:.3f} rad.',
+                throttle_duration_sec=1.0,
+            )
+            return
+
+        # Section: Require scan matching to improve alignment over the odometry prediction.
+        predicted_score = self.score_pose(predicted_pose, beams)
+        candidate_score = self.score_pose(fine_pose, beams)
+        score_improvement_per_beam = (candidate_score - predicted_score) / len(beams)
+        if score_improvement_per_beam < self.min_score_improvement_per_beam:
+            self.get_logger().warn(
+                'Rejecting lidar bootstrap candidate without sufficient score improvement: '
+                f'dscore/beam={score_improvement_per_beam:.4f}.',
+                throttle_duration_sec=1.0,
+            )
+            return
+
+        # Section: Never promote a pose whose robot footprint overlaps static/unknown map cells.
+        if self.unsafe_map is None or not pose_has_clearance(
+            self.unsafe_map,
+            self.map_resolution,
+            self.map_origin_x,
+            self.map_origin_y,
+            fine_pose,
+            self.minimum_pose_clearance,
+        ):
+            self.get_logger().warn(
+                'Rejecting lidar bootstrap candidate because static-map clearance is below '
+                f'{self.minimum_pose_clearance:.2f} m.',
+                throttle_duration_sec=1.0,
+            )
+            return
+
+        # Section: Publish only monotonically improving candidates so the promoter sees the best.
+        if candidate_score <= self.best_refined_score:
+            return
+
+        self.best_refined_score = candidate_score
         self.map_to_base_pose = fine_pose
-        self.last_odom_pose = self.current_odom_pose
         if self.publish_tf:
             self.publish_transform(msg.header.stamp)
-        self.publish_pose(msg.header.stamp, fine_score)
+        self.publish_pose(msg.header.stamp, candidate_score)
+        self.get_logger().info(
+            'Accepted safe lidar bootstrap candidate: '
+            f'dxy={correction_distance:.3f} m, dyaw={correction_yaw:.3f} rad, '
+            f'dscore/beam={score_improvement_per_beam:.4f}.'
+        )
 
     def scan_to_points(self, msg: LaserScan):
         valid_points = []
@@ -353,12 +533,14 @@ class LidarLocalizer(Node):
         return offset
 
     def predict_pose(self) -> Pose2D:
-        if self.last_odom_pose is None:
-            self.last_odom_pose = self.current_odom_pose
+        # Section: A fixed seed prevents small per-scan corrections from accumulating.
+        if self.seed_map_pose is None:
             return self.map_to_base_pose
-
-        delta = pose_delta(self.last_odom_pose, self.current_odom_pose)
-        return pose_compose(self.map_to_base_pose, delta)
+        return predict_pose_from_anchors(
+            self.seed_map_pose,
+            self.seed_odom_pose,
+            self.current_odom_pose,
+        )
 
     def search_pose(
         self,
@@ -397,6 +579,14 @@ class LidarLocalizer(Node):
                         )
 
         return best_pose, best_score
+
+    def score_pose(self, pose: Pose2D, beams: np.ndarray) -> float:
+        """Score one complete pose without search-offset penalties."""
+        cos_yaw = math.cos(pose.yaw)
+        sin_yaw = math.sin(pose.yaw)
+        world_x = pose.x + cos_yaw * beams[:, 0] - sin_yaw * beams[:, 1]
+        world_y = pose.y + sin_yaw * beams[:, 0] + cos_yaw * beams[:, 1]
+        return self.score_points(world_x, world_y)
 
     def score_points(self, world_x: np.ndarray, world_y: np.ndarray) -> float:
         map_x = ((world_x - self.map_origin_x) / self.map_resolution).astype(np.int32)

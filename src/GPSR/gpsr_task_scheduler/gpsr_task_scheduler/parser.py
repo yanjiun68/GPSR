@@ -11,32 +11,63 @@ from gpsr_task_scheduler.models import TaskRequest, ValidationIssue
 
 def parse_command(command_id: str, instruction: str, config: SchedulerConfig) -> tuple[TaskRequest | None, list[ValidationIssue]]:
     """Special function: Parse constrained GPSR text into semantic task roles."""
-    text = " ".join(str(instruction or "").lower().replace("-", " ").split())
+    original_instruction = str(instruction or "")
+    text = " ".join(original_instruction.lower().replace("-", " ").split())
+    # Section: Normalize supported STT variants before deterministic vocabulary matching.
+    text = _normalize_person_attribute_phrases(text)
     issues: list[ValidationIssue] = []
     if not text:
         return None, [ValidationIssue("empty_instruction", "Instruction is empty.")]
     if re.search(r"\b(it|there|them|him|her)\b", text) and not _contains_known_target(text, config):
         issues.append(ValidationIssue("unresolved_pronoun", "Instruction contains a pronoun without a resolvable target."))
-    task_type = _detect_task_type(text)
+    task_type = _detect_task_type(text, config)
+    if task_type == "accompany_ambiguous":
+        issues.append(ValidationIssue("ambiguous_leader", "Accompany requires an explicit human-leads or robot-leads role."))
+        task_type = ""
+    unsupported = re.search(r"\b(meet|answer|describe|remember|offer)\b", text)
+    if not task_type and unsupported:
+        issues.append(ValidationIssue("unsupported_task", f"Unsupported task verb: {unsupported.group(1)}."))
     if not task_type:
-        issues.append(ValidationIssue("unknown_task", "No supported deterministic GPSR task was recognized."))
+        if not unsupported and not any(issue.code == "ambiguous_leader" for issue in issues):
+            issues.append(ValidationIssue("unknown_task", "No supported deterministic GPSR task was recognized."))
     known_locations = _locations_in_text(text, config.known_locations)
-    unknown_locations = _unknown_location_mentions(text, config.known_locations)
+    unknown_locations = _unknown_location_mentions(text, config)
     for location in unknown_locations:
-        issues.append(ValidationIssue("unknown_location", f"Unknown location: {location}."))
+        issue_code = "unknown_location_or_surface" if re.search(rf"\bon\s+(?:the\s+)?{re.escape(location.replace('_', ' '))}\b", text) else "unknown_location"
+        issues.append(ValidationIssue(issue_code, f"Unknown location or surface: {location}."))
     report_location = _report_location(text, known_locations)
     task_location = _task_location(text, known_locations, report_location)
     recipient = _recipient(text, config)
     target = _target(text, task_type, config)
     filters = _filters(text, config)
+    person_selector, person_issues = _person_selector(text, task_type, filters, config)
+    requested_person_fields = _requested_person_fields(text, task_type)
+    issues.extend(person_issues)
+    action_person, action_person_issues = _action_person(text, task_type, config)
+    issues.extend(action_person_issues)
+    if action_person:
+        target["target_person"] = action_person
+    speech_payload, speech_issues = _speech_payload(text, task_type, action_person)
+    issues.extend(speech_issues)
+    target.update(speech_payload)
     if task_type and _requires_task_location(task_type) and not task_location:
         issues.append(ValidationIssue("missing_task_location", "Task requires a known task location."))
     if _requires_report(text) and not report_location and len(known_locations) > 1:
         issues.append(ValidationIssue("missing_report_location", "Instruction requests output at a destination, but no known report location was found."))
     if task_type in {"find_object", "count_objects"} and not target:
-        issues.append(ValidationIssue("missing_target", "Object task requires a known object or category target."))
-    if task_type == "find_person" and recipient is None and not filters:
-        issues.append(ValidationIssue("missing_person_target", "Find-person task requires a known person or person filter."))
+        unknown_named_person = re.search(r"\b(?:find|locate)\s+(?:the\s+)?([A-Z][a-z]+)\b", original_instruction)
+        if task_type == "find_object" and unknown_named_person:
+            issues.append(ValidationIssue("unknown_person", f"Unknown person: {normalize_symbol(unknown_named_person.group(1))}."))
+        else:
+            issues.append(ValidationIssue("missing_target", "Object task requires a known object or category target."))
+    if task_type == "find_person" and not person_selector and not person_issues:
+        issues.append(ValidationIssue("missing_person_selector", "Find-person task requires exactly one name or attribute selector."))
+    if task_type == "navigate" and not task_location:
+        issues.append(ValidationIssue("missing_task_location", "Navigation requires a known destination."))
+    if task_type == "place_object" and not task_location:
+        issues.append(ValidationIssue("missing_task_location", "Place requires a known destination or surface."))
+    if task_type in {"acquire_object", "place_object", "deliver_object"} and not target.get("object_name"):
+        issues.append(ValidationIssue("missing_target", "Object manipulation requires a known object target."))
     if issues:
         return None, issues
     return TaskRequest(
@@ -47,10 +78,126 @@ def parse_command(command_id: str, instruction: str, config: SchedulerConfig) ->
         return_location=config.instruction_point,
         target=target,
         filters=filters,
+        person_selector=person_selector,
+        requested_person_fields=requested_person_fields,
         recipient=recipient,
-        output_template=_output_template(text, task_type),
+        output_template=_output_template(text, task_type, requested_person_fields),
         return_after_completion=config.return_after_completion,
     ), []
+
+
+def _normalize_person_attribute_phrases(text: str) -> str:
+    """Special function: Convert supported arm-language variants to canonical parser phrases."""
+    # Section: Longer variants are replaced first to preserve exact word boundaries.
+    aliases = {
+        "raising the right arm": "right hand raised",
+        "raising right arm": "right hand raised",
+        "right arm raised": "right hand raised",
+        "raising the right hand": "right hand raised",
+        "raising right hand": "right hand raised",
+        "raising the left arm": "left hand raised",
+        "raising left arm": "left hand raised",
+        "left arm raised": "left hand raised",
+        "raising the left hand": "left hand raised",
+        "raising left hand": "left hand raised",
+    }
+    normalized = text
+    for phrase, replacement in aliases.items():
+        normalized = re.sub(rf"\b{re.escape(phrase)}\b", replacement, normalized)
+    return " ".join(normalized.split())
+
+
+def _person_selector(
+    text: str,
+    task_type: str,
+    filters: list[dict[str, Any]],
+    config: SchedulerConfig,
+) -> tuple[dict[str, Any], list[ValidationIssue]]:
+    """Special function: Resolve one mutually exclusive name or attribute person selector."""
+    if task_type != "find_person":
+        return {}, []
+
+    # Section: A searched name must occur after the find verb and before any reporting clause.
+    searched_names = []
+    search_clause = re.split(r"\b(?:tell|report|say|answer)\b", text, maxsplit=1)[0]
+    for person in sorted(config.known_people):
+        phrase = person.replace("_", " ")
+        if re.search(rf"\b(?:find|locate|look for)\b.*\b{re.escape(phrase)}\b", search_clause):
+            searched_names.append(person)
+
+    # Section: Pose filters are authoritative for attribute-routed person searches.
+    pose_values = [
+        str(item.get("value", ""))
+        for item in filters
+        if item.get("feature") == "pose" and item.get("value")
+    ]
+    clothing_values = [
+        str(item.get("value", ""))
+        for item in filters
+        if item.get("feature") == "shirt_color" and item.get("value")
+    ]
+    wearable_predicates: list[dict[str, str]] = []
+    unavailable_wearables: list[str] = []
+    for feature, phrases in {
+            "glasses": ("wearing glasses", "with glasses", "has glasses"),
+            "hat": ("wearing a hat", "wearing hat", "with a hat", "with hat"),
+            "face_mask": ("wearing a mask", "wearing mask", "with a mask", "with mask"),
+    }.items():
+        if not any(re.search(rf"\b{re.escape(phrase)}\b", text) for phrase in phrases):
+            continue
+        # Section: Model-gated wearables are accepted only when configuration enables YES.
+        enabled_values = config.supported_person_attributes.get(feature, [])
+        if not {"yes", "true", "1"}.intersection(enabled_values):
+            unavailable_wearables.append(feature)
+            continue
+        wearable_predicates.append(
+            {"type": feature, "operator": "equals", "value": "yes"}
+        )
+    if unavailable_wearables:
+        return {}, [
+            ValidationIssue(
+                "unavailable_person_attribute_model",
+                f"No validated positive-class model is configured for {unavailable_wearables}.",
+            )
+        ]
+    predicates: list[dict[str, str]] = []
+    predicates.extend({"type": "gesture" if value in {"right_hand_raised", "left_hand_raised", "waving"} else "pose", "operator": "equals", "value": value} for value in pose_values)
+    predicates.extend({"type": "shirt_color", "operator": "equals", "value": value} for value in clothing_values)
+    predicates.extend(wearable_predicates)
+
+    # Section: Reject combined or multiple selectors instead of choosing a hidden precedence.
+    if searched_names and predicates:
+        return {}, [ValidationIssue("conflicting_person_selectors", "Name and attribute person selectors cannot be combined.")]
+    if len(searched_names) > 1:
+        return {}, [ValidationIssue("conflicting_person_selectors", "Find-person command resolved more than one name.")]
+    if searched_names:
+        return {"type": "name", "value": searched_names[0]}, []
+    if predicates:
+        return {"all": predicates}, []
+    if re.search(r"\b(?:person|man|woman|someone|guest)\b", text):
+        return {"type": "any_person", "value": ""}, []
+    return {}, []
+
+
+def _requested_person_fields(text: str, task_type: str) -> list[str]:
+    """Special function: Extract explicit guest-information fields from a find-person command."""
+    if task_type != "find_person":
+        return []
+    # Section: Preserve a deterministic reporting order independent of phrase order.
+    patterns = {
+        "name": r"\b(?:their|his|her|the guest'?s|person'?s)\s+name\b|\bwhat(?:'s| is)\s+(?:their|his|her)\s+name\b",
+        "age": r"\b(?:their|his|her|the guest'?s|person'?s)\s+age\b|\bhow old\b",
+        "gender": r"\b(?:their|his|her|the guest'?s|person'?s)\s+gender\b",
+        "favorite_drink": r"\b(?:favorite|favourite)\s+drink\b",
+        "hometown": r"\b(?:hometown|where (?:they|he|she) (?:are|is) from)\b",
+        "shirt_color": r"\b(?:shirt|clothes|clothing)\s+colou?r\b",
+        "glasses": r"\bwhether (?:they|he|she) (?:are|is) wearing glasses\b",
+        "hat": r"\bwhether (?:they|he|she) (?:are|is) wearing (?:a )?hat\b",
+        "face_mask": r"\bwhether (?:they|he|she) (?:are|is) wearing (?:a )?mask\b",
+        "pose": r"\b(?:their|his|her)\s+pose\b",
+        "gesture": r"\b(?:their|his|her)\s+gesture\b",
+    }
+    return [field for field, pattern in patterns.items() if re.search(pattern, text)]
 
 
 def _contains_known_target(text: str, config: SchedulerConfig) -> bool:
@@ -59,7 +206,7 @@ def _contains_known_target(text: str, config: SchedulerConfig) -> bool:
     return any(re.search(rf"\b{re.escape(symbol.replace('_', ' '))}\b", text) for symbol in symbols)
 
 
-def _detect_task_type(text: str) -> str:
+def _detect_task_type(text: str, config: SchedulerConfig) -> str:
     """Special function: Classify the supported GPSR task family."""
     if re.search(r"\b(how many|count)\b.*\b(people|persons|humans)\b", text):
         return "count_people"
@@ -67,8 +214,37 @@ def _detect_task_type(text: str) -> str:
         return "count_objects"
     if re.search(r"\b(find|locate|look for)\b.*\b(person|man|woman|someone|guest)\b", text):
         return "find_person"
+    # Section: A configured person name after a search verb selects the named-person task.
+    name_search_clause = re.split(r"\b(?:tell|report|say|answer)\b", text, maxsplit=1)[0]
+    if any(
+        re.search(rf"\b(?:find|locate|look for)\b.*\b{re.escape(person.replace('_', ' '))}\b", name_search_clause)
+        for person in config.known_people
+    ):
+        return "find_person"
     if re.search(r"\b(find|locate|look for)\b", text):
         return "find_object"
+    if re.search(r"\b(?:bring|deliver)\b", text):
+        return "deliver_object"
+    if re.search(r"\b(?:take|pick up|pick|grasp)\b", text):
+        return "acquire_object"
+    if re.search(r"\b(?:place|put)\b", text):
+        return "place_object"
+    if re.search(r"\b(?:follow)\b", text):
+        return "follow_person"
+    if re.search(r"\b(?:guide|lead)\b", text):
+        return "guide_person"
+    if re.search(r"\baccompany\b", text):
+        if re.search(r"\b(?:they|person|guest|human)\s+(?:lead|leads|is leading)\b|\bhuman leads\b", text):
+            return "follow_person"
+        if re.search(r"\b(?:robot|you)\s+(?:lead|leads|are leading)\b|\brobot leads\b", text):
+            return "guide_person"
+        return "accompany_ambiguous"
+    if re.search(r"\b(?:ask)\b|\btalk\b.*\b(?:and listen|with response)\b", text):
+        return "ask_and_listen"
+    if re.search(r"\b(?:say|speak|tell|report|greet)\b", text):
+        return "say"
+    if re.search(r"\b(?:go|navigate|move)\s+to\b", text):
+        return "navigate"
     return ""
 
 
@@ -83,11 +259,12 @@ def _locations_in_text(text: str, known_locations: set[str]) -> list[str]:
     return [location for _, location in sorted(hits)]
 
 
-def _unknown_location_mentions(text: str, known_locations: set[str]) -> list[str]:
+def _unknown_location_mentions(text: str, config: SchedulerConfig) -> list[str]:
     """Special function: Flag obvious unsupported room/location phrases."""
+    known_locations = config.known_locations
     unknown: list[str] = []
     stop_words = {"and", "then", "tell", "report", "say", "answer", "count", "find", "locate", "look", "go", "navigate", "with", "for"}
-    for match in re.finditer(r"(?=\b(?:in|at|to|from)\s+(?:the\s+)?([a-z_]+(?:\s+[a-z_]+){0,2}))", text):
+    for match in re.finditer(r"(?=\b(?:in|at|to|from|on)\s+(?:the\s+)?([a-z_]+(?:\s+[a-z_]+){0,2}))", text):
         words = []
         for word in match.group(1).split():
             if word in stop_words:
@@ -95,6 +272,11 @@ def _unknown_location_mentions(text: str, known_locations: set[str]) -> list[str
             words.append(word)
         candidate = normalize_symbol(" ".join(words))
         if not candidate or candidate in {"person", "people", "object", "objects", "me"}:
+            continue
+        if candidate in config.known_people or any(candidate.startswith(person) for person in config.known_people):
+            continue
+        # Section: Person-directed verbs diagnose unknown people separately from locations.
+        if re.search(r"\b(?:deliver|tell|talk|follow|guide|greet|accompany)\b", text) and match.group(0).lstrip().startswith("to"):
             continue
         if candidate not in known_locations and not any(candidate.startswith(location) for location in known_locations):
             unknown.append(candidate)
@@ -139,9 +321,72 @@ def _recipient(text: str, config: SchedulerConfig) -> dict[str, Any] | None:
     return None
 
 
+def _action_person(
+    text: str,
+    task_type: str,
+    config: SchedulerConfig,
+) -> tuple[str, list[ValidationIssue]]:
+    """Special function: Resolve person roles for movement, delivery, and communication primitives."""
+    person_tasks = {"follow_person", "guide_person", "deliver_object", "say", "ask_and_listen"}
+    if task_type not in person_tasks:
+        return "", []
+    for person in sorted(config.known_people):
+        if re.search(rf"\b{re.escape(person.replace('_', ' '))}\b", text):
+            return person, []
+    if task_type == "deliver_object" and re.search(r"\b(?:me|operator)\b", text):
+        return "operator", []
+
+    # Section: Extract a likely explicit name only to return a precise closed-vocabulary error.
+    patterns = {
+        "follow_person": r"\b(?:follow|accompany)\s+([a-z_]+)",
+        "guide_person": r"\b(?:guide|lead|accompany)\s+([a-z_]+)",
+        "deliver_object": r"\b(?:to|for)\s+([a-z_]+)",
+        "say": r"\b(?:tell|greet)\s+([a-z_]+)",
+        "ask_and_listen": r"\b(?:ask|talk to)\s+([a-z_]+)",
+    }
+    match = re.search(patterns[task_type], text)
+    candidate = normalize_symbol(match.group(1)) if match else ""
+    ignored = {"the", "a", "an", "me", "operator", "person", "guest", "human"}
+    if candidate and candidate not in ignored:
+        return "", [ValidationIssue("unknown_person", f"Unknown person: {candidate}.")]
+    if task_type in {"follow_person", "guide_person"}:
+        return "", [ValidationIssue("missing_person", "Person-motion task requires a known target person.")]
+    return "", []
+
+
+def _speech_payload(
+    text: str,
+    task_type: str,
+    target_person: str,
+) -> tuple[dict[str, Any], list[ValidationIssue]]:
+    """Special function: Extract literal SAY or ASK_AND_LISTEN content without query inference."""
+    if task_type not in {"say", "ask_and_listen"}:
+        return {}, []
+    if task_type == "ask_and_listen":
+        match = re.search(r"\bask\b\s+(.*)$", text)
+        question = str(match.group(1) if match else text).strip()
+        if target_person and question.startswith(target_person.replace("_", " ")):
+            question = question[len(target_person.replace("_", " ")):].strip()
+        if not question:
+            return {}, [ValidationIssue("missing_question", "Ask-and-listen requires literal question text.")]
+        return {"question": question, "target_person": target_person}, []
+    if re.search(r"\b(?:the\s+)?(?:time|date|weather)\b", text):
+        return {}, [ValidationIssue("unsupported_query", "Dynamic query content requires a query-resolution component.")]
+    if re.search(r"\bgreet\b", text):
+        greeting = f"Hello {target_person}." if target_person else "Hello."
+        return {"text": greeting, "target_person": target_person}, []
+    match = re.search(r"\b(?:say|speak|report|tell)\b\s+(.*)$", text)
+    speech = str(match.group(1) if match else "").strip()
+    if target_person and speech.startswith(target_person.replace("_", " ")):
+        speech = speech[len(target_person.replace("_", " ")):].strip()
+    if not speech:
+        return {}, [ValidationIssue("missing_speech_text", "Speech requires literal text.")]
+    return {"text": speech, "target_person": target_person}, []
+
+
 def _target(text: str, task_type: str, config: SchedulerConfig) -> dict[str, Any]:
     """Special function: Resolve object/category target semantics."""
-    if task_type not in {"find_object", "count_objects"}:
+    if task_type not in {"find_object", "count_objects", "acquire_object", "place_object", "deliver_object"}:
         return {}
     for object_name in config.known_objects:
         if re.search(rf"\b{re.escape(object_name.replace('_', ' '))}s?\b", text):
@@ -170,7 +415,7 @@ def _filters(text: str, config: SchedulerConfig) -> list[dict[str, Any]]:
 def _requires_task_location(task_type: str) -> bool:
     """Special function: Declare task families that require physical navigation first."""
     # Section: FIND_OBJECT owns global or strict-location search navigation internally.
-    return task_type in {"find_person", "count_objects", "count_people"}
+    return task_type in {"find_person", "count_objects", "count_people", "guide_person"}
 
 
 def _requires_report(text: str) -> bool:
@@ -178,7 +423,7 @@ def _requires_report(text: str) -> bool:
     return bool(re.search(r"\b(?:tell|report|say|answer)\b.*\b(?:in|at|to)\b", text) or re.search(r"\b(?:go|navigate|return)\s+to\b.*\b(?:tell|report|say|answer)\b", text))
 
 
-def _output_template(text: str, task_type: str) -> str | None:
+def _output_template(text: str, task_type: str, requested_person_fields: list[str] | None = None) -> str | None:
     """Special function: Select deterministic output text template for task results."""
     if not _requires_report(text) and "tell" not in text and "report" not in text and "say" not in text and "answer" not in text:
         return None
@@ -187,6 +432,13 @@ def _output_template(text: str, task_type: str) -> str | None:
     if task_type == "count_objects":
         return "I counted {result.count} objects."
     if task_type == "find_person":
+        fields = list(requested_person_fields or [])
+        if fields == ["name"]:
+            return "The guest's name is {result.name}."
+        if fields == ["favorite_drink"]:
+            return "The guest's favorite drink is {result.favorite_drink}."
+        if fields == ["name", "favorite_drink"]:
+            return "The guest is {result.name} and likes {result.favorite_drink}."
         return "I found the requested person."
     if task_type == "find_object":
         return "I found the requested object."

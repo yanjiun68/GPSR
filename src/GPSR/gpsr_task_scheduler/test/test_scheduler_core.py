@@ -62,6 +62,85 @@ def test_human_pose_filter_is_structured() -> None:
     """Special function: Human pose phrases become structured pose filters."""
     result = planned_result("find person with right hand raised in the kitchen tell me")
     assert {"feature": "pose", "operator": "equals", "value": "right_hand_raised"} in result.task_request.filters
+    assert result.task_request.person_selector == {"all": [{"type": "gesture", "operator": "equals", "value": "right_hand_raised"}]}
+    assert [step.skill_name for step in result.steps] == ["NAVIGATE", "FIND_PERSON_BY_ATTRIBUTE", "SAY"]
+
+
+@pytest.mark.parametrize(
+    "phrase",
+    ["right hand raised", "right arm raised", "raising right hand", "raising right arm"],
+)
+def test_right_arm_stt_variants_select_attribute_route(phrase: str) -> None:
+    """Special function: Supported STT arm variants produce the same attribute action."""
+    result = planned_result(f"find a person {phrase} in the living room")
+    assert result.task_request.person_selector == {"all": [{"type": "gesture", "operator": "equals", "value": "right_hand_raised"}]}
+    assert result.steps[1].skill_name == "FIND_PERSON_BY_ATTRIBUTE"
+
+
+def test_named_person_selects_identity_route() -> None:
+    """Special function: A configured searched name produces only FIND_PERSON."""
+    result = planned_result("find john in the living room")
+    assert result.task_request.person_selector == {"type": "name", "value": "john"}
+    assert [step.skill_name for step in result.steps] == ["NAVIGATE", "FIND_PERSON"]
+    assert result.steps[1].arguments["target_person"] == "john"
+
+
+def test_name_and_attribute_combination_is_rejected() -> None:
+    """Special function: Mixed selectors cannot silently choose one person state machine."""
+    result = schedule_command(
+        "conflicting_person",
+        "find john with right hand raised in the living room",
+        default_config(),
+    )
+    assert not result.valid
+    assert {issue.code for issue in result.issues} == {"conflicting_person_selectors"}
+
+
+def test_any_person_selects_attribute_route() -> None:
+    """Special function: Generic person search becomes an explicit any-person selector."""
+    result = planned_result("find a person in the living room")
+    assert result.task_request.person_selector == {"type": "any_person", "value": ""}
+    assert result.steps[1].skill_name == "FIND_PERSON_BY_ATTRIBUTE"
+
+
+def test_clothing_attribute_selects_tracked_appearance_route() -> None:
+    """Special function: Shirt-color requests enter the lifecycle appearance state machine."""
+    result = planned_result("find a person wearing red in the living room")
+    assert result.task_request.person_selector == {
+        "all": [{"type": "shirt_color", "operator": "equals", "value": "red"}]
+    }
+    assert result.steps[1].skill_name == "FIND_PERSON_BY_ATTRIBUTE"
+
+
+def test_combined_attributes_and_guest_fields_create_extract_step() -> None:
+    """Special function: Combined positive predicates are followed by guest extraction."""
+    result = planned_result(
+        "find a person wearing red with glasses in the kitchen tell me their name and favorite drink"
+    )
+    assert result.task_request.person_selector == {
+        "all": [
+            {"type": "shirt_color", "operator": "equals", "value": "red"},
+            {"type": "glasses", "operator": "equals", "value": "yes"},
+        ]
+    }
+    assert result.task_request.requested_person_fields == ["name", "favorite_drink"]
+    assert [step.skill_name for step in result.steps] == [
+        "NAVIGATE", "FIND_PERSON_BY_ATTRIBUTE", "EXTRACT_PERSON_INFO", "SAY",
+    ]
+    assert result.steps[2].arguments["fields"] == ["name", "favorite_drink"]
+
+
+def test_unconfigured_hat_model_is_rejected_during_planning() -> None:
+    """Special function: Prevent an impossible positive wearable search from executing."""
+    result = schedule_command(
+        "missing_hat_model",
+        "find a person wearing a hat in the kitchen",
+        default_config(),
+    )
+    assert not result.valid
+    assert {issue.code for issue in result.issues} == {
+        "unavailable_person_attribute_model",
+    }
 
 
 def test_unresolved_pronoun_is_rejected() -> None:
@@ -105,7 +184,57 @@ def test_return_after_success_appends_instruction_point() -> None:
     config.return_after_completion = True
     result = schedule_command("returning", "count people in the kitchen tell me", config)
     assert result.valid
-    assert [step.skill_name for step in result.steps] == ["NAVIGATE", "COUNT_PEOPLE", "SAY", "RETURN_TO_INSTRUCTION_POINT"]
+    assert [step.skill_name for step in result.steps] == ["NAVIGATE", "COUNT_PEOPLE", "SAY", "NAVIGATE"]
+    assert result.steps[-1].step_id == "return_to_instruction_point"
+
+
+def test_standalone_go_compiles_to_navigation_primitive() -> None:
+    """Special function: Surface navigation verbs never enter ActionQueue identifiers."""
+    result = planned_result("go to the kitchen")
+    assert [step.skill_name for step in result.steps] == ["NAVIGATE"]
+    assert result.steps[0].arguments["target_location"] == "kitchen"
+
+
+def test_take_expands_then_rejects_unavailable_pick() -> None:
+    """Special function: Acquisition exposes its complete proposed primitive plan safely."""
+    result = schedule_command("take", "take the coke", default_config())
+    assert not result.valid
+    assert [step.skill_name for step in result.steps] == ["FIND_OBJECT", "PICK_OBJECT"]
+    assert {issue.code for issue in result.issues} == {"primitive_unavailable"}
+    assert "PICK_OBJECT" in result.issues[0].message
+
+
+def test_bring_expands_then_rejects_unavailable_manipulation() -> None:
+    """Special function: Delivery expansion is centralized in the scheduler compiler."""
+    result = schedule_command("bring", "bring me the coke", default_config())
+    assert not result.valid
+    assert [step.skill_name for step in result.steps] == [
+        "FIND_OBJECT", "PICK_OBJECT", "NAVIGATE", "HANDOVER_OBJECT",
+    ]
+    assert "HANDOVER_OBJECT" in result.issues[0].message
+    assert "PICK_OBJECT" in result.issues[0].message
+
+
+def test_unknown_capitalized_find_target_reports_unknown_person() -> None:
+    """Special function: Unknown proper names do not fall through to object search."""
+    result = schedule_command("unknown_person", "find Alex", default_config())
+    assert not result.valid
+    assert {issue.code for issue in result.issues} == {"unknown_person"}
+
+
+def test_unknown_table_reports_location_or_surface() -> None:
+    """Special function: On-surface phrases receive a precise deterministic diagnostic."""
+    result = schedule_command("unknown_surface", "count the drinks on the table", default_config())
+    assert not result.valid
+    assert "unknown_location_or_surface" in {issue.code for issue in result.issues}
+
+
+def test_follow_known_person_rejects_disabled_real_capability() -> None:
+    """Special function: Missing physical follow integration cannot report a valid plan."""
+    result = schedule_command("follow", "follow john", default_config())
+    assert not result.valid
+    assert [step.skill_name for step in result.steps] == ["FOLLOW_PERSON"]
+    assert {issue.code for issue in result.issues} == {"primitive_unavailable"}
 
 
 def test_action_step_conversion_preserves_timeout_and_arguments() -> None:

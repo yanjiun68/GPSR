@@ -28,6 +28,7 @@
   <depend>sensor_msgs</depend>
   <depend>std_msgs</depend>
   <depend>putrabot_interfaces</depend>
+  <depend>receptionist_interfaces</depend>
   <depend>robot_ai_interfaces</depend>
   <depend>robot_yasmin_tasks</depend>
   <depend>voice</depend>

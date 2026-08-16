@@ -1,0 +1,6 @@
+# Section: Retrieve a GPSR guest by id; an empty id selects the active guest.
+string memory_id
+---
+bool success
+robot_ai_interfaces/GpsrGuestRecord record
+string message

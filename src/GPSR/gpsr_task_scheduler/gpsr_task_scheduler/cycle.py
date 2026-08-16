@@ -149,6 +149,16 @@ class GpsrCycleController:
             )
             return True
 
+    def reset_error(self) -> bool:
+        """Special function: Apply an operator override from ERROR back to command intake."""
+        with self._lock:
+            if self._state != SchedulerState.ERROR:
+                return False
+            # Section: Abandon stale command ownership so a new transcript can be admitted.
+            self._active_command_id = ""
+            self._state = SchedulerState.WAITING_FOR_COMMAND
+            return True
+
     def _matches(self, command_id: str, expected_state: SchedulerState) -> bool:
         """Special function: Match both lifecycle state and active command identity."""
         return (

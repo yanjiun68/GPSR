@@ -1,13 +1,20 @@
 """Section: Voice command parser tests."""
 
-from robot_yasmin_tasks.gpsr.action_types import COUNT_PEOPLE, FIND_OBJECT, GIVE, NAVIGATE, PICK, SAY
+from robot_yasmin_tasks.gpsr.action_types import (
+    COUNT_PEOPLE,
+    FIND_OBJECT,
+    HANDOVER_OBJECT,
+    NAVIGATE,
+    PICK_OBJECT,
+    SAY,
+)
 from robot_yasmin_tasks.gpsr.voice_command_parser import fallback_parse_transcript, parse_llm_pairs
 
 
 def test_llm_pairs_to_steps() -> None:
     """Special function: LLM pairs convert into GPSR symbolic steps."""
     steps = parse_llm_pairs(["navigate|kitchen", "find_obj|coke,table", "grasp|coke", "handover|operator"])
-    assert [step.action_type for step in steps] == [NAVIGATE, FIND_OBJECT, PICK, GIVE]
+    assert [step.action_type for step in steps] == [NAVIGATE, FIND_OBJECT, PICK_OBJECT, HANDOVER_OBJECT]
 
 
 def test_llm_count_people_pair_to_navigation_sequence() -> None:

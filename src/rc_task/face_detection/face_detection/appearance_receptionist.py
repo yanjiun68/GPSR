@@ -1,9 +1,7 @@
 #!/usr/bin/env python3
 import json
-from collections import deque
 
 import cv2
-import numpy as np
 import rclpy
 from cv_bridge import CvBridge
 from rclpy.node import Node
@@ -13,6 +11,15 @@ from sensor_msgs.msg import Image
 from std_msgs.msg import Bool, String
 from ultralytics import YOLO
 
+from face_detection.appearance_estimators import (
+    HsvShirtColorEstimator,
+    TemporalCategoricalVoter,
+    YoloAttributeEstimator,
+    best_attribute_confidence,
+    crop_person_roi,
+    get_person_roi,
+    get_upper_body_roi,
+)
 from face_detection.paths import default_detection_model_paths, default_glasses_model_path
 
 
@@ -21,142 +28,6 @@ def as_bool(value):
     if isinstance(value, bool):
         return value
     return str(value).strip().lower() in ('1', 'true', 'yes', 'on')
-
-
-def get_upper_body_roi(frame, face_bbox, person_bbox=None):
-    """Special function: Derive the selected person's torso ROI from the associated face."""
-    h, w, _ = frame.shape
-    x1, y1, x2, y2 = [int(v) for v in face_bbox]
-
-    face_w = x2 - x1
-    face_h = y2 - y1
-
-    shirt_x1 = max(0, x1 - int(0.4 * face_w))
-    shirt_x2 = min(w, x2 + int(0.4 * face_w))
-    shirt_y1 = min(h, y2 + int(0.15 * face_h))
-    shirt_y2 = min(h, y2 + int(1.8 * face_h))
-
-    # Section: A tracker-provided person ROI prevents torso pixels crossing into another person.
-    if person_bbox is not None and len(person_bbox) == 4:
-        person_x1, person_y1, person_x2, person_y2 = [int(value) for value in person_bbox]
-        shirt_x1 = max(shirt_x1, person_x1)
-        shirt_x2 = min(shirt_x2, person_x2)
-        shirt_y1 = max(shirt_y1, person_y1)
-        shirt_y2 = min(shirt_y2, person_y2)
-
-    if shirt_x2 <= shirt_x1 or shirt_y2 <= shirt_y1:
-        return None, None
-
-    roi = frame[shirt_y1:shirt_y2, shirt_x1:shirt_x2]
-    return roi, (shirt_x1, shirt_y1, shirt_x2, shirt_y2)
-
-
-def get_person_roi(frame, face_bbox):
-    """Special function: Crop a conservative face-and-torso region for human attributes."""
-    height, width = frame.shape[:2]
-    x1, y1, x2, y2 = [int(value) for value in face_bbox]
-    face_width = max(1, x2 - x1)
-    face_height = max(1, y2 - y1)
-    person_x1 = max(0, x1 - int(0.7 * face_width))
-    person_x2 = min(width, x2 + int(0.7 * face_width))
-    person_y1 = max(0, y1 - int(0.4 * face_height))
-    person_y2 = min(height, y2 + int(2.2 * face_height))
-    if person_x2 <= person_x1 or person_y2 <= person_y1:
-        return None, None
-    return frame[person_y1:person_y2, person_x1:person_x2], (
-        person_x1,
-        person_y1,
-        person_x2,
-        person_y2,
-    )
-
-
-def crop_person_roi(frame, person_bbox):
-    """Special function: Crop an existing tracker ROI in full-frame xyxy coordinates."""
-    height, width = frame.shape[:2]
-    if person_bbox is None or len(person_bbox) != 4:
-        return None, None
-    x1, y1, x2, y2 = [int(value) for value in person_bbox]
-    left = max(0, min(x1, width))
-    top = max(0, min(y1, height))
-    right = max(0, min(x2, width))
-    bottom = max(0, min(y2, height))
-    if right <= left or bottom <= top:
-        return None, None
-    return frame[top:bottom, left:right], (left, top, right, bottom)
-
-
-def detect_dominant_shirt_color(roi_bgr):
-    """Special function: Estimate robust HSV shirt color inside the selected torso only."""
-    import cv2
-
-    if roi_bgr is None or roi_bgr.size == 0:
-        return 'unknown', 0.0
-
-    hsv = cv2.cvtColor(roi_bgr, cv2.COLOR_BGR2HSV)
-    color_ranges = {
-        'red': [((0, 70, 50), (10, 255, 255)), ((170, 70, 50), (180, 255, 255))],
-        'orange': [((11, 70, 50), (20, 255, 255))],
-        'yellow': [((21, 70, 50), (35, 255, 255))],
-        'green': [((36, 50, 40), (85, 255, 255))],
-        'blue': [((86, 50, 40), (130, 255, 255))],
-        'purple': [((131, 50, 40), (160, 255, 255))],
-        'white': [((0, 0, 180), (180, 50, 255))],
-        'black': [((0, 0, 0), (180, 255, 50))],
-        'gray': [((0, 0, 51), (180, 50, 179))],
-    }
-
-    best_color = 'unknown'
-    best_count = 0
-
-    for color_name, ranges in color_ranges.items():
-        total_count = 0
-        for lower, upper in ranges:
-            lower_np = np.array(lower, dtype=np.uint8)
-            upper_np = np.array(upper, dtype=np.uint8)
-            mask = cv2.inRange(hsv, lower_np, upper_np)
-            total_count += cv2.countNonZero(mask)
-
-        if total_count > best_count:
-            best_count = total_count
-            best_color = color_name
-
-    if best_count < 100:
-        return 'unknown', 0.0
-
-    total_pixels = max(roi_bgr.shape[0] * roi_bgr.shape[1], 1)
-    return best_color, min(1.0, float(best_count) / float(total_pixels))
-
-
-def detect_attributes_with_yolo(frame, yolo_models, conf_threshold=0.4, device='cpu'):
-    """Special function: Run human-attribute models on the selected person ROI only."""
-    detected_scores = {}
-    for yolo_model in yolo_models:
-        results = yolo_model.predict(frame, verbose=False, device=device)
-
-        for result in results:
-            boxes = result.boxes
-            names = result.names
-            if boxes is None:
-                continue
-
-            for box in boxes:
-                conf = float(box.conf[0])
-                cls_id = int(box.cls[0])
-                if conf < conf_threshold:
-                    continue
-                label = str(names[cls_id]).strip().lower().replace(' ', '_').replace('-', '_')
-                detected_scores[label] = max(detected_scores.get(label, 0.0), conf)
-
-    return detected_scores
-
-
-def best_attribute_confidence(detected_scores, aliases):
-    best_confidence = 0.0
-    for label, confidence in detected_scores.items():
-        if any(alias == label or alias in label for alias in aliases):
-            best_confidence = max(best_confidence, confidence)
-    return best_confidence
 
 
 def binary_attribute_from_confidence(confidence):
@@ -289,7 +160,11 @@ class AppearanceNode(Node):
         self.logged_missing_face_input = False
         self.completed_first_estimate = False
         self.last_waiting_log_ns = 0
-        self.shirt_color_history = deque(maxlen=self.shirt_color_history_size)
+        self.shirt_color_voter = TemporalCategoricalVoter(
+            self.shirt_color_history_size,
+            self.shirt_color_min_observations,
+            self.shirt_color_min_confidence,
+        )
         self.stable_shirt_color = ''
         self.stable_shirt_color_confidence = 0.0
         self.stable_shirt_color_updated_ns = 0
@@ -332,6 +207,12 @@ class AppearanceNode(Node):
 
         self.get_logger().info(f'Loading YOLO detectors from {", ".join(self.yolo_model_paths)}')
         self.yolo_models = self._load_yolo_models()
+        self.attribute_estimator = YoloAttributeEstimator(
+            self.yolo_models,
+            self.yolo_conf_threshold,
+            self.appearance_device,
+        )
+        self.shirt_color_estimator = HsvShirtColorEstimator()
 
         # Run appearance estimation at 5 Hz using the latest received image and face data.
         self.timer = self.create_timer(0.2, self.timer_callback)
@@ -358,24 +239,15 @@ class AppearanceNode(Node):
         return yolo_models
 
     def _update_stable_shirt_color(self, color, confidence):
+        """Special function: Update the reusable temporal voter and apply hold semantics."""
         now_ns = self.get_clock().now().nanoseconds
-
-        if color and color != 'unknown' and confidence >= self.shirt_color_min_confidence:
-            self.shirt_color_history.append((color, float(confidence)))
-
-        vote_scores = {}
-        vote_counts = {}
-        for observed_color, observed_confidence in self.shirt_color_history:
-            vote_scores[observed_color] = vote_scores.get(observed_color, 0.0) + observed_confidence
-            vote_counts[observed_color] = vote_counts.get(observed_color, 0) + 1
-
-        if vote_scores:
-            best_color = max(vote_scores, key=vote_scores.get)
-            best_count = vote_counts[best_color]
-            if best_count >= self.shirt_color_min_observations:
-                self.stable_shirt_color = best_color
-                self.stable_shirt_color_confidence = vote_scores[best_color] / float(best_count)
-                self.stable_shirt_color_updated_ns = now_ns
+        stable_color, stable_confidence = self.shirt_color_voter.update(color, confidence)
+        # Section: Only a new meaningful frame extends the stable estimate's hold time.
+        meaningful = color and color != 'unknown' and confidence >= self.shirt_color_min_confidence
+        if stable_color != 'unknown' and meaningful:
+            self.stable_shirt_color = stable_color
+            self.stable_shirt_color_confidence = stable_confidence
+            self.stable_shirt_color_updated_ns = now_ns
 
         if not self.stable_shirt_color:
             return '', 0.0
@@ -509,12 +381,7 @@ class AppearanceNode(Node):
             else:
                 person_roi, person_roi_box = get_person_roi(self.latest_frame, face_bbox)
             if person_roi is not None:
-                attribute_scores = detect_attributes_with_yolo(
-                    person_roi,
-                    self.yolo_models,
-                    conf_threshold=self.yolo_conf_threshold,
-                    device=self.appearance_device,
-                )
+                attribute_scores = self.attribute_estimator.estimate(person_roi)
             # Section: Attribute decisions are derived only from the associated person crop.
             glasses_confidence = best_attribute_confidence(
                 attribute_scores,
@@ -544,7 +411,7 @@ class AppearanceNode(Node):
                 face_bbox,
                 person_bbox=person_roi_box,
             )
-            shirt_color, shirt_color_confidence = detect_dominant_shirt_color(roi)
+            shirt_color, shirt_color_confidence = self.shirt_color_estimator.estimate(roi)
             stable_shirt_color, stable_shirt_color_confidence = self._update_stable_shirt_color(
                 shirt_color,
                 shirt_color_confidence,

@@ -13,6 +13,7 @@ from rclpy.action import ActionClient
 from std_msgs.msg import String
 
 from robot_yasmin_tasks.gpsr import blackboard_keys as bb
+from robot_yasmin_tasks.gpsr.action_types import ASK_AND_LISTEN
 from robot_yasmin_tasks.gpsr.blackboard_utils import bb_get
 from robot_yasmin_tasks.gpsr.models import ActionStepData
 from robot_yasmin_tasks.gpsr.outcomes import SUCCESS
@@ -299,7 +300,7 @@ class FindPersonClients:
         if self._is_canceled(blackboard):
             return {"status": "canceled", "reason": "CANCELED"}
         dialogue_action = ActionStepData(
-            action_type="ASK",
+            action_type=ASK_AND_LISTEN,
             parameters={
                 "question": f"Are you {target_name}?",
                 "record_sec": min(4.0, max(1.0, timeout_sec)),

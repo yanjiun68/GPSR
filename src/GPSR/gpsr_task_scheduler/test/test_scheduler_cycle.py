@@ -199,7 +199,7 @@ class _CycleHarness:
 
     def submit_return_to_instruction_point(self, command_id: str) -> dict:
         """Special function: Record the return request after the task queue terminates."""
-        self.submissions.append((f"{command_id}_return", ["RETURN_TO_INSTRUCTION_POINT"]))
+        self.submissions.append((f"{command_id}_return", ["NAVIGATE"]))
         return {
             "success": True,
             "completed_steps": 1,
@@ -287,8 +287,8 @@ def test_exhausted_recovery_stays_in_error() -> None:
     assert any(level == "error" for level, _message in harness.logger.messages)
 
 
-def test_reset_service_rearms_exhausted_error_recovery() -> None:
-    """Special function: Operator reset clears retry guards without bypassing recovery."""
+def test_reset_service_leaves_error_and_reopens_command_intake() -> None:
+    """Special function: Operator reset clears ERROR and accepts a new command."""
     harness = _RecoveryHarness([], max_attempts=3)
     harness.error_recovery_attempts = 3
     harness.error_recovery_next_attempt_time = 999.0
@@ -302,7 +302,8 @@ def test_reset_service_rearms_exhausted_error_recovery() -> None:
     assert harness.error_recovery_attempts == 0
     assert harness.error_recovery_next_attempt_time == 0.0
     assert harness.error_recovery_exhaustion_logged is False
-    assert harness.cycle.snapshot().state == SchedulerState.ERROR
+    assert harness.cycle.snapshot().state == SchedulerState.WAITING_FOR_COMMAND
+    assert harness.cycle.try_accept_command("command_after_reset") is True
 
 
 def test_reset_service_rejects_non_error_state() -> None:
@@ -339,7 +340,7 @@ def test_multi_skill_command_returns_only_after_final_skill() -> None:
     harness.process("command_1")
     assert harness.submissions == [
         ("command_1", ["NAVIGATE", "COUNT_OBJECTS", "SAY"]),
-        ("command_1_return", ["RETURN_TO_INSTRUCTION_POINT"]),
+        ("command_1_return", ["NAVIGATE"]),
     ]
 
 
@@ -368,7 +369,7 @@ def test_terminal_task_failure_returns_and_releases_scheduler() -> None:
     harness = _CycleHarness(["COUNT_OBJECTS"], task_success=False)
     result = harness.process("command_1")
     assert result["success"] is False
-    assert harness.submissions[-1][1] == ["RETURN_TO_INSTRUCTION_POINT"]
+    assert harness.submissions[-1][1] == ["NAVIGATE"]
     assert harness.cycle.snapshot().state == SchedulerState.WAITING_FOR_COMMAND
 
 

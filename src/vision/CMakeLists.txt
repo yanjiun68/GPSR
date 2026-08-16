@@ -18,6 +18,7 @@ find_package(image_transport REQUIRED)
 find_package(OpenCV REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(putrabot_interfaces REQUIRED)
+find_package(receptionist_interfaces REQUIRED)
 find_package(robot_ai_interfaces REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(voice_interfaces REQUIRED)
@@ -53,6 +54,7 @@ install(
   scripts/gpsr_object_detection_node.py
   scripts/gesture_classifier.py
   scripts/human_skeleton_detection_node.py
+  scripts/gpsr_human_identity_lifecycle_node.py
   scripts/count_objects_perception_server.py
   scripts/count_people_perception_server.py
   DESTINATION lib/${PROJECT_NAME}

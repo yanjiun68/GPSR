@@ -6,6 +6,8 @@ import json
 from dataclasses import dataclass, field
 from typing import Any
 
+from robot_yasmin_tasks.gpsr.action_types import normalize_primitive_name
+
 
 @dataclass(slots=True)
 class ActionStepData:
@@ -59,7 +61,7 @@ def parse_parameters(raw: Any) -> dict[str, Any]:
 def normalize_action_step(raw: Any) -> ActionStepData:
     """Special function: Normalize dict or ROS message action steps."""
     if isinstance(raw, ActionStepData):
-        return raw
+        return canonicalize_action_step(raw)
     if isinstance(raw, dict):
         params = parse_parameters(raw.get("parameters", raw.get("parameters_json", {})))
         # Section: Preserve unknown fields inside parameters without hiding execution metadata.
@@ -72,7 +74,7 @@ def normalize_action_step(raw: Any) -> ActionStepData:
         for key, value in raw.items():
             if key not in known:
                 params.setdefault(key, value)
-        return ActionStepData(
+        return canonicalize_action_step(ActionStepData(
             action_type=str(raw.get("action_type", "")).upper(),
             task_id=str(raw.get("task_id", "")),
             task_family=str(raw.get("task_family", "")),
@@ -87,8 +89,8 @@ def normalize_action_step(raw: Any) -> ActionStepData:
             requires_success=list(raw.get("requires_success", [])),
             requires_data=list(raw.get("requires_data", [])),
             result_variable=str(raw.get("result_variable", "")),
-        )
-    return ActionStepData(
+        ))
+    return canonicalize_action_step(ActionStepData(
         action_type=str(getattr(raw, "action_type", "")).upper(),
         task_id=str(getattr(raw, "task_id", "")),
         task_family=str(getattr(raw, "task_family", "")),
@@ -103,7 +105,28 @@ def normalize_action_step(raw: Any) -> ActionStepData:
         requires_success=list(getattr(raw, "requires_success", [])),
         requires_data=list(getattr(raw, "requires_data", [])),
         result_variable=str(getattr(raw, "result_variable", "")),
-    )
+    ))
+
+
+def canonicalize_action_step(action: ActionStepData) -> ActionStepData:
+    """Special function: Translate temporary legacy queue identifiers into primitives."""
+    canonical, legacy = normalize_primitive_name(action.action_type)
+    action.action_type = canonical
+    if not legacy:
+        return action
+
+    # Section: Preserve deprecation evidence for executor logging and result diagnostics.
+    action.parameters.setdefault("_legacy_action_type", legacy)
+    action.parameters.setdefault("_canonical_action_type", canonical)
+    if legacy == "RETURN_TO_INSTRUCTION_POINT":
+        action.target_location = action.target_location or str(
+            action.parameters.get("target_location", "instruction_point")
+        )
+        action.parameters.setdefault("target_location", action.target_location)
+    elif legacy == "GREET":
+        target = action.target_person or str(action.parameters.get("target_person", ""))
+        action.parameters.setdefault("text", f"Hello {target}." if target else "Hello.")
+    return action
 
 
 def make_skill_result(action_type: str, outcome: str, message: str = "", result: dict[str, Any] | None = None, recoverable: bool = False, fatal: bool = False) -> SkillResultData:

@@ -1,4 +1,4 @@
-"""Section: PLACE skill."""
+"""Section: PLACE_OBJECT executable primitive skill."""
 from yasmin import Blackboard
 from robot_yasmin_tasks.gpsr import blackboard_keys as bb
 from robot_yasmin_tasks.gpsr.blackboard_utils import bb_get
@@ -19,5 +19,5 @@ def validate_place(blackboard: Blackboard, action: ActionStepData) -> tuple[bool
 class PlaceObjectSkillSM(SimpleSkillSM):
     """Special function: Place object and clear held_object."""
     def __init__(self, client: ManipulationClients | None = None) -> None:
-        """Special function: Build PLACE state machine."""
+        """Special function: Build PLACE_OBJECT state machine."""
         super().__init__("PLACE_OBJECT_SKILL_SM", (client or ManipulationClients()).place_object, validate_place)

@@ -1,0 +1,1 @@
+# Ignore all third-party ECL packages during colcon package discovery.

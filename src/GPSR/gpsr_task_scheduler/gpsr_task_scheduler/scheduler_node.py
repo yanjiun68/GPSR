@@ -21,6 +21,7 @@ from gpsr_task_scheduler.config import SchedulerConfig, load_config
 from gpsr_task_scheduler.cycle import GpsrCycleController, SchedulerState
 from gpsr_task_scheduler.planner import plan_to_dict, step_to_action_step_dict
 from gpsr_task_scheduler.scheduler import schedule_command
+from gpsr_task_scheduler.scheduler_viewer_sm import SchedulerViewerSM
 from robot_ai_interfaces.action import ExecuteActionQueue, ExecuteTaskPlan
 from robot_ai_interfaces.msg import ActionQueue, ActionStep
 from robot_ai_interfaces.srv import ScheduleCommand
@@ -35,6 +36,8 @@ class GpsrTaskSchedulerNode(Node):
 
         # Section: Declare runtime parameters exposed by the scheduler launch file.
         self.declare_parameter("config_file", self.default_config_path())
+        self.declare_parameter("skill_registry_file", "")
+        self.declare_parameter("allow_simulated_primitives", False)
         self.declare_parameter("dry_run", True)
         self.declare_parameter("command_input_mode", "topic")
         self.declare_parameter("command_topic", "/gpsr/command")
@@ -60,6 +63,7 @@ class GpsrTaskSchedulerNode(Node):
         self.declare_parameter("error_recovery_retry_delay_sec", 5.0)
         self.declare_parameter("state_topic", "/gpsr/state")
         self.declare_parameter("command_result_topic", "/gpsr/command_result")
+        self.declare_parameter("enable_scheduler_viewer", True)
 
         # Section: Load deterministic vocabulary and mission policy.
         self.config = self.load_runtime_config()
@@ -70,6 +74,13 @@ class GpsrTaskSchedulerNode(Node):
         self.error_recovery_attempts = 0
         self.error_recovery_next_attempt_time = 0.0
         self.error_recovery_exhaustion_logged = False
+
+        # Section: Publish the complete scheduler lifecycle, including ERROR, to YASMIN Viewer.
+        self.scheduler_viewer = (
+            SchedulerViewerSM(self)
+            if bool(self.get_parameter("enable_scheduler_viewer").value)
+            else None
+        )
 
         # Section: Publish complete dry-run or accepted plans for operator inspection.
         self.plan_pub = self.create_publisher(String, str(self.get_parameter("plan_topic").value), 10)
@@ -102,7 +113,7 @@ class GpsrTaskSchedulerNode(Node):
             self.schedule_service_callback,
         )
 
-        # Section: Expose a guarded operator interface that re-arms ERROR recovery only.
+        # Section: Expose an operator interface that clears ERROR and reopens command intake.
         self.reset_state_service = self.create_service(
             Trigger,
             str(self.get_parameter("reset_state_service").value),
@@ -143,7 +154,11 @@ class GpsrTaskSchedulerNode(Node):
 
     def load_runtime_config(self) -> SchedulerConfig:
         """Special function: Apply ROS launch parameters over YAML scheduler defaults."""
-        config = load_config(str(self.get_parameter("config_file").value))
+        registry_file = str(self.get_parameter("skill_registry_file").value).strip()
+        config = load_config(
+            str(self.get_parameter("config_file").value),
+            registry_file or None,
+        )
         instruction_point = str(self.get_parameter("instruction_point").value).strip()
         if instruction_point:
             config.instruction_point = instruction_point
@@ -152,6 +167,9 @@ class GpsrTaskSchedulerNode(Node):
         config.default_skill_timeout_sec = float(self.get_parameter("default_skill_timeout_sec").value)
         config.default_skill_retries = int(self.get_parameter("default_skill_retries").value)
         config.actions["execute_action_queue"] = str(self.get_parameter("execute_action_queue_action").value)
+        config.allow_simulated_primitives = bool(
+            self.get_parameter("allow_simulated_primitives").value
+        )
         return config
 
     def command_callback(self, msg: String) -> None:
@@ -198,7 +216,7 @@ class GpsrTaskSchedulerNode(Node):
         _request: Trigger.Request,
         response: Trigger.Response,
     ) -> Trigger.Response:
-        """Special function: Re-arm guarded recovery without force-setting scheduler state."""
+        """Special function: Reset ERROR directly to command intake without recovery motion."""
         snapshot = self.cycle.snapshot()
         if snapshot.state != SchedulerState.ERROR:
             response.success = False
@@ -207,19 +225,12 @@ class GpsrTaskSchedulerNode(Node):
                 "only ERROR can be reset."
             )
             return response
-        if not bool(self.get_parameter("enable_error_recovery").value):
-            response.success = False
-            response.message = "Reset rejected because enable_error_recovery is false."
-            return response
-
-        # Section: The recovery timer performs the verified return before reopening intake.
+        # Section: Clear exhausted automatic-recovery bookkeeping before the operator override.
         self.error_recovery_attempts = 0
         self.error_recovery_next_attempt_time = 0.0
         self.error_recovery_exhaustion_logged = False
-        response.success = True
-        response.message = (
-            "GPSR ERROR recovery re-armed; waiting for verified return to Instruction Point."
-        )
+        response.success = bool(self.cycle.reset_error())
+        response.message = "GPSR ERROR reset; scheduler is WAITING_FOR_COMMAND."
         self.get_logger().warn(response.message)
         self.publish_cycle_state()
         return response
@@ -440,7 +451,7 @@ class GpsrTaskSchedulerNode(Node):
         executable["steps"] = [
             step
             for step in planned.get("steps", [])
-            if str(step.get("skill_name", "")) != "RETURN_TO_INSTRUCTION_POINT"
+            if str(step.get("step_id", "")) != "return_to_instruction_point"
         ]
         return executable
 
@@ -449,23 +460,26 @@ class GpsrTaskSchedulerNode(Node):
         return_plan = {
             "steps": [{
                 "step_id": "return_to_instruction_point",
-                "skill_name": "RETURN_TO_INSTRUCTION_POINT",
+                "skill_name": "NAVIGATE",
                 "arguments": {"target_location": self.config.instruction_point},
                 "dependencies": [],
-                "timeout": float(self.config.timeout_for("RETURN_TO_INSTRUCTION_POINT")),
-                "retry_count": int(self.config.retries_for("RETURN_TO_INSTRUCTION_POINT")),
+                "timeout": float(self.config.timeout_for("NAVIGATE")),
+                "retry_count": int(self.config.retries_for("NAVIGATE")),
                 "result_variable": None,
             }]
         }
         return self.submit_action_queue(
             f"{command_id}_return",
             return_plan,
-            max(1.0, float(self.config.timeout_for("RETURN_TO_INSTRUCTION_POINT"))),
+            max(1.0, float(self.config.timeout_for("NAVIGATE"))),
         )
 
     def publish_cycle_state(self) -> None:
         """Special function: Publish current readiness, identity, and competition count."""
         snapshot = self.cycle.snapshot()
+        # Section: Keep the YASMIN supervisory state synchronized with the guarded cycle.
+        if self.scheduler_viewer is not None:
+            self.scheduler_viewer.update(snapshot.state)
         msg = String()
         msg.data = json.dumps({
             "state": snapshot.state.value,
@@ -479,6 +493,14 @@ class GpsrTaskSchedulerNode(Node):
             ),
         }, sort_keys=True)
         self.state_pub.publish(msg)
+
+    def destroy_node(self) -> Any:
+        """Special function: Stop the scheduler viewer before destroying ROS resources."""
+        # Section: Prevent the YASMIN worker and publisher timer from outliving this node.
+        if self.scheduler_viewer is not None:
+            self.scheduler_viewer.shutdown()
+            self.scheduler_viewer = None
+        return super().destroy_node()
 
     def schedule(self, command_id: str, instruction: str, dry_run: bool) -> dict[str, Any]:
         """Special function: Build and publish one deterministic plan dictionary."""

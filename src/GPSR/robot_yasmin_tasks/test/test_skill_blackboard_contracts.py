@@ -13,21 +13,21 @@ from robot_yasmin_tasks.skills.place_object_skill_sm import PlaceObjectSkillSM
 def test_pick_requires_pose() -> None:
     """Special function: PICK rejects missing pose."""
     blackboard = Blackboard()
-    blackboard[bb.CURRENT_ACTION] = {"action_type": "PICK", "target_object": "cup"}
+    blackboard[bb.CURRENT_ACTION] = {"action_type": "PICK_OBJECT", "target_object": "cup"}
     assert PickObjectSkillSM()(blackboard) == INVALID_INPUT
 
 
 def test_place_requires_held_object() -> None:
     """Special function: PLACE rejects missing held object."""
     blackboard = Blackboard()
-    blackboard[bb.CURRENT_ACTION] = {"action_type": "PLACE", "target_location": "table"}
+    blackboard[bb.CURRENT_ACTION] = {"action_type": "PLACE_OBJECT", "target_location": "table"}
     assert PlaceObjectSkillSM()(blackboard) == INVALID_INPUT
 
 
 def test_give_requires_held_object() -> None:
     """Special function: GIVE rejects missing held object."""
     blackboard = Blackboard()
-    blackboard[bb.CURRENT_ACTION] = {"action_type": "GIVE", "target_person": "operator"}
+    blackboard[bb.CURRENT_ACTION] = {"action_type": "HANDOVER_OBJECT", "target_person": "operator"}
     assert HandoverSkillSM()(blackboard) == INVALID_INPUT
 
 

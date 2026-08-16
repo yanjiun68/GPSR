@@ -7,7 +7,11 @@ from robot_yasmin_tasks.skills.skill_base import SimpleSkillSM
 
 def validate_info(_blackboard: Blackboard, action: ActionStepData) -> tuple[bool, str]:
     """Special function: Validate extractable person field."""
-    return (str(action.parameters.get("field", "")).lower() in {"name", "pose", "gesture"}, "Invalid person info field.")
+    fields = list(action.parameters.get("fields", []))
+    if not fields and action.parameters.get("field"):
+        fields = [action.parameters.get("field")]
+    supported = {"name", "age", "gender", "favorite_drink", "favourite_drink", "hometown", "shirt_color", "shirt_colour", "glasses", "hat", "face_mask", "pose", "gesture", "profile_id", "person_id", "track_id"}
+    return (all(str(field).lower() in supported for field in fields), "Invalid person info field.")
 
 
 class ExtractPersonInfoSkillSM(SimpleSkillSM):

@@ -1,0 +1,19 @@
+# Section: Find one person satisfying every normalized positive predicate.
+string selector_json
+string location
+string command_id
+string source_step_id
+float32 timeout_sec
+uint32 confirmation_min_frames
+---
+bool success
+string outcome
+string person_ref_json
+string memory_id
+uint64 memory_revision
+string observation_json
+string message
+---
+string status
+uint32 visible_count
+uint32 matching_count

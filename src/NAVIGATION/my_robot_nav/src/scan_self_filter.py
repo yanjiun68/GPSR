@@ -135,10 +135,13 @@ class ScanSelfFilter(Node):
         angles = msg.angle_min + np.arange(n, dtype=np.float64) * msg.angle_increment
         finite = np.isfinite(ranges)
 
-        px_laser = ranges * np.cos(angles)
-        py_laser = ranges * np.sin(angles)
-        xs_base = tx + cos_yaw * px_laser - sin_yaw * py_laser
-        ys_base = ty + sin_yaw * px_laser + cos_yaw * py_laser
+        # Section: Transform finite returns only; multiplying infinity by zero produces NaNs.
+        xs_base = np.full(n, np.nan, dtype=np.float64)
+        ys_base = np.full(n, np.nan, dtype=np.float64)
+        px_laser = ranges[finite] * np.cos(angles[finite])
+        py_laser = ranges[finite] * np.sin(angles[finite])
+        xs_base[finite] = tx + cos_yaw * px_laser - sin_yaw * py_laser
+        ys_base[finite] = ty + sin_yaw * px_laser + cos_yaw * py_laser
 
         if self.polygon is not None:
             mask_inside = self._inside_polygon(xs_base, ys_base)
@@ -204,7 +207,11 @@ class ScanSelfFilter(Node):
 
     def _warn_throttled(self, message: str):
         now_sec = self.get_clock().now().nanoseconds / 1e9
-        if self.last_warn_time is None or (now_sec - self.last_warn_time) >= self.warn_interval_sec:
+        warning_interval_elapsed = (
+            self.last_warn_time is None
+            or (now_sec - self.last_warn_time) >= self.warn_interval_sec
+        )
+        if warning_interval_elapsed:
             self.last_warn_time = now_sec
             self.get_logger().warn(message)
 

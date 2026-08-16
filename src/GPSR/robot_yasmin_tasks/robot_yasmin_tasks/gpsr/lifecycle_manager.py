@@ -17,7 +17,10 @@ from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 
 from robot_ai_interfaces.srv import GetLifecycleSkillState, ManageLifecycleSkill
-from robot_yasmin_tasks.gpsr.action_types import ALLOWED_ACTION_TYPES
+from robot_yasmin_tasks.gpsr.action_types import (
+    ALLOWED_ACTION_TYPES,
+    load_primitive_registry,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -28,6 +31,10 @@ class SkillLifecycleSpec:
     conflict_group: str
     lifecycle_nodes: tuple[str, ...]
     execution_interface: str
+    interface_type: str = ""
+    implementation: str = "real"
+    production_enabled: bool = True
+    legacy_aliases: tuple[str, ...] = ()
 
 
 class GpsrLifecycleManager(Node):
@@ -40,12 +47,16 @@ class GpsrLifecycleManager(Node):
         # Section: Declare the one authoritative registry and bounded transition timeout.
         self.declare_parameter("registry_file", self.default_registry_path())
         self.declare_parameter("transition_timeout_sec", 10.0)
+        self.declare_parameter("allow_simulated_primitives", False)
 
         # Section: Serialize complete group operations so conflicts cannot race.
         self._operation_lock = threading.RLock()
         self._integrity_fault = ""
         self._prepared_skill = ""
         self._callback_group = ReentrantCallbackGroup()
+        self.allow_simulated_primitives = bool(
+            self.get_parameter("allow_simulated_primitives").value
+        )
         self.registry = self.load_registry(str(self.get_parameter("registry_file").value))
 
         # Section: Build fixed lifecycle service clients from registry node names.
@@ -113,34 +124,22 @@ class GpsrLifecycleManager(Node):
 
     def load_registry(self, registry_file: str) -> dict[str, SkillLifecycleSpec]:
         """Special function: Load and validate the JSON-compatible YAML skill registry."""
-        path = Path(registry_file)
-        payload = json.loads(path.read_text(encoding="utf-8"))
-        raw_skills = payload.get("skills", {})
-        if not isinstance(raw_skills, dict) or not raw_skills:
-            raise RuntimeError(f"Lifecycle registry has no skills: {path}")
+        capabilities = load_primitive_registry(registry_file)
 
-        # Section: Normalize names once so the executor and manager share exact keys.
-        registry: dict[str, SkillLifecycleSpec] = {}
-        for raw_name, raw_spec in raw_skills.items():
-            name = str(raw_name).strip().upper()
-            nodes = tuple(str(item).strip().rstrip("/") for item in raw_spec.get("lifecycle_nodes", []))
-            if not name or any(not node.startswith("/") for node in nodes):
-                raise RuntimeError(f"Invalid lifecycle registry entry: {raw_name}")
-            registry[name] = SkillLifecycleSpec(
-                name=name,
-                conflict_group=str(raw_spec.get("conflict_group", "")).strip(),
-                lifecycle_nodes=nodes,
-                execution_interface=str(raw_spec.get("execution_interface", "")).strip(),
+        # Section: Adapt the authoritative capability records to lifecycle transition policy.
+        return {
+            name: SkillLifecycleSpec(
+                name=spec.name,
+                conflict_group=spec.conflict_group,
+                lifecycle_nodes=spec.lifecycle_nodes,
+                execution_interface=spec.execution_interface,
+                interface_type=spec.interface_type,
+                implementation=spec.implementation,
+                production_enabled=spec.production_enabled,
+                legacy_aliases=spec.legacy_aliases,
             )
-
-        # Section: Fail startup if any dispatchable state machine can bypass manager policy.
-        missing = sorted(ALLOWED_ACTION_TYPES - set(registry))
-        unexpected = sorted(set(registry) - ALLOWED_ACTION_TYPES)
-        if missing or unexpected:
-            raise RuntimeError(
-                f"Lifecycle registry/action mismatch: missing={missing}, unexpected={unexpected}"
-            )
-        return registry
+            for name, spec in capabilities.items()
+        }
 
     def prepare_callback(
         self,
@@ -228,6 +227,16 @@ class GpsrLifecycleManager(Node):
         spec = self.registry.get(name)
         if spec is None:
             return False, f"Unknown GPSR skill: {name}"
+        production_available = spec.implementation == "real" and spec.production_enabled
+        test_simulation_available = (
+            bool(getattr(self, "allow_simulated_primitives", False))
+            and spec.implementation == "simulated"
+        )
+        if not production_available and not test_simulation_available:
+            return False, (
+                f"Primitive unavailable: {name} implementation={spec.implementation} "
+                f"production_enabled={spec.production_enabled}"
+            )
         if self._integrity_fault:
             return False, f"Lifecycle integrity fault requires recover_skill: {self._integrity_fault}"
         if not spec.lifecycle_nodes:
@@ -469,6 +478,9 @@ class GpsrLifecycleManager(Node):
             "skill_name": spec.name,
             "conflict_group": spec.conflict_group,
             "execution_interface": spec.execution_interface,
+            "interface_type": spec.interface_type,
+            "implementation": spec.implementation,
+            "production_enabled": spec.production_enabled,
             "prepared_skill": self._prepared_skill,
             "integrity_fault": self._integrity_fault,
             "nodes": {
