@@ -38,6 +38,9 @@
   <depend>interbotix_xs_modules</depend>
   <depend>interbotix_perception_modules</depend>
   <depend>interbotix_xsarm_moveit</depend>
+  <!-- Guarded gripper close is delegated to the companion action server. -->
+  <exec_depend>rx200_gripper_guard</exec_depend>
+  <exec_depend>rx200_gripper_guard_interfaces</exec_depend>
   
   <!-- Camera -->
   <depend>realsense2_camera</depend>

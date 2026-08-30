@@ -23,6 +23,10 @@ service /semantic_location/get_current
 
 Room classification is based only on polygon containment. The nearest waypoint is calculated after the room is known and never turns an outside pose into a known room.
 
+## Interactive visualizer
+
+Open [docs/semantic_location_visualizer.html](docs/semantic_location_visualizer.html) in a browser to explore the classification pipeline without running ROS. Click or drag the simulated robot through the example polygons, change AMCL variance and debounce duration, replay the unit-test scenarios, inspect the simulated service response, or edit the JSON mirror of the semantic YAML configuration.
+
 ## Semantic map format
 
 The installed [semantic_locations.yaml](config/semantic_locations.yaml) is illustrative. It is deliberately not copied from competition coordinates and must be replaced or overridden before physical use.

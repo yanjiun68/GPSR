@@ -274,3 +274,11 @@ def generate_launch_description() -> LaunchDescription:
         TimerAction(period=5.0, actions=[reid_enricher]),
         TimerAction(period=6.0, actions=[master_tracker, follow_controller]),
     ])
+
+"""
+ros2 launch person_follower_master person_follow_return.launch.py \
+  launch_drivers:=false \
+  launch_camera:=false
+
+  This config is for integration with other nodes. 
+  """

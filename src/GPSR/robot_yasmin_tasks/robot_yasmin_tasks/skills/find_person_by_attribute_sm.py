@@ -11,6 +11,8 @@ from robot_yasmin_tasks.gpsr.blackboard_utils import bb_get
 from robot_yasmin_tasks.gpsr.models import ActionStepData, make_skill_result, normalize_action_step
 from robot_yasmin_tasks.gpsr.outcomes import CANCELED, FAILED, INVALID_INPUT, SKILL_OUTCOMES
 from robot_yasmin_tasks.ros_clients.find_person_attribute_clients import FindPersonAttributeClients
+from robot_yasmin_tasks.ros_clients.nav2_client import Nav2Client
+from robot_yasmin_tasks.skills.person_waypoint_search import PersonWaypointSearchSM
 
 
 # Section: Positive selectors implemented by the lifecycle tracked-appearance server.
@@ -92,13 +94,13 @@ class WaitForAttributeMatchState(State):
         return outcome
 
 
-class FindPersonByAttributeSM(StateMachine):
-    """Special function: Find a person by real pose, gesture, or any-person evidence."""
+class _FindPersonByAttributeAtLocationSM(StateMachine):
+    """Special function: Search one already selected waypoint for an attribute match."""
 
     def __init__(self, client: FindPersonAttributeClients | None = None) -> None:
         """Special function: Build the attribute-only validation and perception graph."""
         super().__init__(outcomes=SKILL_OUTCOMES)
-        self.set_name("FIND_PERSON_BY_ATTRIBUTE_SM")
+        self.set_name("FIND_PERSON_BY_ATTRIBUTE_AT_LOCATION_SM")
         active_client = client or FindPersonAttributeClients()
         self.add_state(
             "VALIDATE_ATTRIBUTE",
@@ -109,4 +111,22 @@ class FindPersonByAttributeSM(StateMachine):
             "WAIT_FOR_ATTRIBUTE_MATCH",
             WaitForAttributeMatchState(active_client),
             transitions={outcome: outcome for outcome in SKILL_OUTCOMES},
+        )
+
+
+class FindPersonByAttributeSM(PersonWaypointSearchSM):
+    """Special function: Loop through YAML waypoints until an attribute match is found."""
+
+    def __init__(
+        self,
+        client: FindPersonAttributeClients | None = None,
+        navigation: Nav2Client | None = None,
+        search_config_file: str | None = None,
+    ) -> None:
+        """Special function: Wrap local attribute perception in the shared person-search route."""
+        super().__init__(
+            "FIND_PERSON_BY_ATTRIBUTE_SM",
+            _FindPersonByAttributeAtLocationSM(client),
+            navigation,
+            search_config_file,
         )

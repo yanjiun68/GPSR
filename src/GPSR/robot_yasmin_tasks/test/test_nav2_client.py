@@ -1,5 +1,7 @@
 """Section: Real NavigateNamedPose client behavior tests."""
 
+# Section: Test fixtures, deterministic fakes, and regression scenarios.
+
 from types import SimpleNamespace
 
 from action_msgs.msg import GoalStatus
@@ -76,6 +78,54 @@ class FakeActionClient:
         return ImmediateFuture(self.goal_handle)
 
 
+class FakePoseActionClient:
+    """Special function: Capture raw NavigateToPose goals without a ROS graph."""
+
+    def __init__(self, goal_handle: AcceptedGoal) -> None:
+        """Special function: Store one deterministic raw-pose result handle."""
+        self.goal_handle = goal_handle
+        self.poses = []
+
+    def wait_for_server(self, timeout_sec: float) -> bool:
+        """Special function: Report the fake raw-pose server as available."""
+        return timeout_sec > 0.0
+
+    def send_goal_async(self, goal) -> ImmediateFuture:
+        """Special function: Capture the raw pose carried by a Nav2 goal."""
+        self.poses.append(goal.pose)
+        return ImmediateFuture(self.goal_handle)
+
+
+class FakeSpinActionClient:
+    """Special function: Capture Nav2 Spin goals without a live behavior server."""
+
+    def __init__(self, goal_handle: AcceptedGoal) -> None:
+        """Special function: Store the result handle and captured relative angles."""
+        self.goal_handle = goal_handle
+        self.goals = []
+
+    def wait_for_server(self, timeout_sec: float) -> bool:
+        """Special function: Report availability for every positive bounded wait."""
+        return timeout_sec > 0.0
+
+    def send_goal_async(self, goal) -> ImmediateFuture:
+        """Special function: Capture the Spin goal before accepting it."""
+        self.goals.append(goal)
+        return ImmediateFuture(self.goal_handle)
+
+
+def raw_pose_parameters() -> dict:
+    """Special function: Return one valid raw map-pose parameter contract."""
+    return {
+        "target_pose": {
+            "frame_id": "map",
+            "position": {"x": 1.0, "y": -2.0, "z": 0.0},
+            "orientation": {"x": 0.0, "y": 0.0, "z": 0.0, "w": 2.0},
+        },
+        "target_source": "command_start_amcl",
+    }
+
+
 def real_client_with(fake_client: FakeActionClient) -> Nav2Client:
     """Special function: Construct a real-mode client around a test action transport."""
     client = Nav2Client(node=None, simulate=False)
@@ -124,3 +174,63 @@ def test_named_navigation_reports_unavailable_server() -> None:
     assert result.outcome == FAILED
     assert result.recoverable is True
     assert "unavailable" in result.message
+
+
+def test_raw_pose_navigation_uses_nav2_action_and_normalizes_quaternion() -> None:
+    """Special function: Route raw targets to NavigateToPose with normalized map poses."""
+    fake = FakePoseActionClient(AcceptedGoal(True, ""))
+    client = Nav2Client(node=None, simulate=False)
+    client.pose_client = fake
+    blackboard = Blackboard()
+    result = client.navigate_to_pose(
+        blackboard,
+        ActionStepData("NAVIGATE", parameters=raw_pose_parameters(), timeout_sec=10.0),
+    )
+    assert result.outcome == SUCCESS
+    assert result.result["target_type"] == "pose"
+    assert len(fake.poses) == 1
+    assert fake.poses[0].header.frame_id == "map"
+    assert fake.poses[0].pose.orientation.w == 1.0
+
+
+def test_navigation_rejects_ambiguous_named_and_raw_targets() -> None:
+    """Special function: Prevent one step from selecting two navigation interfaces."""
+    client = Nav2Client(simulate=True)
+    result = client.navigate_to_pose(
+        Blackboard(),
+        ActionStepData(
+            "NAVIGATE",
+            target_location="kitchen",
+            parameters=raw_pose_parameters(),
+        ),
+    )
+    assert result.outcome == FAILED
+    assert result.fatal is True
+    assert "exactly one" in result.message
+
+
+def test_navigation_rejects_malformed_raw_pose() -> None:
+    """Special function: Reject non-map and zero-quaternion raw navigation targets."""
+    parameters = raw_pose_parameters()
+    parameters["target_pose"]["orientation"]["w"] = 0.0
+    result = Nav2Client(simulate=True).navigate_to_pose(
+        Blackboard(),
+        ActionStepData("NAVIGATE", parameters=parameters),
+    )
+    assert result.outcome == FAILED
+    assert result.fatal is True
+    assert "malformed" in result.message
+
+
+def test_search_rotation_uses_nav2_spin_with_time_allowance() -> None:
+    """Special function: Local person scanning sends a bounded relative Nav2 Spin goal."""
+    fake = FakeSpinActionClient(AcceptedGoal(True))
+    client = Nav2Client(node=None, simulate=False)
+    client.spin_client = fake
+
+    result = client.spin_by_angle(Blackboard(), 1.25, 4.5)
+
+    assert result.outcome == SUCCESS
+    assert fake.goals[0].target_yaw == 1.25
+    assert fake.goals[0].time_allowance.sec == 4
+    assert fake.goals[0].time_allowance.nanosec == 500_000_000

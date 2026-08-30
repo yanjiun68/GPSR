@@ -1,5 +1,7 @@
 """Section: Reusable YASMIN skill state-machine base."""
 
+# Section: State-machine composition and skill-specific execution behavior.
+
 from __future__ import annotations
 
 from collections.abc import Callable

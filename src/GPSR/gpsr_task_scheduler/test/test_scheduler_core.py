@@ -1,5 +1,7 @@
 """Section: Deterministic scheduler unit tests."""
 
+# Section: Test fixtures, deterministic fakes, and regression scenarios.
+
 from __future__ import annotations
 
 import itertools
@@ -7,6 +9,7 @@ import itertools
 import pytest
 
 from gpsr_task_scheduler.config import default_config
+from gpsr_task_scheduler.models import SkillStep
 from gpsr_task_scheduler.planner import step_to_action_step_dict
 from gpsr_task_scheduler.scheduler import schedule_command
 
@@ -63,7 +66,8 @@ def test_human_pose_filter_is_structured() -> None:
     result = planned_result("find person with right hand raised in the kitchen tell me")
     assert {"feature": "pose", "operator": "equals", "value": "right_hand_raised"} in result.task_request.filters
     assert result.task_request.person_selector == {"all": [{"type": "gesture", "operator": "equals", "value": "right_hand_raised"}]}
-    assert [step.skill_name for step in result.steps] == ["NAVIGATE", "FIND_PERSON_BY_ATTRIBUTE", "SAY"]
+    assert [step.skill_name for step in result.steps] == ["FIND_PERSON_BY_ATTRIBUTE", "SAY"]
+    assert result.steps[0].arguments["search_scope"] == "STRICT_LOCATION"
 
 
 @pytest.mark.parametrize(
@@ -74,15 +78,31 @@ def test_right_arm_stt_variants_select_attribute_route(phrase: str) -> None:
     """Special function: Supported STT arm variants produce the same attribute action."""
     result = planned_result(f"find a person {phrase} in the living room")
     assert result.task_request.person_selector == {"all": [{"type": "gesture", "operator": "equals", "value": "right_hand_raised"}]}
-    assert result.steps[1].skill_name == "FIND_PERSON_BY_ATTRIBUTE"
+    assert result.steps[0].skill_name == "FIND_PERSON_BY_ATTRIBUTE"
 
 
 def test_named_person_selects_identity_route() -> None:
     """Special function: A configured searched name produces only FIND_PERSON."""
     result = planned_result("find john in the living room")
     assert result.task_request.person_selector == {"type": "name", "value": "john"}
-    assert [step.skill_name for step in result.steps] == ["NAVIGATE", "FIND_PERSON"]
-    assert result.steps[1].arguments["target_person"] == "john"
+    assert [step.skill_name for step in result.steps] == ["FIND_PERSON"]
+    assert result.steps[0].arguments["target_person"] == "john"
+    assert result.steps[0].arguments["search_scope"] == "STRICT_LOCATION"
+
+
+def test_location_free_person_search_builds_one_global_compound_skill() -> None:
+    """Special function: Missing location selects YAML waypoint search instead of rejection."""
+    result = planned_result("find a person")
+    assert [step.skill_name for step in result.steps] == ["FIND_PERSON_BY_ATTRIBUTE"]
+    assert result.steps[0].arguments["search_scope"] == "GLOBAL"
+    assert result.steps[0].arguments["target_location"] is None
+
+
+def test_location_free_named_person_search_builds_one_global_identity_skill() -> None:
+    """Special function: A known name can be searched across every configured waypoint."""
+    result = planned_result("find john")
+    assert [step.skill_name for step in result.steps] == ["FIND_PERSON"]
+    assert result.steps[0].arguments["search_scope"] == "GLOBAL"
 
 
 def test_name_and_attribute_combination_is_rejected() -> None:
@@ -100,7 +120,7 @@ def test_any_person_selects_attribute_route() -> None:
     """Special function: Generic person search becomes an explicit any-person selector."""
     result = planned_result("find a person in the living room")
     assert result.task_request.person_selector == {"type": "any_person", "value": ""}
-    assert result.steps[1].skill_name == "FIND_PERSON_BY_ATTRIBUTE"
+    assert result.steps[0].skill_name == "FIND_PERSON_BY_ATTRIBUTE"
 
 
 def test_clothing_attribute_selects_tracked_appearance_route() -> None:
@@ -109,7 +129,7 @@ def test_clothing_attribute_selects_tracked_appearance_route() -> None:
     assert result.task_request.person_selector == {
         "all": [{"type": "shirt_color", "operator": "equals", "value": "red"}]
     }
-    assert result.steps[1].skill_name == "FIND_PERSON_BY_ATTRIBUTE"
+    assert result.steps[0].skill_name == "FIND_PERSON_BY_ATTRIBUTE"
 
 
 def test_combined_attributes_and_guest_fields_create_extract_step() -> None:
@@ -125,9 +145,9 @@ def test_combined_attributes_and_guest_fields_create_extract_step() -> None:
     }
     assert result.task_request.requested_person_fields == ["name", "favorite_drink"]
     assert [step.skill_name for step in result.steps] == [
-        "NAVIGATE", "FIND_PERSON_BY_ATTRIBUTE", "EXTRACT_PERSON_INFO", "SAY",
+        "FIND_PERSON_BY_ATTRIBUTE", "EXTRACT_PERSON_INFO", "SAY",
     ]
-    assert result.steps[2].arguments["fields"] == ["name", "favorite_drink"]
+    assert result.steps[1].arguments["fields"] == ["name", "favorite_drink"]
 
 
 def test_unconfigured_hat_model_is_rejected_during_planning() -> None:
@@ -176,6 +196,24 @@ def test_task_result_substitution_is_passed_to_tts_arguments() -> None:
     result = planned_result("count people in the kitchen go to the living room tell me")
     assert result.steps[-1].skill_name == "SAY"
     assert result.steps[-1].arguments["substitution"] == "task_result"
+
+
+def test_report_back_to_me_is_deferred_until_after_scheduler_return() -> None:
+    """Special function: Keep operator-relative reporting outside the pre-return queue."""
+    result = planned_result("find bottles and report back to me")
+    assert result.task_request.report_after_return is True
+    assert [step.skill_name for step in result.steps] == ["FIND_OBJECT"]
+    assert [step.skill_name for step in result.post_return_steps] == ["SAY"]
+    assert result.post_return_steps[0].arguments["substitution"] == "task_result"
+
+
+def test_missing_navigation_location_serializes_as_empty_string() -> None:
+    """Special function: Prevent optional ROS string fields from becoming literal None."""
+    converted = step_to_action_step_dict(
+        SkillStep("raw_pose", "NAVIGATE", {"target_location": None}),
+        "command_1",
+    )
+    assert converted["target_location"] == ""
 
 
 def test_return_after_success_appends_instruction_point() -> None:
@@ -229,12 +267,13 @@ def test_unknown_table_reports_location_or_surface() -> None:
     assert "unknown_location_or_surface" in {issue.code for issue in result.issues}
 
 
-def test_follow_known_person_rejects_disabled_real_capability() -> None:
-    """Special function: Missing physical follow integration cannot report a valid plan."""
+def test_follow_known_person_uses_enabled_real_capability() -> None:
+    """Special function: A known person now schedules through the production follow adapter."""
     result = schedule_command("follow", "follow john", default_config())
-    assert not result.valid
+    assert result.valid
     assert [step.skill_name for step in result.steps] == ["FOLLOW_PERSON"]
-    assert {issue.code for issue in result.issues} == {"primitive_unavailable"}
+    assert result.steps[0].arguments["target_person"] == "john"
+    assert result.issues == []
 
 
 def test_action_step_conversion_preserves_timeout_and_arguments() -> None:

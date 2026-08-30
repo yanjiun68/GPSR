@@ -32,6 +32,8 @@ def plan_task(request: TaskRequest, config: SchedulerConfig) -> SchedulerResult:
     if issues:
         return SchedulerResult(request.command_id, request, [], issues)
     steps: list[SkillStep] = []
+    # Section: Operator-relative reports execute only after the scheduler-owned return phase.
+    post_return_steps: list[SkillStep] = []
     # Section: Standalone executable primitives bypass task-family helper expansion.
     if request.task_type == "navigate":
         steps.append(_step("navigate", "NAVIGATE", {"target_location": request.task_location}, [], config))
@@ -58,8 +60,8 @@ def plan_task(request: TaskRequest, config: SchedulerConfig) -> SchedulerResult:
     if request.task_type in {"say", "ask_and_listen"}:
         steps.extend(_communication_steps(request, config))
         return _validated_capability_result(request, steps, config)
-    # Section: FIND_OBJECT is a compound mission and owns every search navigation.
-    if request.task_type == "find_object":
+    # Section: Every FIND skill is a compound mission and owns its search navigation.
+    if request.task_type in {"find_object", "find_person"}:
         execute_step = _execute_step(request, None, config)
         steps.append(execute_step)
     else:
@@ -85,11 +87,26 @@ def plan_task(request: TaskRequest, config: SchedulerConfig) -> SchedulerResult:
         steps.append(_step("find_recipient", "FIND_PERSON", {"target_person": request.recipient.get("name", ""), "target_location": request.report_location or ""}, [dependency], config, "recipient"))
     if request.output_template:
         dependency = steps[-1].step_id
-        steps.append(_step("tts_say_output", "SAY", {"text": request.output_template, "substitution": "task_result"}, [dependency], config))
+        report_step = _step(
+            "tts_say_output",
+            "SAY",
+            {"text": request.output_template, "substitution": "task_result"},
+            [dependency],
+            config,
+        )
+        if request.report_after_return:
+            post_return_steps.append(report_step)
+        else:
+            steps.append(report_step)
     if request.return_after_completion and request.return_location:
         dependency = steps[-1].step_id
         steps.append(_step("return_to_instruction_point", "NAVIGATE", {"target_location": request.return_location}, [dependency], config))
-    return _validated_capability_result(request, steps, config)
+    return _validated_capability_result(
+        request,
+        steps,
+        config,
+        post_return_steps=post_return_steps,
+    )
 
 
 def _validate_request(request: TaskRequest) -> list[ValidationIssue]:
@@ -97,7 +114,7 @@ def _validate_request(request: TaskRequest) -> list[ValidationIssue]:
     issues: list[ValidationIssue] = []
     if request.task_type not in TASK_TO_SKILL and request.task_type not in COMPOUND_TASK_TYPES:
         issues.append(ValidationIssue("unknown_task", f"Unsupported task type: {request.task_type}."))
-    if request.task_type in {"find_person", "count_objects", "count_people", "navigate", "guide_person", "place_object"} and not request.task_location:
+    if request.task_type in {"count_objects", "count_people", "navigate", "guide_person", "place_object"} and not request.task_location:
         issues.append(ValidationIssue("missing_task_location", "Task location is required."))
     if request.recipient and not request.output_template:
         issues.append(ValidationIssue("recipient_without_output", "Named recipient requires an output template."))
@@ -110,10 +127,13 @@ def _validated_capability_result(
     request: TaskRequest,
     steps: list[SkillStep],
     config: SchedulerConfig,
+    post_return_steps: list[SkillStep] | None = None,
 ) -> SchedulerResult:
     """Special function: Retain proposed primitives while rejecting unavailable capabilities."""
+    # Section: Capability admission covers both the task queue and deferred reporting queue.
+    deferred_steps = list(post_return_steps or [])
     unavailable = unavailable_primitives(
-        [step.skill_name for step in steps],
+        [step.skill_name for step in [*steps, *deferred_steps]],
         config.primitive_capabilities,
         config.allow_simulated_primitives,
     )
@@ -123,7 +143,13 @@ def _validated_capability_result(
             f"Required executable primitives are unavailable: {unavailable}.",
         )
     ] if unavailable else []
-    return SchedulerResult(request.command_id, request, steps, issues)
+    return SchedulerResult(
+        request.command_id,
+        request,
+        steps,
+        issues,
+        deferred_steps,
+    )
 
 
 def _acquire_steps(request: TaskRequest, config: SchedulerConfig) -> list[SkillStep]:
@@ -215,6 +241,8 @@ def _execute_step(request: TaskRequest, dependency: str | None, config: Schedule
     arguments.update(request.target)
     if request.task_type == "find_person":
         arguments["selector"] = dict(request.person_selector)
+        arguments["location"] = request.task_location or ""
+        arguments["search_scope"] = "STRICT_LOCATION" if request.task_location else "GLOBAL"
         if request.person_selector.get("type") == "name":
             arguments["target_person"] = str(request.person_selector.get("value", ""))
     # Section: Explicit FIND_OBJECT locations are strict boundaries; omission means global.
@@ -239,10 +267,10 @@ def step_to_action_step_dict(step: SkillStep, command_id: str) -> dict[str, Any]
         "action_type": step.skill_name,
         "task_id": command_id,
         "task_family": "gpsr_scheduler",
-        "target_object": str(args.get("object_name", "")),
-        "target_person": str(args.get("target_person", "")),
-        "target_location": str(args.get("target_location", "")),
-        "target_category": str(args.get("category", "")),
+        "target_object": _string_or_empty(args.get("object_name")),
+        "target_person": _string_or_empty(args.get("target_person")),
+        "target_location": _string_or_empty(args.get("target_location")),
+        "target_category": _string_or_empty(args.get("category")),
         "parameters_json": json.dumps(args, sort_keys=True),
         "timeout_sec": float(step.timeout),
         "max_retries": int(step.retry_count),
@@ -250,6 +278,11 @@ def step_to_action_step_dict(step: SkillStep, command_id: str) -> dict[str, Any]
         "requires_data": list(args.get("requires_data", [])),
         "result_variable": str(step.result_variable or ""),
     }
+
+
+def _string_or_empty(value: Any) -> str:
+    """Special function: Convert optional ROS string fields without leaking literal None."""
+    return "" if value is None else str(value)
 
 
 def plan_to_dict(result: SchedulerResult) -> dict[str, Any]:
@@ -270,6 +303,7 @@ def plan_to_dict(result: SchedulerResult) -> dict[str, Any]:
             "recipient": result.task_request.recipient,
             "output_template": result.task_request.output_template,
             "return_after_completion": result.task_request.return_after_completion,
+            "report_after_return": result.task_request.report_after_return,
         },
         "steps": [
             {
@@ -282,6 +316,18 @@ def plan_to_dict(result: SchedulerResult) -> dict[str, Any]:
                 "result_variable": step.result_variable,
             }
             for step in result.steps
+        ],
+        "post_return_steps": [
+            {
+                "step_id": step.step_id,
+                "skill_name": step.skill_name,
+                "arguments": step.arguments,
+                "dependencies": step.dependencies,
+                "timeout": step.timeout,
+                "retry_count": step.retry_count,
+                "result_variable": step.result_variable,
+            }
+            for step in result.post_return_steps
         ],
         "issues": [{"code": issue.code, "message": issue.message} for issue in result.issues],
     }

@@ -31,6 +31,8 @@ def generate_launch_description():
     # ========================================
     grasp_pkg_share = FindPackageShare('rx200_handbag_grasp')
     grasp_params = PathJoinSubstitution([grasp_pkg_share, 'config', 'grasp_params.yaml'])
+    guard_pkg_share = FindPackageShare('rx200_gripper_guard')
+    guard_params = PathJoinSubstitution([guard_pkg_share, 'config', 'gripper_guard.yaml'])
 
     # ========================================
     # Launch Arguments
@@ -45,8 +47,18 @@ def generate_launch_description():
     )
 
     # ========================================
-    # Main Grasp Node
+    # Gripper guard starts first and remains the sole PWM owner during guarded close.
     # ========================================
+    gripper_guard_node = Node(
+        package='rx200_gripper_guard',
+        executable='gripper_guard_node',
+        name='rx200_gripper_guard',
+        parameters=[guard_params],
+        output='screen',
+        emulate_tty=False,
+    )
+
+    # Main Grasp Node
     grasp_node = Node(
         package='rx200_handbag_grasp',
         executable='grasp_node.py',
@@ -71,6 +83,9 @@ def generate_launch_description():
     return LaunchDescription([
         viz_only_arg,
         use_saved_tf_arg,
+
+        # Companion guard tolerates startup delay while xs_sdk feedback becomes available.
+        gripper_guard_node,
 
         # Grasp node (slightly delayed to ensure other systems are ready)
         TimerAction(

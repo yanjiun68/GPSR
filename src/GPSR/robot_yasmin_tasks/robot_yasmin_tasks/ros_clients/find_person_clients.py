@@ -111,7 +111,8 @@ class FindPersonClients:
                 return future.result()
             if self._is_canceled(blackboard):
                 return None
-        return future.result() if future.done() else None
+        # Section: Completion observed after the absolute deadline is never accepted as success.
+        return None
 
     def lookup_profile(
         self,
@@ -213,6 +214,8 @@ class FindPersonClients:
             if bool(result.success) and bool(status.is_known) and (
                 matched_id == expected_profile_id and score >= float(threshold)
             ):
+                if time.monotonic() >= deadline:
+                    return {"status": "timeout", "reason": "RECOGNITION_DEADLINE_EXPIRED"}
                 observation = dict(self._latest_observation)
                 return {
                     "status": "found",
@@ -254,6 +257,7 @@ class FindPersonClients:
         with self._condition:
             next_sequence = self._sequence + 1
         deadline = time.monotonic() + max(0.05, timeout_sec)
+        saw_fresh_observation = False
         while time.monotonic() < deadline:
             if self._is_canceled(blackboard):
                 return {"status": "canceled", "reason": "CANCELED"}
@@ -264,9 +268,10 @@ class FindPersonClients:
                     continue
             for sequence, received_at, observation in pending:
                 next_sequence = sequence + 1
-                if not observation.get("face_detected", False):
-                    continue
                 if time.monotonic() - received_at > 1.0:
+                    continue
+                saw_fresh_observation = True
+                if not observation.get("face_detected", False):
                     continue
                 candidate_id = self._candidate_id(observation)
                 if candidate_id in rejected_ids:
@@ -283,7 +288,9 @@ class FindPersonClients:
                         "observation": observation,
                     },
                 }
-        return {"status": "exhausted", "reason": "CANDIDATE_SEARCH_TIMEOUT"}
+        if saw_fresh_observation:
+            return {"status": "exhausted", "reason": "NO_VISIBLE_FACE_CANDIDATE"}
+        return {"status": "failed", "reason": "PERSON_OBSERVATION_STREAM_UNAVAILABLE"}
 
     def ask_confirmation(
         self,

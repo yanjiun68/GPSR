@@ -7,13 +7,32 @@ import os
 from typing import Any
 
 import cv2
+import numpy as np
 import rclpy
 from cv_bridge import CvBridge
 from rclpy.lifecycle import LifecycleNode, State, TransitionCallbackReturn
-from rclpy.qos import QoSProfile, ReliabilityPolicy
+from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import Image
+from std_msgs.msg import Bool
 
 from putrabot_interfaces.msg import ObjectDetection, ObjectDetections
+
+
+# Section: Default open-vocabulary prompts retain COCO coverage and GPSR-specific objects.
+DEFAULT_OBJECT_CLASS_PROMPTS = [
+    "bicycle", "car", "motorcycle", "airplane", "bus", "train", "truck", "boat",
+    "traffic light", "fire hydrant", "stop sign", "parking meter", "bench", "bird",
+    "cat", "dog", "horse", "sheep", "cow", "elephant", "bear", "zebra", "giraffe",
+    "backpack", "umbrella", "handbag", "tie", "suitcase", "frisbee", "skis",
+    "snowboard", "sports ball", "kite", "baseball bat", "baseball glove", "skateboard",
+    "surfboard", "tennis racket", "bottle", "wine glass", "cup", "fork", "knife",
+    "spoon", "bowl", "banana", "apple", "sandwich", "orange", "broccoli", "carrot",
+    "hot dog", "pizza", "donut", "cake", "chair", "couch", "potted plant", "bed",
+    "dining table", "toilet", "tv", "laptop", "mouse", "remote", "keyboard",
+    "cell phone", "microwave", "oven", "toaster", "sink", "refrigerator", "book",
+    "clock", "vase", "scissors", "teddy bear", "hair drier", "toothbrush", "coke",
+    "milk", "chips", "cracker", "cookie",
+]
 
 
 # Section: Optional YOLO import provides a deterministic CONFIGURE failure.
@@ -43,16 +62,23 @@ class GpsrObjectDetectionNode(LifecycleNode):
         self.declare_parameter("rgb_topic", "/camera/image_raw")
         self.declare_parameter("detections_topic", "/perception/raw_object_detections")
         self.declare_parameter("annotated_image_topic", "/perception/object_detections_image")
-        self.declare_parameter("yolo_model_path", "yolo11n.pt")
+        # Section: Default standalone GPSR object detection to the requested YOLOE weights.
+        self.declare_parameter(
+            "yolo_model_path",
+            "/home/yanjiun68/workspace/WS1/PutrabotUPM-project/yoloe-26s-seg.pt",
+        )
         self.declare_parameter("confidence_threshold", 0.35)
         self.declare_parameter("image_size", 640)
         self.declare_parameter("inference_stride", 3)
         self.declare_parameter("yolo_device", "cuda")
         self.declare_parameter("include_classes", ["__none__"])
         self.declare_parameter("exclude_classes", ["person"])
+        self.declare_parameter("yolo_class_prompts", DEFAULT_OBJECT_CLASS_PROMPTS)
         self.declare_parameter("publish_annotated_image", True)
         self.declare_parameter("show_gui", False)
         self.declare_parameter("gui_window_name", "GPSR Object Detection")
+        self.declare_parameter("ready_topic", "/perception/object_detector_ready")
+        self.declare_parameter("enable_model_warmup", True)
 
         # Section: Resource handles stay empty until CONFIGURE.
         self.bridge = None
@@ -60,7 +86,9 @@ class GpsrObjectDetectionNode(LifecycleNode):
         self.image_subscription = None
         self.detections_pub = None
         self.annotated_pub = None
+        self.ready_pub = None
         self.skill_active = False
+        self.detector_ready = False
         self.frame_count = 0
         self.gui_available = False
         self.get_logger().info("GPSR YOLO lifecycle detector is UNCONFIGURED.")
@@ -82,6 +110,12 @@ class GpsrObjectDetectionNode(LifecycleNode):
                 for name in self.get_parameter("exclude_classes").value
                 if str(name).strip() and str(name).strip().lower() != "__none__"
             }
+            # Section: Read open-vocabulary labels before loading YOLOE embeddings.
+            self.yolo_class_prompts = [
+                str(name).strip().lower()
+                for name in self.get_parameter("yolo_class_prompts").value
+                if str(name).strip() and str(name).strip().lower() != "__none__"
+            ]
             self.publish_annotated_image = bool(
                 self.get_parameter("publish_annotated_image").value
             )
@@ -101,7 +135,11 @@ class GpsrObjectDetectionNode(LifecycleNode):
             self.model = self.load_model(str(self.get_parameter("yolo_model_path").value))
             if self.model is None:
                 raise RuntimeError("YOLO model could not be loaded")
+            self.configure_open_vocabulary_classes()
+            if bool(self.get_parameter("enable_model_warmup").value):
+                self.warm_up_model()
             self.frame_count = 0
+            self.detector_ready = False
 
             # Section: Allocate publishers and subscription without processing while INACTIVE.
             sensor_qos = QoSProfile(depth=10)
@@ -122,6 +160,17 @@ class GpsrObjectDetectionNode(LifecycleNode):
                 str(self.get_parameter("annotated_image_topic").value),
                 10,
             )
+            # Section: Transient readiness lets a later-configured skill server see current state.
+            ready_qos = QoSProfile(
+                depth=1,
+                durability=DurabilityPolicy.TRANSIENT_LOCAL,
+                reliability=ReliabilityPolicy.RELIABLE,
+            )
+            self.ready_pub = self.create_lifecycle_publisher(
+                Bool,
+                str(self.get_parameter("ready_topic").value),
+                ready_qos,
+            )
             self.get_logger().info(
                 "[GPSR_LIFECYCLE] YOLO configured: "
                 f"model={self.get_parameter('yolo_model_path').value}, "
@@ -139,12 +188,18 @@ class GpsrObjectDetectionNode(LifecycleNode):
         if result != TransitionCallbackReturn.SUCCESS:
             return result
         self.skill_active = True
+        self.detector_ready = False
+        if self.ready_pub is not None:
+            self.ready_pub.publish(Bool(data=False))
         self.get_logger().info("[GPSR_LIFECYCLE] YOLO detector: ACTIVE")
         return TransitionCallbackReturn.SUCCESS
 
     def on_deactivate(self, state: State) -> TransitionCallbackReturn:
         """Special function: Stop inference before deactivating lifecycle publishers."""
         self.skill_active = False
+        self.detector_ready = False
+        if self.ready_pub is not None:
+            self.ready_pub.publish(Bool(data=False))
         if self.gui_available:
             cv2.destroyWindow(self.gui_window_name)
         return super().on_deactivate(state)
@@ -178,9 +233,13 @@ class GpsrObjectDetectionNode(LifecycleNode):
         if self.annotated_pub is not None:
             self.destroy_publisher(self.annotated_pub)
             self.annotated_pub = None
+        if self.ready_pub is not None:
+            self.destroy_publisher(self.ready_pub)
+            self.ready_pub = None
         self.model = None
         self.bridge = None
         self.frame_count = 0
+        self.detector_ready = False
         if self.gui_available:
             cv2.destroyAllWindows()
         self.gui_available = False
@@ -195,6 +254,54 @@ class GpsrObjectDetectionNode(LifecycleNode):
         except Exception as exc:
             self.get_logger().error(f"Failed to load YOLO model '{model_path}': {exc}")
             return None
+
+    def configure_open_vocabulary_classes(self) -> None:
+        """Special function: Give YOLOE explicit text prompts before its first prediction."""
+        if self.model is None:
+            raise RuntimeError("Cannot configure class prompts without a loaded YOLO model.")
+        set_classes = getattr(self.model, "set_classes", None)
+        if not callable(set_classes):
+            return
+
+        # Section: An explicit include list narrows inference; otherwise retain broad object coverage.
+        requested_prompts = (
+            sorted(self.include_classes)
+            if self.include_classes
+            else list(self.yolo_class_prompts)
+        )
+        effective_prompts = [
+            name for name in requested_prompts
+            if name and name not in self.exclude_classes
+        ]
+        if not effective_prompts:
+            raise RuntimeError("Open-vocabulary YOLO requires at least one class prompt.")
+
+        # Section: YOLOE generates text embeddings and replaces numeric placeholder names.
+        set_classes(effective_prompts)
+        configured_names = {
+            str(name).strip().lower()
+            for name in getattr(self.model, "names", {}).values()
+        }
+        if not set(effective_prompts).issubset(configured_names):
+            raise RuntimeError("YOLOE did not retain the configured class prompts.")
+        self.get_logger().info(
+            f"Configured open-vocabulary YOLO with {len(effective_prompts)} object prompts."
+        )
+
+    def warm_up_model(self) -> None:
+        """Special function: Initialize the configured inference backend before activation."""
+        if self.model is None:
+            raise RuntimeError("Cannot warm up an unloaded YOLO model.")
+        # Section: A small black frame initializes CUDA kernels without publishing fake evidence.
+        warmup_frame = np.zeros((self.image_size, self.image_size, 3), dtype=np.uint8)
+        self.model.predict(
+            source=warmup_frame,
+            imgsz=self.image_size,
+            conf=self.confidence_threshold,
+            device=self.yolo_device,
+            verbose=False,
+        )
+        self.get_logger().info("YOLO inference backend warm-up completed.")
 
     def image_callback(self, msg: Image) -> None:
         """Special function: Run decimated inference only when explicitly ACTIVE."""
@@ -219,6 +326,12 @@ class GpsrObjectDetectionNode(LifecycleNode):
             detection.stamp = msg.header.stamp
             dets_msg.detections.append(detection)
         self.detections_pub.publish(dets_msg)
+        # Section: Readiness becomes true only after one successful live camera inference.
+        if not self.detector_ready:
+            self.detector_ready = True
+            if self.ready_pub is not None:
+                self.ready_pub.publish(Bool(data=True))
+            self.get_logger().info("[GPSR_LIFECYCLE] YOLO detector: READY")
 
         # Section: Debug output remains gated by the same ACTIVE callback.
         if self.publish_annotated_image or self.gui_available:

@@ -1,5 +1,7 @@
 """Section: Thin executor clients for lifecycle-owned person skill servers."""
 
+# Section: ROS client adapters, transport boundaries, and result translation.
+
 from __future__ import annotations
 
 import json
@@ -16,17 +18,68 @@ from robot_yasmin_tasks.gpsr.models import ActionStepData, make_skill_result
 from robot_yasmin_tasks.gpsr.outcomes import CANCELED, FAILED, INVALID_INPUT, NOT_FOUND, SUCCESS, TIMEOUT
 
 
-def wait_for_future(future: Any, timeout_sec: float, cancel_requested: Any = None) -> Any:
-    """Special function: Wait for one ROS future while honoring queue cancellation."""
+# Section: Goal teardown may outlive execution briefly but can never extend success time.
+CANCEL_DRAIN_GRACE_SEC = 2.0
+
+
+def remaining_sec(deadline: float) -> float:
+    """Special function: Return time left before one immutable monotonic deadline."""
+    return max(0.0, float(deadline) - time.monotonic())
+
+
+def wait_for_future_until(
+    future: Any,
+    deadline: float,
+    cancel_requested: Any = None,
+) -> Any:
+    """Special function: Wait for one future without accepting completion after its deadline."""
     completed = threading.Event()
     future.add_done_callback(lambda _future: completed.set())
-    deadline = time.monotonic() + max(0.1, float(timeout_sec))
-    while time.monotonic() < deadline:
-        if completed.wait(timeout=0.05):
-            return future.result()
+    while remaining_sec(deadline) > 0.0:
+        if completed.wait(timeout=min(0.05, remaining_sec(deadline))):
+            return future.result() if time.monotonic() <= deadline else None
         if callable(cancel_requested) and cancel_requested():
             return None
-    return future.result() if future.done() else None
+    return None
+
+
+def wait_for_future(future: Any, timeout_sec: float, cancel_requested: Any = None) -> Any:
+    """Special function: Wait for one ROS future while honoring queue cancellation."""
+    deadline = time.monotonic() + max(0.1, float(timeout_sec))
+    return wait_for_future_until(future, deadline, cancel_requested)
+
+
+def cancel_and_drain_goal(
+    goal_handle: Any,
+    result_future: Any,
+    grace_sec: float = CANCEL_DRAIN_GRACE_SEC,
+) -> bool:
+    """Special function: Request cancellation and await the server's terminal result."""
+    cleanup_deadline = time.monotonic() + max(0.1, float(grace_sec))
+    try:
+        cancel_future = goal_handle.cancel_goal_async()
+        wait_for_future_until(cancel_future, cleanup_deadline)
+        return wait_for_future_until(result_future, cleanup_deadline) is not None
+    except Exception:  # noqa: BLE001 - teardown reports failure instead of masking it.
+        return False
+
+
+def cancel_pending_goal(
+    goal_future: Any,
+    grace_sec: float = CANCEL_DRAIN_GRACE_SEC,
+) -> bool:
+    """Special function: Resolve a late goal response, then cancel any accepted goal."""
+    cleanup_deadline = time.monotonic() + max(0.1, float(grace_sec))
+    goal_handle = wait_for_future_until(goal_future, cleanup_deadline)
+    if goal_handle is None:
+        return False
+    if not goal_handle.accepted:
+        return True
+    return cancel_and_drain_goal(
+        goal_handle,
+        goal_handle.get_result_async(),
+        remaining_sec(cleanup_deadline),
+    )
 
 
 def normalized_outcome(raw_outcome: str) -> str:
@@ -46,27 +99,68 @@ class FindPersonByAttributeActionClient:
     def find_person(self, blackboard: Any, action: ActionStepData) -> Any:
         """Special function: Execute attribute search and mirror its memory reference locally."""
         timeout_sec = max(0.1, float(action.timeout_sec or action.parameters.get("timeout_sec", 20.0) or 20.0))
-        if not self.client.wait_for_server(timeout_sec=min(timeout_sec, 5.0)):
+        deadline = time.monotonic() + timeout_sec
+        cancel_requested = bb_get(blackboard, bb.CANCEL_REQUESTED, None)
+        if not self.client.wait_for_server(timeout_sec=min(remaining_sec(deadline), 5.0)):
             return make_skill_result(action.action_type, FAILED, f"Find-person action unavailable: {self.action_name}", recoverable=True)
+        if callable(cancel_requested) and cancel_requested():
+            return make_skill_result(
+                action.action_type,
+                CANCELED,
+                "Find-person canceled before goal submission.",
+                fatal=True,
+            )
+        if remaining_sec(deadline) <= 0.0:
+            return make_skill_result(
+                action.action_type,
+                TIMEOUT,
+                "Find-person deadline expired before goal submission.",
+                recoverable=True,
+            )
         selector = action.parameters.get("selector", {})
         goal = FindPersonByAttribute.Goal()
         goal.selector_json = json.dumps(selector, sort_keys=True)
         goal.location = str(action.target_location or action.parameters.get("location", ""))
         goal.command_id = str(action.task_id)
         goal.source_step_id = str(action.step_id)
-        goal.timeout_sec = timeout_sec
+        goal.timeout_sec = remaining_sec(deadline)
         goal.confirmation_min_frames = int(action.parameters.get("confirmation_min_frames", 3) or 3)
-        cancel_requested = bb_get(blackboard, bb.CANCEL_REQUESTED, None)
-        goal_handle = wait_for_future(self.client.send_goal_async(goal), timeout_sec, cancel_requested)
+        goal_future = self.client.send_goal_async(goal)
+        goal_handle = wait_for_future_until(goal_future, deadline, cancel_requested)
         if goal_handle is None:
-            return make_skill_result(action.action_type, CANCELED if callable(cancel_requested) and cancel_requested() else TIMEOUT, "Find-person goal acceptance timed out.", recoverable=True)
+            canceled = callable(cancel_requested) and cancel_requested()
+            cancellation_confirmed = cancel_pending_goal(goal_future)
+            outcome = CANCELED if canceled else TIMEOUT
+            return make_skill_result(
+                action.action_type,
+                outcome,
+                "Find-person goal acceptance did not complete before the absolute deadline.",
+                {"cancellation_confirmed": cancellation_confirmed},
+                recoverable=outcome == TIMEOUT,
+                fatal=outcome == CANCELED,
+            )
         if not goal_handle.accepted:
             return make_skill_result(action.action_type, FAILED, "Find-person goal was rejected.", recoverable=True)
-        wrapped = wait_for_future(goal_handle.get_result_async(), timeout_sec, cancel_requested)
+        result_future = goal_handle.get_result_async()
+        wrapped = wait_for_future_until(result_future, deadline, cancel_requested)
         if wrapped is None:
-            goal_handle.cancel_goal_async()
             outcome = CANCELED if callable(cancel_requested) and cancel_requested() else TIMEOUT
-            return make_skill_result(action.action_type, outcome, "Find-person action did not finish before its deadline.", recoverable=outcome == TIMEOUT, fatal=outcome == CANCELED)
+            cancellation_confirmed = cancel_and_drain_goal(goal_handle, result_future)
+            return make_skill_result(
+                action.action_type,
+                outcome,
+                "Find-person action did not finish before its absolute deadline.",
+                {"cancellation_confirmed": cancellation_confirmed},
+                recoverable=outcome == TIMEOUT,
+                fatal=outcome == CANCELED,
+            )
+        if time.monotonic() > deadline:
+            return make_skill_result(
+                action.action_type,
+                TIMEOUT,
+                "Find-person result arrived after the absolute deadline.",
+                recoverable=True,
+            )
         result = wrapped.result
         outcome = normalized_outcome(result.outcome)
         person_ref = self.parse_json(result.person_ref_json)

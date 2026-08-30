@@ -1,5 +1,7 @@
 """Section: Lifecycle capability marker for conditionally launched GPSR skills."""
 
+# Section: Lifecycle server resources, callbacks, and executable entrypoint.
+
 from __future__ import annotations
 
 import rclpy

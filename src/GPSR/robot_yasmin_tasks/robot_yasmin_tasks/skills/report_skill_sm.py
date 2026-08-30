@@ -1,4 +1,6 @@
 """Section: REPORT skill."""
+
+# Section: State-machine composition and skill-specific execution behavior.
 from robot_yasmin_tasks.gpsr import blackboard_keys as bb
 from robot_yasmin_tasks.gpsr.blackboard_utils import bb_get
 from robot_yasmin_tasks.gpsr.models import ActionStepData

@@ -1,4 +1,6 @@
 """Section: ASK_AND_LISTEN executable primitive skill."""
+
+# Section: State-machine composition and skill-specific execution behavior.
 from robot_yasmin_tasks.ros_clients.dialogue_clients import DialogueClients
 from robot_yasmin_tasks.skills.skill_base import SimpleSkillSM, require_any_field
 

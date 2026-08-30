@@ -1,5 +1,7 @@
 """Section: Voice command parser tests."""
 
+# Section: Test fixtures, deterministic fakes, and regression scenarios.
+
 from robot_yasmin_tasks.gpsr.action_types import (
     COUNT_PEOPLE,
     FIND_OBJECT,

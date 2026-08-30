@@ -1,0 +1,24 @@
+# Section: Shared waypoint policy for every person-finding skill.
+person_search:
+  # Section: Global searches visit every recorded searchable GPSR waypoint in this order.
+  global_waypoints:
+    - kitchen
+    - living_room
+    - dining_room
+    - bedroom
+    - entrance
+    - exit
+
+  # Section: Each local observation is bounded so an absent person advances the loop.
+  observation_timeout_sec: 20.0
+
+  # Section: One hard deadline bounds the complete multi-waypoint mission when the action omits one.
+  mission_timeout_sec: 300.0
+
+  # Section: Observe the arrival heading, then rotate to two additional local viewpoints.
+  scan_angles_deg: [60.0, -120.0]
+  scan_timeout_sec: 15.0
+
+# Section: Nav2 remains the sole owner of movement between person-search viewpoints.
+navigation:
+  waypoint_timeout_sec: 60.0

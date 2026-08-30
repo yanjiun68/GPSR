@@ -1,0 +1,943 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GPSR Find Search Mechanism Visualizer</title>
+
+  <!-- Style section: Keep the simulator self-contained and available without network access. -->
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #071018;
+      --panel: #0d1a24;
+      --panel-2: #122631;
+      --line: #294552;
+      --text: #eff9fc;
+      --muted: #9bb2bc;
+      --cyan: #42dbff;
+      --green: #52e19b;
+      --yellow: #ffc768;
+      --red: #ff7180;
+      --purple: #b8a4ff;
+      --shadow: 0 18px 52px rgba(0, 0, 0, 0.32);
+    }
+
+    * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
+
+    body {
+      min-height: 100vh;
+      margin: 0;
+      color: var(--text);
+      background:
+        radial-gradient(circle at 10% 0%, rgba(66, 219, 255, 0.12), transparent 32rem),
+        radial-gradient(circle at 90% 10%, rgba(184, 164, 255, 0.10), transparent 30rem),
+        var(--bg);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    button, select, input { font: inherit; }
+
+    header {
+      display: flex;
+      justify-content: space-between;
+      gap: 1rem;
+      max-width: 1580px;
+      margin: 0 auto;
+      padding: 1.7rem 1.3rem 0.7rem;
+    }
+
+    h1, h2, h3, p { margin-top: 0; }
+    h1 { margin-bottom: 0.35rem; font-size: clamp(1.65rem, 3vw, 2.55rem); letter-spacing: -0.045em; }
+    h2 { margin-bottom: 0.85rem; font-size: 0.93rem; letter-spacing: 0.08em; text-transform: uppercase; }
+    h3 { margin-bottom: 0.35rem; font-size: 0.92rem; }
+
+    .subtitle { max-width: 820px; margin: 0; color: var(--muted); line-height: 1.5; }
+    .muted { color: var(--muted); }
+
+    .live-badge {
+      height: fit-content;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 0.45rem 0.72rem;
+      color: var(--muted);
+      background: rgba(13, 26, 36, 0.8);
+      white-space: nowrap;
+    }
+
+    .live-badge::before {
+      display: inline-block;
+      width: 0.52rem;
+      height: 0.52rem;
+      margin-right: 0.45rem;
+      border-radius: 50%;
+      background: var(--green);
+      box-shadow: 0 0 12px var(--green);
+      content: "";
+    }
+
+    main {
+      display: grid;
+      grid-template-columns: minmax(285px, 350px) minmax(560px, 1fr) minmax(300px, 390px);
+      gap: 1rem;
+      max-width: 1580px;
+      margin: 0 auto;
+      padding: 0.5rem 1.3rem 2rem;
+    }
+
+    .stack { display: grid; align-content: start; gap: 1rem; }
+
+    .panel {
+      border: 1px solid var(--line);
+      border-radius: 17px;
+      padding: 1rem;
+      background: linear-gradient(145deg, rgba(18, 38, 49, 0.95), rgba(8, 20, 28, 0.97));
+      box-shadow: var(--shadow);
+    }
+
+    .control-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.7rem; }
+    .wide { grid-column: 1 / -1; }
+
+    label {
+      display: grid;
+      gap: 0.35rem;
+      color: var(--muted);
+      font-size: 0.76rem;
+    }
+
+    select, input[type="text"] {
+      width: 100%;
+      min-height: 2.55rem;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 0.55rem 0.65rem;
+      color: var(--text);
+      background: #091720;
+      outline: none;
+    }
+
+    select:focus, input:focus { border-color: var(--cyan); }
+    select:disabled, input:disabled { opacity: 0.45; cursor: not-allowed; }
+
+    .check-row {
+      display: flex;
+      align-items: center;
+      grid-template-columns: auto 1fr;
+      gap: 0.55rem;
+      min-height: 2.2rem;
+      color: var(--text);
+    }
+
+    input[type="checkbox"] { width: 1rem; height: 1rem; accent-color: var(--cyan); }
+
+    button {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 0.68rem 0.85rem;
+      color: var(--text);
+      background: var(--panel-2);
+      cursor: pointer;
+      transition: transform 120ms ease, border-color 120ms ease, background 120ms ease;
+    }
+
+    button:hover { border-color: var(--cyan); transform: translateY(-1px); }
+    button:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+    button.primary { border-color: var(--cyan); color: #00131b; background: var(--cyan); font-weight: 800; }
+    button.active { border-color: var(--green); background: rgba(82, 225, 155, 0.14); }
+
+    .button-row { display: grid; grid-template-columns: 1.2fr 1fr 1fr; gap: 0.55rem; margin-top: 0.85rem; }
+
+    .command {
+      margin-top: 0.8rem;
+      border-left: 3px solid var(--cyan);
+      border-radius: 7px;
+      padding: 0.68rem 0.75rem;
+      color: #dff9ff;
+      background: rgba(66, 219, 255, 0.08);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.8rem;
+      line-height: 1.45;
+    }
+
+    .route-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 0.38rem; }
+    .route-arrow { color: var(--muted); font-size: 0.78rem; }
+
+    .chip {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 0.35rem 0.58rem;
+      color: var(--muted);
+      background: rgba(7, 16, 24, 0.7);
+      font-size: 0.74rem;
+    }
+
+    .chip.current { border-color: var(--cyan); color: var(--cyan); }
+    .chip.searched { border-color: var(--green); color: var(--green); }
+    .chip.failed { border-color: var(--red); color: var(--red); }
+    .chip.found { border-color: var(--yellow); color: var(--yellow); box-shadow: 0 0 12px rgba(255, 199, 104, 0.18); }
+
+    .map-wrap {
+      position: relative;
+      overflow: hidden;
+      min-height: 590px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background:
+        linear-gradient(rgba(66, 219, 255, 0.035) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(66, 219, 255, 0.035) 1px, transparent 1px),
+        #08151e;
+      background-size: 32px 32px;
+    }
+
+    svg { display: block; width: 100%; height: 590px; }
+    .route-line { fill: none; stroke: rgba(66, 219, 255, 0.35); stroke-width: 3; stroke-dasharray: 8 7; }
+    .room-shape { fill: rgba(18, 38, 49, 0.88); stroke: #385867; stroke-width: 2; cursor: pointer; transition: fill 120ms ease, stroke 120ms ease; }
+    .room:hover .room-shape { fill: rgba(66, 219, 255, 0.12); stroke: var(--cyan); }
+    .room.route .room-shape { stroke: rgba(66, 219, 255, 0.72); }
+    .room.current .room-shape { fill: rgba(66, 219, 255, 0.2); stroke: var(--cyan); stroke-width: 4; }
+    .room.searched .room-shape { fill: rgba(82, 225, 155, 0.11); stroke: var(--green); }
+    .room.failed .room-shape { fill: rgba(255, 113, 128, 0.11); stroke: var(--red); }
+    .room.found .room-shape { fill: rgba(255, 199, 104, 0.18); stroke: var(--yellow); stroke-width: 4; }
+    .room-label { fill: var(--text); font-size: 14px; font-weight: 750; text-anchor: middle; pointer-events: none; }
+    .room-coord { fill: var(--muted); font-size: 10px; text-anchor: middle; pointer-events: none; }
+    .route-number { fill: #00131b; font-size: 10px; font-weight: 850; text-anchor: middle; dominant-baseline: central; pointer-events: none; }
+    .route-number-bg { fill: var(--cyan); pointer-events: none; }
+    .target-marker { fill: var(--yellow); stroke: #fff3ce; stroke-width: 2; filter: drop-shadow(0 0 8px rgba(255, 199, 104, 0.9)); pointer-events: none; }
+    .robot-marker { fill: var(--cyan); stroke: white; stroke-width: 2; filter: drop-shadow(0 0 8px rgba(66, 219, 255, 0.9)); pointer-events: none; }
+
+    .map-help {
+      position: absolute;
+      right: 0.7rem;
+      bottom: 0.7rem;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      padding: 0.45rem 0.58rem;
+      color: var(--muted);
+      background: rgba(7, 16, 24, 0.88);
+      font-size: 0.7rem;
+    }
+
+    .legend { display: flex; flex-wrap: wrap; gap: 0.65rem; margin-top: 0.75rem; color: var(--muted); font-size: 0.72rem; }
+    .legend span::before { display: inline-block; width: 0.62rem; height: 0.62rem; margin-right: 0.32rem; border-radius: 50%; content: ""; }
+    .legend .robot::before { background: var(--cyan); }
+    .legend .target::before { background: var(--yellow); }
+    .legend .done::before { background: var(--green); }
+    .legend .failure::before { background: var(--red); }
+
+    .status-card {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 0.8rem;
+      background: rgba(7, 16, 24, 0.6);
+    }
+
+    .status-card.success { border-color: rgba(82, 225, 155, 0.6); }
+    .status-card.failure { border-color: rgba(255, 113, 128, 0.6); }
+    .status-card.running { border-color: rgba(66, 219, 255, 0.6); }
+    .status-title { color: var(--muted); font-size: 0.7rem; letter-spacing: 0.08em; text-transform: uppercase; }
+    .status-value { margin: 0.2rem 0 0; font-size: 1.08rem; font-weight: 780; }
+    .status-detail { margin: 0.35rem 0 0; color: var(--muted); font-size: 0.77rem; line-height: 1.45; }
+
+    .timeline {
+      display: grid;
+      gap: 0.45rem;
+      max-height: 510px;
+      overflow: auto;
+      padding-right: 0.2rem;
+    }
+
+    .event {
+      display: grid;
+      grid-template-columns: 1.6rem 1fr;
+      gap: 0.55rem;
+      border: 1px solid transparent;
+      border-radius: 10px;
+      padding: 0.5rem;
+      opacity: 0.46;
+      cursor: pointer;
+    }
+
+    .event.past { opacity: 0.8; }
+    .event.current { border-color: var(--cyan); background: rgba(66, 219, 255, 0.09); opacity: 1; }
+    .event-dot { display: grid; place-items: center; width: 1.45rem; height: 1.45rem; border-radius: 50%; color: #00131b; background: var(--muted); font-size: 0.65rem; font-weight: 850; }
+    .event.past .event-dot { background: var(--green); }
+    .event.current .event-dot { background: var(--cyan); box-shadow: 0 0 10px rgba(66, 219, 255, 0.55); }
+    .event-name { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.73rem; font-weight: 750; }
+    .event-message { margin-top: 0.16rem; color: var(--muted); font-size: 0.7rem; line-height: 1.35; }
+
+    .failure-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.42rem; }
+    .failure-toggle { display: flex; align-items: center; gap: 0.42rem; border: 1px solid var(--line); border-radius: 8px; padding: 0.38rem 0.48rem; font-size: 0.7rem; }
+
+    .policy-note { margin: 0; color: var(--muted); font-size: 0.74rem; line-height: 1.5; }
+    .warning { color: var(--yellow); }
+
+    @media (max-width: 1180px) {
+      main { grid-template-columns: 320px minmax(500px, 1fr); }
+      main > .stack:last-child { grid-column: 1 / -1; grid-template-columns: 1fr 1fr; }
+    }
+
+    @media (max-width: 820px) {
+      header { display: block; }
+      .live-badge { display: inline-block; margin-top: 0.8rem; }
+      main { grid-template-columns: 1fr; padding: 0.5rem 0.8rem 1.5rem; }
+      main > .stack:last-child { grid-column: auto; grid-template-columns: 1fr; }
+      .map-wrap, svg { min-height: 490px; height: 490px; }
+    }
+  </style>
+</head>
+<body>
+  <!-- Header section: Describe the simulator and make its offline nature explicit. -->
+  <header>
+    <div>
+      <h1>GPSR Find Search Mechanism</h1>
+      <p class="subtitle">Explore how object, named-person, and attribute-person commands become strict or global waypoint missions. Change the hidden target position, inject navigation failures, and step through every state.</p>
+    </div>
+    <div class="live-badge">Offline policy simulator</div>
+  </header>
+
+  <!-- Main section: Controls, spatial map, and execution timeline form one interactive workspace. -->
+  <main>
+    <section class="stack">
+      <div class="panel">
+        <h2>Command setup</h2>
+        <div class="control-grid">
+          <label class="wide">Find skill
+            <select id="skillSelect">
+              <option value="object">Find object</option>
+              <option value="person_name">Find named person</option>
+              <option value="person_attribute">Find person by attribute</option>
+              <option value="person_any">Find any person</option>
+            </select>
+          </label>
+          <label id="subjectLabel" class="wide">Requested target
+            <select id="subjectSelect"></select>
+          </label>
+          <label id="attributeLabel" class="wide" hidden>Attribute value
+            <input id="attributeInput" type="text" value="right hand raised" spellcheck="false">
+          </label>
+          <label>Search scope
+            <select id="scopeSelect">
+              <option value="global">Global — loop policy</option>
+              <option value="strict">Strict — one location</option>
+            </select>
+          </label>
+          <label>Requested location
+            <select id="locationSelect"></select>
+          </label>
+          <label class="wide">Actual hidden target position
+            <select id="targetPositionSelect"></select>
+          </label>
+          <label id="approachRow" class="check-row wide">
+            <input id="approachToggle" type="checkbox" checked>
+            Approach verified object after localization
+          </label>
+          <label class="wide">Injected terminal condition
+            <select id="terminalSelect">
+              <option value="normal">Normal perception</option>
+              <option value="perception_failure">Perception unavailable</option>
+              <option value="timeout">Mission timeout</option>
+              <option value="canceled">Operator cancellation</option>
+              <option value="localization_failure">Object localization failure</option>
+              <option value="unreachable_target">Object stand-off unreachable</option>
+            </select>
+          </label>
+        </div>
+        <div id="commandPreview" class="command"></div>
+        <div class="button-row">
+          <button id="buildButton" class="primary">Build scenario</button>
+          <button id="resetButton">Reset</button>
+          <button id="autoButton">Auto play</button>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>Navigation failures</h2>
+        <p class="policy-note">Toggle any waypoint to simulate Nav2 rejection/failure. A normal failure is recorded and skipped; a timeout is terminal.</p>
+        <div id="failureGrid" class="failure-grid"></div>
+      </div>
+
+      <div class="panel">
+        <h2>Resolved policy route</h2>
+        <div id="routeChips" class="route-chips"></div>
+        <p id="policyExplanation" class="policy-note" style="margin-top:0.75rem"></p>
+      </div>
+    </section>
+
+    <section class="stack">
+      <div class="panel">
+        <h2>Waypoint map</h2>
+        <div class="map-wrap">
+          <svg id="mapSvg" viewBox="0 0 760 590" role="img" aria-label="Interactive GPSR waypoint map"></svg>
+          <div class="map-help">Click room: place target · Alt/Option-click: toggle Nav2 failure</div>
+        </div>
+        <div class="legend">
+          <span class="robot">robot/current</span>
+          <span class="target">hidden target</span>
+          <span class="done">searched</span>
+          <span class="failure">navigation failed</span>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div style="display:flex;justify-content:space-between;gap:0.8rem;align-items:center">
+          <div>
+            <h2 style="margin-bottom:0.2rem">Current transition</h2>
+            <span id="stepCounter" class="muted" style="font-size:0.75rem"></span>
+          </div>
+          <div style="display:flex;gap:0.45rem">
+            <button id="previousButton">Previous</button>
+            <button id="nextButton" class="primary">Next state</button>
+          </div>
+        </div>
+        <div id="currentStatus" class="status-card running" style="margin-top:0.8rem"></div>
+      </div>
+    </section>
+
+    <section class="stack">
+      <div class="panel">
+        <h2>State timeline</h2>
+        <div id="timeline" class="timeline"></div>
+      </div>
+
+      <div class="panel">
+        <h2>Outcome matrix</h2>
+        <p class="policy-note"><strong>Explicit room:</strong> search stops after that room, even when the target is elsewhere.</p>
+        <p class="policy-note"><strong>No room:</strong> search advances through the YAML route until found or exhausted.</p>
+        <p class="policy-note"><strong>Nav2 failure:</strong> skip and continue; if every waypoint fails, return <span class="warning">FAILED</span>.</p>
+        <p class="policy-note"><strong>All searches miss:</strong> return <span class="warning">NOT_FOUND</span>.</p>
+        <p class="policy-note"><strong>Target confirmed:</strong> stop immediately; objects additionally verify, localize, and optionally approach.</p>
+      </div>
+    </section>
+  </main>
+
+  <!-- Script section: Embedded policy data mirrors the repository YAML files as of generation. -->
+  <script>
+    "use strict";
+
+    // Section: Recorded map-frame waypoint positions from gpsr_waypoint.yaml.
+    const WAYPOINTS = {
+      bedroom: { x: 2.9910, y: 1.9087 },
+      living_room: { x: 0.6347, y: -0.2996 },
+      kitchen: { x: -1.1104, y: 0.6954 },
+      exit: { x: -4.9650, y: 0.1019 },
+      entrance: { x: -3.4970, y: -1.7687 },
+      instruction_point: { x: -0.2056, y: 0.3069 },
+      dining_room: { x: 2.2613, y: -0.1384 }
+    };
+
+    // Section: Object policy mirrors find_object_search.yaml, including its five eligible rooms.
+    const OBJECT_ROOMS = ["kitchen", "dining_room", "living_room", "bedroom", "entrance"];
+    const OBJECT_PRIORS = {
+      bottle: ["kitchen", "dining_room", "living_room", "bedroom"],
+      chair: ["dining_room", "living_room", "bedroom", "entrance"],
+      coke: ["kitchen", "dining_room", "living_room"],
+      cup: ["kitchen", "dining_room", "living_room"],
+      milk: ["kitchen", "dining_room"],
+      apple: ["kitchen", "dining_room"],
+      banana: ["kitchen", "dining_room"],
+      chips: ["kitchen", "living_room"],
+      drink: ["kitchen", "dining_room", "living_room", "bedroom"],
+      food: ["kitchen", "dining_room", "living_room"],
+      object: ["kitchen", "dining_room", "living_room", "bedroom", "entrance"]
+    };
+
+    // Section: Person policy mirrors find_person_search.yaml exactly.
+    const PERSON_ROUTE = ["kitchen", "living_room", "dining_room", "bedroom", "entrance", "exit"];
+    const ALL_POSITIONS = [...PERSON_ROUTE, "instruction_point"];
+    const OBJECT_TARGETS = ["bottle", "chair", "coke", "cup", "milk", "apple", "banana", "chips", "drink", "food", "object"];
+    const KNOWN_PEOPLE = ["john", "mary", "operator"];
+
+    // Section: Stable visual room boxes provide a readable semantic layout around real coordinates.
+    const ROOM_LAYOUT = {
+      exit: { x: 45, y: 238, w: 122, h: 105 },
+      entrance: { x: 58, y: 420, w: 150, h: 105 },
+      kitchen: { x: 245, y: 118, w: 150, h: 120 },
+      instruction_point: { x: 290, y: 300, w: 155, h: 92 },
+      living_room: { x: 450, y: 325, w: 158, h: 120 },
+      dining_room: { x: 560, y: 205, w: 155, h: 100 },
+      bedroom: { x: 560, y: 52, w: 155, h: 105 }
+    };
+
+    // Section: Mutable simulator state is rebuilt whenever command inputs change.
+    const simulator = {
+      events: [],
+      route: [],
+      step: 0,
+      timer: null,
+      failedWaypoints: new Set()
+    };
+
+    // Section: Cache DOM elements once for predictable interaction updates.
+    const ui = Object.fromEntries([
+      "skillSelect", "subjectLabel", "subjectSelect", "attributeLabel", "attributeInput",
+      "scopeSelect", "locationSelect", "targetPositionSelect", "approachRow", "approachToggle",
+      "terminalSelect", "commandPreview", "buildButton", "resetButton", "autoButton",
+      "failureGrid", "routeChips", "policyExplanation", "mapSvg", "stepCounter",
+      "previousButton", "nextButton", "currentStatus", "timeline"
+    ].map((id) => [id, document.getElementById(id)]));
+
+    // Special function: Convert an internal waypoint symbol into readable text.
+    function humanize(symbol) {
+      return String(symbol).replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+    }
+
+    // Special function: Replace select options while retaining a valid preferred value.
+    function fillSelect(select, values, preferred = "") {
+      select.innerHTML = "";
+      values.forEach(({ value, label }) => {
+        const option = document.createElement("option");
+        option.value = value;
+        option.textContent = label;
+        select.append(option);
+      });
+      if ([...select.options].some((option) => option.value === preferred)) select.value = preferred;
+    }
+
+    // Special function: Update target controls when the selected find skill changes.
+    function configureSkillControls() {
+      const skill = ui.skillSelect.value;
+      const previous = ui.subjectSelect.value;
+      ui.attributeLabel.hidden = skill !== "person_attribute";
+      ui.subjectLabel.hidden = skill === "person_attribute" || skill === "person_any";
+      ui.approachRow.hidden = skill !== "object";
+      [...ui.terminalSelect.options].forEach((option) => {
+        option.disabled = skill !== "object" && ["localization_failure", "unreachable_target"].includes(option.value);
+      });
+      if (ui.terminalSelect.selectedOptions[0]?.disabled) ui.terminalSelect.value = "normal";
+      if (skill === "object") {
+        fillSelect(ui.subjectSelect, OBJECT_TARGETS.map((value) => ({ value, label: humanize(value) })), previous || "bottle");
+        ui.subjectLabel.firstChild.textContent = "Requested object/category";
+      } else if (skill === "person_name") {
+        fillSelect(ui.subjectSelect, KNOWN_PEOPLE.map((value) => ({ value, label: humanize(value) })), previous || "john");
+        ui.subjectLabel.firstChild.textContent = "Requested person name";
+      }
+      updateCommandPreview();
+    }
+
+    // Special function: Enable strict location only when the command explicitly names a room.
+    function configureScopeControls() {
+      const strict = ui.scopeSelect.value === "strict";
+      ui.locationSelect.disabled = !strict;
+      updateCommandPreview();
+    }
+
+    // Special function: Generate representative spoken language for the selected semantic command.
+    function commandText() {
+      const skill = ui.skillSelect.value;
+      let targetPhrase = "a person";
+      if (skill === "object") targetPhrase = ui.subjectSelect.value;
+      if (skill === "person_name") targetPhrase = ui.subjectSelect.value;
+      if (skill === "person_attribute") targetPhrase = `a person with ${ui.attributeInput.value.trim() || "the selected attribute"}`;
+      const location = ui.scopeSelect.value === "strict" ? ` in the ${humanize(ui.locationSelect.value).toLowerCase()}` : "";
+      return `find ${targetPhrase}${location}`;
+    }
+
+    // Special function: Refresh command text without altering the current simulation step.
+    function updateCommandPreview() {
+      ui.commandPreview.textContent = `“${commandText()}”`;
+    }
+
+    // Special function: Resolve semantic object priors followed by every remaining eligible room.
+    function objectGlobalRoute(target) {
+      const prior = OBJECT_PRIORS[target] || OBJECT_PRIORS.object;
+      return [...new Set([...prior, ...OBJECT_ROOMS])];
+    }
+
+    // Special function: Build the strict or global route exactly as the selected skill policy does.
+    function resolveRoute() {
+      if (ui.scopeSelect.value === "strict") {
+        const requested = ui.locationSelect.value;
+        // Section: FindObject rejects strict locations missing from its rooms mapping.
+        if (ui.skillSelect.value === "object" && !OBJECT_ROOMS.includes(requested)) return [];
+        return [requested];
+      }
+      if (ui.skillSelect.value === "object") return objectGlobalRoute(ui.subjectSelect.value);
+      return [...PERSON_ROUTE];
+    }
+
+    // Special function: Create one normalized timeline event.
+    function event(state, message, waypoint = "", status = "running") {
+      return { state, message, waypoint, status };
+    }
+
+    // Special function: Append object Strategy 2B states for one reachable viewpoint.
+    function appendObjectSearch(events, waypoint, targetHere, terminalCondition, approach) {
+      events.push(event("FAST_SCAN", `Scan headings 0°, +60°, and -60° at ${humanize(waypoint)}.`, waypoint));
+      if (!targetHere) {
+        events.push(event("EXTENDED_SCAN", "No confirmed target; scan +120° and -120°.", waypoint));
+        events.push(event("FULL_SCAN", "Complete the exhaustive 180° scan.", waypoint));
+        events.push(event("MARK_VIEWPOINT", `${humanize(waypoint)} searched without a match.`, waypoint, "searched"));
+        return false;
+      }
+      events.push(event("VERIFY_TARGET", "Require 3 hits inside a 5-frame sliding window.", waypoint));
+      if (terminalCondition === "localization_failure") {
+        events.push(event("LOCALIZATION_FAILURE", "Bounding box was verified, but depth/TF localization failed.", waypoint, "failure"));
+        return true;
+      }
+      events.push(event("LOCALIZE_TARGET", "Project aligned depth into a map-frame target pose.", waypoint));
+      events.push(event("PLAN_STANDOFF", "Validate collision-safe stand-off candidates with Nav2.", waypoint));
+      if (terminalCondition === "unreachable_target") {
+        events.push(event("FOUND_UNREACHABLE", "Target exists, but no safe stand-off pose is reachable.", waypoint, "failure"));
+        return true;
+      }
+      if (approach) events.push(event("APPROACH_TARGET", "Navigate to the selected safe stand-off pose.", waypoint));
+      events.push(event("SUCCESS", `Requested object confirmed at ${humanize(waypoint)}.`, waypoint, "success"));
+      return true;
+    }
+
+    // Special function: Build the complete object mission for route, target, and injected failures.
+    function buildObjectEvents(route, targetPosition) {
+      const events = [event("INITIALIZE", "Validate object/category, scope, timeout, and approach request.")];
+      const terminal = ui.terminalSelect.value;
+      if (terminal === "perception_failure") {
+        events.push(event("PERCEPTION_FAILURE", "Object detector produced no startup frame.", "", "failure"));
+        return events;
+      }
+      events.push(event("BUILD_SEARCH_PLAN", `Resolve ${route.length} eligible viewpoint(s) from semantic YAML priors.`));
+      for (const [index, waypoint] of route.entries()) {
+        events.push(event("SELECT_VIEWPOINT", `Select route waypoint ${index + 1} of ${route.length}.`, waypoint));
+        events.push(event("NAVIGATE_AND_MONITOR", `Send NavigateNamedPose goal for ${humanize(waypoint)}.`, waypoint));
+        if (ui.terminalSelect.value === "canceled") {
+          events.push(event("CANCELED", "Operator cancellation stops navigation and perception.", waypoint, "failure"));
+          return events;
+        }
+        if (ui.terminalSelect.value === "timeout") {
+          events.push(event("TIMEOUT", "The bounded FindObject mission deadline expired.", waypoint, "failure"));
+          return events;
+        }
+        if (simulator.failedWaypoints.has(waypoint)) {
+          events.push(event("MARK_NAV_FAILED", `Nav2 could not reach ${humanize(waypoint)}; record and skip it.`, waypoint, "failed"));
+          events.push(event("ADVANCE_SEARCH", "Clear the current viewpoint and continue.", waypoint));
+          continue;
+        }
+        const finished = appendObjectSearch(events, waypoint, targetPosition === waypoint, terminal, ui.approachToggle.checked);
+        if (finished) return events;
+        events.push(event("ADVANCE_SEARCH", "No verified target; advance to the next viewpoint.", waypoint));
+      }
+      const reachable = route.some((waypoint) => !simulator.failedWaypoints.has(waypoint));
+      events.push(reachable
+        ? event("NOT_FOUND", "All eligible object viewpoints were exhausted.", "", "failure")
+        : event("NAVIGATION_FAILURE", "No eligible object viewpoint could be navigated.", "", "failure"));
+      return events;
+    }
+
+    // Special function: Build the shared person navigate-search-advance loop for either selector route.
+    function buildPersonEvents(route, targetPosition) {
+      const terminal = ui.terminalSelect.value;
+      const events = [event("PREPARE_SEARCH_ROUTE", `Freeze the command and load ${route.length} waypoint(s) from YAML.`)];
+      if (terminal === "perception_failure") {
+        events.push(event("FAILED", "Person perception resource is unavailable.", "", "failure"));
+        return events;
+      }
+      for (const [index, waypoint] of route.entries()) {
+        events.push(event("NAVIGATE_TO_WAYPOINT", `Navigate to ${humanize(waypoint)} (${index + 1}/${route.length}).`, waypoint));
+        if (terminal === "canceled") {
+          events.push(event("FINALIZE_CANCELED", "Cancellation is terminal and releases command ownership.", waypoint, "failure"));
+          return events;
+        }
+        if (terminal === "timeout") {
+          events.push(event("FINALIZE_TIMEOUT", "Navigation or observation exceeded its deadline.", waypoint, "failure"));
+          return events;
+        }
+        if (simulator.failedWaypoints.has(waypoint)) {
+          events.push(event("ADVANCE_WAYPOINT", `Nav2 failure recorded for ${humanize(waypoint)}; continue.`, waypoint, "failed"));
+          continue;
+        }
+        events.push(event("SEARCH_CURRENT_WAYPOINT", `Run local ${humanize(ui.skillSelect.value)} perception for up to 20 seconds.`, waypoint));
+        if (targetPosition === waypoint) {
+          events.push(event("FINALIZE_SUCCESS", `Matching person found at ${humanize(waypoint)}.`, waypoint, "success"));
+          return events;
+        }
+        events.push(event("ADVANCE_WAYPOINT", `No matching person at ${humanize(waypoint)}; continue.`, waypoint, "searched"));
+      }
+      const reachable = route.some((waypoint) => !simulator.failedWaypoints.has(waypoint));
+      events.push(reachable
+        ? event("FINALIZE_NOT_FOUND", "Every configured person-search waypoint was searched.", "", "failure")
+        : event("FINALIZE_NO_REACHABLE", "Every configured person-search waypoint failed navigation.", "", "failure"));
+      return events;
+    }
+
+    // Special function: Recompute the whole scenario from current controls and reset playback.
+    function buildScenario() {
+      stopAutoPlay();
+      simulator.route = resolveRoute();
+      const targetPosition = ui.targetPositionSelect.value;
+      simulator.events = ui.skillSelect.value === "object"
+        ? buildObjectEvents(simulator.route, targetPosition)
+        : buildPersonEvents(simulator.route, targetPosition);
+      simulator.step = 0;
+      renderAll();
+    }
+
+    // Special function: Compute waypoint classes from all events completed at the current step.
+    function waypointStates() {
+      const states = Object.fromEntries(Object.keys(WAYPOINTS).map((name) => [name, ""]));
+      simulator.route.forEach((name) => { states[name] = "route"; });
+      simulator.events.slice(0, simulator.step + 1).forEach((item) => {
+        if (!item.waypoint) return;
+        if (item.status === "failed") states[item.waypoint] = "failed";
+        else if (item.status === "searched") states[item.waypoint] = "searched";
+        else if (item.status === "success") states[item.waypoint] = "found";
+      });
+      const current = simulator.events[simulator.step];
+      if (current?.waypoint && !["failed", "searched", "success"].includes(current.status)) states[current.waypoint] = "current";
+      return states;
+    }
+
+    // Special function: Return the center point of a semantic room box.
+    function roomCenter(name) {
+      const room = ROOM_LAYOUT[name];
+      return { x: room.x + room.w / 2, y: room.y + room.h / 2 };
+    }
+
+    // Special function: Create one SVG element without unsafe HTML string interpolation.
+    function svgElement(name, attributes = {}) {
+      const element = document.createElementNS("http://www.w3.org/2000/svg", name);
+      Object.entries(attributes).forEach(([key, value]) => element.setAttribute(key, value));
+      return element;
+    }
+
+    // Special function: Draw route, rooms, target, and current robot state on the semantic map.
+    function renderMap() {
+      ui.mapSvg.replaceChildren();
+      const centers = simulator.route.filter((name) => ROOM_LAYOUT[name]).map(roomCenter);
+      if (centers.length > 1) {
+        const polyline = svgElement("polyline", {
+          class: "route-line",
+          points: centers.map((point) => `${point.x},${point.y}`).join(" ")
+        });
+        ui.mapSvg.append(polyline);
+      }
+      const states = waypointStates();
+      Object.entries(ROOM_LAYOUT).forEach(([name, room]) => {
+        const group = svgElement("g", { class: `room ${states[name] || ""}`, tabindex: "0", role: "button" });
+        const title = svgElement("title");
+        title.textContent = `${humanize(name)} — click to place target; Alt-click to toggle navigation failure`;
+        group.append(title);
+        group.append(svgElement("rect", { class: "room-shape", x: room.x, y: room.y, width: room.w, height: room.h, rx: 13 }));
+        const label = svgElement("text", { class: "room-label", x: room.x + room.w / 2, y: room.y + room.h / 2 - 4 });
+        label.textContent = humanize(name);
+        group.append(label);
+        const coordinate = svgElement("text", { class: "room-coord", x: room.x + room.w / 2, y: room.y + room.h / 2 + 16 });
+        coordinate.textContent = `map (${WAYPOINTS[name].x.toFixed(2)}, ${WAYPOINTS[name].y.toFixed(2)})`;
+        group.append(coordinate);
+        const routeIndex = simulator.route.indexOf(name);
+        if (routeIndex >= 0) {
+          group.append(svgElement("circle", { class: "route-number-bg", cx: room.x + 16, cy: room.y + 16, r: 10 }));
+          const number = svgElement("text", { class: "route-number", x: room.x + 16, y: room.y + 16 });
+          number.textContent = String(routeIndex + 1);
+          group.append(number);
+        }
+        group.addEventListener("click", (clickEvent) => handleRoomClick(name, clickEvent.altKey));
+        group.addEventListener("keydown", (keyEvent) => {
+          if (keyEvent.key === "Enter" || keyEvent.key === " ") handleRoomClick(name, keyEvent.altKey);
+        });
+        ui.mapSvg.append(group);
+      });
+      const target = ui.targetPositionSelect.value;
+      if (ROOM_LAYOUT[target]) {
+        const center = roomCenter(target);
+        ui.mapSvg.append(svgElement("path", {
+          class: "target-marker",
+          d: `M ${center.x} ${center.y - 31} l 8 16 l 17 2 l -12 12 l 3 17 l -16 -8 l -16 8 l 3 -17 l -12 -12 l 17 -2 z`
+        }));
+      }
+      const current = simulator.events[simulator.step];
+      if (current?.waypoint && ROOM_LAYOUT[current.waypoint]) {
+        const center = roomCenter(current.waypoint);
+        ui.mapSvg.append(svgElement("circle", { class: "robot-marker", cx: center.x, cy: center.y + 31, r: 9 }));
+      }
+    }
+
+    // Special function: Set target position or toggle a simulated Nav2 failure from the map.
+    function handleRoomClick(name, toggleFailure) {
+      if (toggleFailure) {
+        if (simulator.failedWaypoints.has(name)) simulator.failedWaypoints.delete(name);
+        else simulator.failedWaypoints.add(name);
+        renderFailureControls();
+      } else {
+        ui.targetPositionSelect.value = name;
+      }
+      buildScenario();
+    }
+
+    // Special function: Render route chips with their current execution status.
+    function renderRoute() {
+      ui.routeChips.replaceChildren();
+      const states = waypointStates();
+      simulator.route.forEach((name, index) => {
+        if (index) {
+          const arrow = document.createElement("span");
+          arrow.className = "route-arrow";
+          arrow.textContent = "→";
+          ui.routeChips.append(arrow);
+        }
+        const chip = document.createElement("span");
+        chip.className = `chip ${states[name] || ""}`;
+        chip.textContent = `${index + 1}. ${humanize(name)}`;
+        ui.routeChips.append(chip);
+      });
+      if (!simulator.route.length) {
+        const chip = document.createElement("span");
+        chip.className = "chip failed";
+        chip.textContent = "No eligible viewpoint";
+        ui.routeChips.append(chip);
+      }
+      const objectGlobal = ui.skillSelect.value === "object" && ui.scopeSelect.value === "global";
+      ui.policyExplanation.textContent = objectGlobal
+        ? "Object order starts with target/category semantic priors, then appends every remaining room in find_object_search.yaml. Exit is not an object-search room."
+        : ui.scopeSelect.value === "global"
+          ? "Person order is the fixed global_waypoints list in find_person_search.yaml."
+          : simulator.route.length
+            ? "STRICT_LOCATION overrides the global route and admits only the requested waypoint."
+            : "The requested strict location is not declared under rooms in find_object_search.yaml, so planning fails before navigation.";
+    }
+
+    // Special function: Render clickable execution events and keep the current event visible.
+    function renderTimeline() {
+      ui.timeline.replaceChildren();
+      simulator.events.forEach((item, index) => {
+        const row = document.createElement("div");
+        row.className = `event ${index < simulator.step ? "past" : ""} ${index === simulator.step ? "current" : ""}`;
+        const dot = document.createElement("div");
+        dot.className = "event-dot";
+        dot.textContent = String(index + 1);
+        const body = document.createElement("div");
+        const name = document.createElement("div");
+        name.className = "event-name";
+        name.textContent = item.state;
+        const message = document.createElement("div");
+        message.className = "event-message";
+        message.textContent = item.message;
+        body.append(name, message);
+        row.append(dot, body);
+        row.addEventListener("click", () => { simulator.step = index; renderAll(); });
+        ui.timeline.append(row);
+        if (index === simulator.step) row.scrollIntoView({ block: "nearest" });
+      });
+    }
+
+    // Special function: Display the active state or final semantic result.
+    function renderStatus() {
+      const current = simulator.events[simulator.step] || event("NO_SCENARIO", "Build a scenario to begin.");
+      const terminal = simulator.step === simulator.events.length - 1;
+      const successful = current.status === "success";
+      ui.currentStatus.className = `status-card ${terminal ? (successful ? "success" : "failure") : "running"}`;
+      ui.currentStatus.innerHTML = "";
+      const caption = document.createElement("div");
+      caption.className = "status-title";
+      caption.textContent = terminal ? "Mission result" : "Active state";
+      const value = document.createElement("div");
+      value.className = "status-value";
+      value.textContent = current.state;
+      const detail = document.createElement("p");
+      detail.className = "status-detail";
+      detail.textContent = current.message;
+      ui.currentStatus.append(caption, value, detail);
+      ui.stepCounter.textContent = `State ${simulator.step + 1} of ${simulator.events.length}`;
+      ui.previousButton.disabled = simulator.step <= 0;
+      ui.nextButton.disabled = simulator.step >= simulator.events.length - 1;
+    }
+
+    // Special function: Rebuild failure checkboxes from all recorded navigation positions.
+    function renderFailureControls() {
+      ui.failureGrid.replaceChildren();
+      ALL_POSITIONS.forEach((name) => {
+        const label = document.createElement("label");
+        label.className = "failure-toggle";
+        const input = document.createElement("input");
+        input.type = "checkbox";
+        input.checked = simulator.failedWaypoints.has(name);
+        input.addEventListener("change", () => {
+          if (input.checked) simulator.failedWaypoints.add(name);
+          else simulator.failedWaypoints.delete(name);
+          buildScenario();
+        });
+        label.append(input, document.createTextNode(humanize(name)));
+        ui.failureGrid.append(label);
+      });
+    }
+
+    // Special function: Render every dependent panel from the same simulator snapshot.
+    function renderAll() {
+      updateCommandPreview();
+      renderRoute();
+      renderMap();
+      renderTimeline();
+      renderStatus();
+    }
+
+    // Special function: Move playback by one bounded state offset.
+    function moveStep(offset) {
+      simulator.step = Math.max(0, Math.min(simulator.events.length - 1, simulator.step + offset));
+      renderAll();
+    }
+
+    // Special function: Stop automatic playback and restore its button label.
+    function stopAutoPlay() {
+      if (simulator.timer !== null) window.clearInterval(simulator.timer);
+      simulator.timer = null;
+      ui.autoButton.classList.remove("active");
+      ui.autoButton.textContent = "Auto play";
+    }
+
+    // Special function: Toggle automatic state progression without rebuilding the scenario.
+    function toggleAutoPlay() {
+      if (simulator.timer !== null) {
+        stopAutoPlay();
+        return;
+      }
+      if (simulator.step >= simulator.events.length - 1) simulator.step = 0;
+      ui.autoButton.classList.add("active");
+      ui.autoButton.textContent = "Pause";
+      simulator.timer = window.setInterval(() => {
+        if (simulator.step >= simulator.events.length - 1) {
+          stopAutoPlay();
+          return;
+        }
+        moveStep(1);
+      }, 850);
+    }
+
+    // Special function: Restore documented defaults, including an empty failure set.
+    function resetSimulator() {
+      stopAutoPlay();
+      ui.skillSelect.value = "object";
+      ui.scopeSelect.value = "global";
+      ui.locationSelect.value = "kitchen";
+      ui.targetPositionSelect.value = "dining_room";
+      ui.attributeInput.value = "right hand raised";
+      ui.approachToggle.checked = true;
+      ui.terminalSelect.value = "normal";
+      simulator.failedWaypoints.clear();
+      configureSkillControls();
+      configureScopeControls();
+      renderFailureControls();
+      buildScenario();
+    }
+
+    // Section: Populate stable location choices before registering interaction handlers.
+    fillSelect(ui.locationSelect, PERSON_ROUTE.map((value) => ({ value, label: humanize(value) })), "kitchen");
+    fillSelect(ui.targetPositionSelect, [
+      ...ALL_POSITIONS.map((value) => ({ value, label: humanize(value) })),
+      { value: "not_present", label: "Not present anywhere" }
+    ], "dining_room");
+
+    // Section: Every meaningful control rebuilds the deterministic event sequence.
+    ui.skillSelect.addEventListener("change", () => { configureSkillControls(); buildScenario(); });
+    ui.scopeSelect.addEventListener("change", () => { configureScopeControls(); buildScenario(); });
+    [ui.subjectSelect, ui.locationSelect, ui.targetPositionSelect, ui.approachToggle, ui.terminalSelect]
+      .forEach((control) => control.addEventListener("change", buildScenario));
+    ui.attributeInput.addEventListener("input", () => { updateCommandPreview(); buildScenario(); });
+    ui.buildButton.addEventListener("click", buildScenario);
+    ui.resetButton.addEventListener("click", resetSimulator);
+    ui.autoButton.addEventListener("click", toggleAutoPlay);
+    ui.previousButton.addEventListener("click", () => moveStep(-1));
+    ui.nextButton.addEventListener("click", () => moveStep(1));
+
+    // Section: Initialize the page with a global bottle search whose target is in the dining room.
+    resetSimulator();
+  </script>
+</body>
+</html>

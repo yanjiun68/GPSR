@@ -1,5 +1,7 @@
 """Section: YASMIN blackboard compatibility helpers."""
 
+# Section: Blackboard compatibility access helpers.
+
 from typing import Any
 
 

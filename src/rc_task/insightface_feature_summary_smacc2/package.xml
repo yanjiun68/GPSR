@@ -3,24 +3,27 @@
 <package format="3">
   <name>insightface_feature_summary_smacc2</name>
   <version>0.1.0</version>
-  <description>Lifecycle-managed SMACC2 task that summarizes InsightFace appearance features through TTS.</description>
+  <description>Lifecycle-managed YASMIN task that summarizes InsightFace appearance features through TTS.</description>
   <maintainer email="yanjiun68@todo.todo">yanjiun68</maintainer>
   <license>Apache-2.0</license>
 
   <!-- Build system dependency. -->
   <buildtool_depend>ament_cmake</buildtool_depend>
 
-  <!-- Runtime and compile dependencies used by the lifecycle wrapper and SMACC2 node. -->
+  <!-- Compile dependencies used by the lifecycle process supervisor. -->
   <depend>ament_index_cpp</depend>
-  <depend>boost</depend>
-  <build_depend>nlohmann_json</build_depend>
   <depend>nav2_util</depend>
   <depend>rclcpp</depend>
   <depend>rclcpp_lifecycle</depend>
-  <depend>receptionist_interfaces</depend>
-  <depend>smacc2</depend>
-  <depend>std_msgs</depend>
-  <depend>voice_interfaces</depend>
+
+  <!-- Runtime dependencies used by the Python YASMIN state machine. -->
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>receptionist_interfaces</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+  <exec_depend>voice_interfaces</exec_depend>
+  <exec_depend>yasmin</exec_depend>
+  <exec_depend>yasmin_ros</exec_depend>
+  <exec_depend>yasmin_viewer</exec_depend>
 
   <!-- Launch-time packages started or managed by this package. -->
   <exec_depend>face_detection</exec_depend>

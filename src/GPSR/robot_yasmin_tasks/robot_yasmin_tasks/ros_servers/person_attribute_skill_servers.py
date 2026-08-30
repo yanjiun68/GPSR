@@ -207,6 +207,12 @@ class ValidateFindGoalState(State):
             blackboard["message"] = error
             return INVALID_INPUT
         blackboard["predicates"] = predicates
+        # Section: One server-side absolute deadline covers matching and mandatory persistence.
+        timeout_sec = max(
+            0.1,
+            float(goal_handle.request.timeout_sec or self.server.default_timeout_sec),
+        )
+        blackboard["deadline"] = time.monotonic() + timeout_sec
         return READY
 
 
@@ -229,10 +235,13 @@ class WaitForTrackedMatchState(State):
             1,
             int(goal_handle.request.confirmation_min_frames or self.server.confirmation_min_frames),
         )
-        deadline = time.monotonic() + timeout_sec
+        deadline = float(
+            blackboard_value(blackboard, "deadline", time.monotonic() + timeout_sec)
+        )
         with self.server.observation_condition:
             cursor = self.server.observation_sequence
         confirmations: dict[str, int] = {}
+        saw_frames = False
         saw_people = False
         while time.monotonic() < deadline:
             if goal_handle.is_cancel_requested or not self.server.skill_active:
@@ -242,6 +251,7 @@ class WaitForTrackedMatchState(State):
             if not frames:
                 continue
             for sequence, frame in frames:
+                saw_frames = True
                 cursor = max(cursor, sequence)
                 people = list(frame.people)
                 saw_people = saw_people or bool(people)
@@ -269,9 +279,14 @@ class WaitForTrackedMatchState(State):
         blackboard["message"] = (
             "People were visible, but none matched every requested attribute."
             if saw_people
-            else "No fresh tracked-person observations arrived before the deadline."
+            else (
+                "Fresh tracked-person frames arrived, but no people were visible."
+                if saw_frames
+                else "No fresh tracked-person observations arrived before the deadline."
+            )
         )
-        return NOT_FOUND if saw_people else TIMEOUT
+        # Section: An observed empty scene is a miss; stream silence is infrastructure failure.
+        return NOT_FOUND if saw_frames else FAILED
 
 
 class SaveFoundGuestState(State):
@@ -279,7 +294,7 @@ class SaveFoundGuestState(State):
 
     def __init__(self, server: "FindPersonByAttributeSkillServer") -> None:
         """Special function: Store the server-owned guest-memory client."""
-        super().__init__([SAVED, FAILED, CANCELED])
+        super().__init__([SAVED, FAILED, CANCELED, TIMEOUT])
         self.server = server
 
     def execute(self, blackboard: Blackboard) -> str:
@@ -288,6 +303,11 @@ class SaveFoundGuestState(State):
         if goal_handle.is_cancel_requested:
             blackboard["message"] = "Find-person goal canceled before memory save."
             return CANCELED
+        absolute_deadline = float(blackboard_value(blackboard, "deadline", 0.0))
+        remaining = max(0.0, absolute_deadline - time.monotonic())
+        if remaining <= 0.0:
+            blackboard["message"] = "Find-person deadline expired before guest-memory save."
+            return TIMEOUT
         observation = blackboard["observation"]
         snapshot = observation_dict(observation)
         person_ref = dict(snapshot)
@@ -311,7 +331,13 @@ class SaveFoundGuestState(State):
             sort_keys=True,
         )
         request.record.profile = copy.deepcopy(observation.profile)
-        response = self.server.call_save(request, self.server.memory_timeout_sec)
+        response = self.server.call_save(
+            request,
+            min(self.server.memory_timeout_sec, remaining),
+        )
+        if time.monotonic() >= absolute_deadline:
+            blackboard["message"] = "Find-person deadline expired during guest-memory save."
+            return TIMEOUT
         if response is None or not response.success:
             blackboard["message"] = (
                 response.message if response is not None else "GPSR guest-memory save timed out."
@@ -333,7 +359,7 @@ class FindPersonByAttributeMissionSM(StateMachine):
         self.set_name("FIND_PERSON_BY_ATTRIBUTE_SERVER_SM")
         self.add_state("VALIDATE_SELECTORS", ValidateFindGoalState(server), transitions={READY: "WAIT_FOR_MATCH", INVALID_INPUT: INVALID_INPUT, CANCELED: CANCELED})
         self.add_state("WAIT_FOR_MATCH", WaitForTrackedMatchState(server), transitions={MATCHED: "SAVE_GUEST", NOT_FOUND: NOT_FOUND, TIMEOUT: TIMEOUT, CANCELED: CANCELED, FAILED: FAILED})
-        self.add_state("SAVE_GUEST", SaveFoundGuestState(server), transitions={SAVED: SUCCESS, FAILED: FAILED, CANCELED: CANCELED})
+        self.add_state("SAVE_GUEST", SaveFoundGuestState(server), transitions={SAVED: SUCCESS, FAILED: FAILED, CANCELED: CANCELED, TIMEOUT: TIMEOUT})
 
 
 class FindPersonByAttributeSkillServer(LifecycleNode):
@@ -361,7 +387,10 @@ class FindPersonByAttributeSkillServer(LifecycleNode):
         self.appearance_sub = None
         self.memory_client = None
         self.action_server = None
-        self.active_goals: set[Any] = set()
+        # Section: Admission is reserved atomically before ActionServer starts execution.
+        self.goal_lock = threading.Lock()
+        self.goal_admitted = False
+        self.active_goal_handle = None
 
     def on_configure(self, _state: LifecycleState) -> TransitionCallbackReturn:
         """Special function: Allocate observation, memory, and action resources."""
@@ -415,11 +444,11 @@ class FindPersonByAttributeSkillServer(LifecycleNode):
         self.skill_active = False
         with self.observation_condition:
             self.observation_condition.notify_all()
-        return TransitionCallbackReturn.SUCCESS if not self.active_goals else TransitionCallbackReturn.FAILURE
+        return TransitionCallbackReturn.SUCCESS if not self.has_active_goal() else TransitionCallbackReturn.FAILURE
 
     def on_cleanup(self, _state: LifecycleState) -> TransitionCallbackReturn:
         """Special function: Release action, subscriptions, clients, and observation history."""
-        if self.active_goals:
+        if self.has_active_goal():
             return TransitionCallbackReturn.FAILURE
         self.release_resources()
         return TransitionCallbackReturn.SUCCESS
@@ -442,7 +471,9 @@ class FindPersonByAttributeSkillServer(LifecycleNode):
             self.destroy_client(self.memory_client)
             self.memory_client = None
         self.observation_history.clear()
-        self.active_goals.clear()
+        with self.goal_lock:
+            self.goal_admitted = False
+            self.active_goal_handle = None
 
     def appearance_callback(self, message: TrackedPersonAppearanceArray) -> None:
         """Special function: Cache frame-consistent observations only while ACTIVE."""
@@ -472,7 +503,16 @@ class FindPersonByAttributeSkillServer(LifecycleNode):
 
     def goal_callback(self, _goal_request: Any) -> GoalResponse:
         """Special function: Reject goals unless lifecycle is ACTIVE and idle."""
-        return GoalResponse.ACCEPT if self.skill_active and not self.active_goals else GoalResponse.REJECT
+        with self.goal_lock:
+            if not self.skill_active or self.goal_admitted:
+                return GoalResponse.REJECT
+            self.goal_admitted = True
+            return GoalResponse.ACCEPT
+
+    def has_active_goal(self) -> bool:
+        """Special function: Read reserved or executing goal ownership atomically."""
+        with self.goal_lock:
+            return bool(self.goal_admitted)
 
     def cancel_callback(self, _goal_handle: Any) -> CancelResponse:
         """Special function: Accept cancellation so the YASMIN wait state can exit."""
@@ -480,7 +520,8 @@ class FindPersonByAttributeSkillServer(LifecycleNode):
 
     def execute_callback(self, goal_handle: Any) -> Any:
         """Special function: Run one server-owned find-person YASMIN state machine."""
-        self.active_goals.add(goal_handle)
+        with self.goal_lock:
+            self.active_goal_handle = goal_handle
         blackboard = Blackboard()
         blackboard["goal_handle"] = goal_handle
         try:
@@ -502,7 +543,9 @@ class FindPersonByAttributeSkillServer(LifecycleNode):
                 goal_handle.abort()
             return result
         finally:
-            self.active_goals.discard(goal_handle)
+            with self.goal_lock:
+                self.active_goal_handle = None
+                self.goal_admitted = False
 
 
 def profile_info(profile: PersonProfile) -> dict[str, Any]:
@@ -773,7 +816,10 @@ class ExtractGuestInfoSkillServer(LifecycleNode):
         self.save_client = None
         self.profile_client = None
         self.action_server = None
-        self.active_goals: set[Any] = set()
+        # Section: A boolean reservation supports unhashable ROS goal-handle test doubles.
+        self.goal_lock = threading.Lock()
+        self.goal_admitted = False
+        self.active_goal_handle = None
 
     def on_configure(self, _state: LifecycleState) -> TransitionCallbackReturn:
         """Special function: Allocate live perception, memory clients, and action server."""
@@ -822,11 +868,11 @@ class ExtractGuestInfoSkillServer(LifecycleNode):
     def on_deactivate(self, _state: LifecycleState) -> TransitionCallbackReturn:
         """Special function: Stop extraction admission before cleanup."""
         self.skill_active = False
-        return TransitionCallbackReturn.SUCCESS if not self.active_goals else TransitionCallbackReturn.FAILURE
+        return TransitionCallbackReturn.SUCCESS if not self.has_active_goal() else TransitionCallbackReturn.FAILURE
 
     def on_cleanup(self, _state: LifecycleState) -> TransitionCallbackReturn:
         """Special function: Release clients, subscriptions, actions, and live caches."""
-        if self.active_goals:
+        if self.has_active_goal():
             return TransitionCallbackReturn.FAILURE
         self.release_resources()
         return TransitionCallbackReturn.SUCCESS
@@ -851,7 +897,9 @@ class ExtractGuestInfoSkillServer(LifecycleNode):
                 self.destroy_client(client)
                 setattr(self, name, None)
         self.latest_people = {}
-        self.active_goals.clear()
+        with self.goal_lock:
+            self.goal_admitted = False
+            self.active_goal_handle = None
 
     def appearance_callback(self, message: TrackedPersonAppearanceArray) -> None:
         """Special function: Cache fresh tracked observations for optional extraction refresh."""
@@ -890,7 +938,16 @@ class ExtractGuestInfoSkillServer(LifecycleNode):
 
     def goal_callback(self, _goal_request: Any) -> GoalResponse:
         """Special function: Reject extraction unless lifecycle is ACTIVE and idle."""
-        return GoalResponse.ACCEPT if self.skill_active and not self.active_goals else GoalResponse.REJECT
+        with self.goal_lock:
+            if not self.skill_active or self.goal_admitted:
+                return GoalResponse.REJECT
+            self.goal_admitted = True
+            return GoalResponse.ACCEPT
+
+    def has_active_goal(self) -> bool:
+        """Special function: Read reserved or executing extraction ownership atomically."""
+        with self.goal_lock:
+            return bool(self.goal_admitted)
 
     def cancel_callback(self, _goal_handle: Any) -> CancelResponse:
         """Special function: Accept cancellation for state-machine polling."""
@@ -898,7 +955,8 @@ class ExtractGuestInfoSkillServer(LifecycleNode):
 
     def execute_callback(self, goal_handle: Any) -> Any:
         """Special function: Run one server-owned extraction YASMIN state machine."""
-        self.active_goals.add(goal_handle)
+        with self.goal_lock:
+            self.active_goal_handle = goal_handle
         blackboard = Blackboard()
         blackboard["goal_handle"] = goal_handle
         try:
@@ -922,7 +980,9 @@ class ExtractGuestInfoSkillServer(LifecycleNode):
                 goal_handle.abort()
             return result
         finally:
-            self.active_goals.discard(goal_handle)
+            with self.goal_lock:
+                self.active_goal_handle = None
+                self.goal_admitted = False
 
 
 def run_server(node_type: Any, args: list[str] | None = None) -> None:

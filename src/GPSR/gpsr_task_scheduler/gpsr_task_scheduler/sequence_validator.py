@@ -75,12 +75,24 @@ def validate_plan(task_type: str, instruction: str, config: SchedulerConfig) -> 
     if result.task_request.task_type != task_type:
         errors.append(f"{task_type}: {instruction!r}: parsed as {result.task_request.task_type!r}")
     # Section: Validate deterministic physical task ordering and its dependency chain.
-    # Section: Compound FIND_OBJECT owns its initial search navigation.
-    expected_skills = (
-        ["FIND_OBJECT", "NAVIGATE", "FIND_PERSON", "SAY"]
-        if task_type == "find_object"
-        else ["NAVIGATE", TASK_TO_SKILL[task_type], "NAVIGATE", "FIND_PERSON", "SAY"]
-    )
+    # Section: Compound object and person find skills own their initial search navigation.
+    if task_type == "find_object":
+        expected_skills = ["FIND_OBJECT", "NAVIGATE", "FIND_PERSON", "SAY"]
+    elif task_type == "find_person":
+        expected_skills = [
+            "FIND_PERSON_BY_ATTRIBUTE",
+            "NAVIGATE",
+            "FIND_PERSON",
+            "SAY",
+        ]
+    else:
+        expected_skills = [
+            "NAVIGATE",
+            TASK_TO_SKILL[task_type],
+            "NAVIGATE",
+            "FIND_PERSON",
+            "SAY",
+        ]
     actual_skills = [step.skill_name for step in result.steps]
     if actual_skills != expected_skills:
         errors.append(f"{task_type}: {instruction!r}: skills {actual_skills!r}, expected {expected_skills!r}")

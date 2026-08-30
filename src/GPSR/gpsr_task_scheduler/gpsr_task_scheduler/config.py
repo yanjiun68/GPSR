@@ -1,5 +1,7 @@
 """Section: Scheduler YAML configuration loading."""
 
+# Section: Configuration contracts, defaults, normalization, and YAML loading.
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -56,7 +58,7 @@ def normalize_symbol(value: Any) -> str:
 def default_config() -> SchedulerConfig:
     """Special function: Provide deterministic defaults for unit tests and missing YAML."""
     return SchedulerConfig(
-        known_locations={"kitchen", "living_room", "bedroom", "dining_room", "entrance", "operator", "instruction_point"},
+        known_locations={"kitchen", "living_room", "bedroom", "dining_room", "entrance", "exit", "operator", "instruction_point"},
         known_objects={"apple", "banana", "bottle", "chair", "coke", "cup", "milk", "chips"},
         known_categories={"drink", "food", "object"},
         known_people={"operator", "john", "mary"},
@@ -66,7 +68,7 @@ def default_config() -> SchedulerConfig:
             "shirt_color": ["red", "orange", "yellow", "green", "blue", "purple", "white", "black", "gray"],
             "glasses": ["yes"],
         },
-        skill_timeouts={"NAVIGATE": 60.0, "FIND_OBJECT": 300.0, "FIND_PERSON": 20.0, "FIND_PERSON_BY_ATTRIBUTE": 20.0, "EXTRACT_PERSON_INFO": 10.0, "COUNT_OBJECTS": 10.0, "COUNT_PEOPLE": 10.0, "PICK_OBJECT": 20.0, "PLACE_OBJECT": 20.0, "HANDOVER_OBJECT": 20.0, "FOLLOW_PERSON": 60.0, "GUIDE_PERSON": 60.0, "SAY": 8.0, "ASK_AND_LISTEN": 15.0},
+        skill_timeouts={"NAVIGATE": 60.0, "FIND_OBJECT": 300.0, "FIND_PERSON": 300.0, "FIND_PERSON_BY_ATTRIBUTE": 300.0, "EXTRACT_PERSON_INFO": 10.0, "COUNT_OBJECTS": 10.0, "COUNT_PEOPLE": 10.0, "PICK_OBJECT": 20.0, "PLACE_OBJECT": 20.0, "HANDOVER_OBJECT": 20.0, "FOLLOW_PERSON": 60.0, "GUIDE_PERSON": 60.0, "SAY": 8.0, "ASK_AND_LISTEN": 15.0},
         skill_retries={"NAVIGATE": 1, "FIND_OBJECT": 0, "FIND_PERSON": 0, "FIND_PERSON_BY_ATTRIBUTE": 0, "EXTRACT_PERSON_INFO": 0, "COUNT_OBJECTS": 0, "COUNT_PEOPLE": 0, "PICK_OBJECT": 0, "PLACE_OBJECT": 0, "HANDOVER_OBJECT": 0, "FOLLOW_PERSON": 0, "GUIDE_PERSON": 0, "SAY": 0, "ASK_AND_LISTEN": 0},
         actions={"execute_action_queue": "/execute_action_queue"},
         primitive_capabilities=load_primitive_registry(),

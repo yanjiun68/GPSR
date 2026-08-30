@@ -2,10 +2,9 @@
 
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
-from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
-from launch_ros.substitutions import FindPackageShare
 
 
 def generate_launch_description() -> LaunchDescription:
@@ -13,7 +12,8 @@ def generate_launch_description() -> LaunchDescription:
     # Section: Skill input and detector configuration.
     rgb_topic = LaunchConfiguration("rgb_topic")
     show_gui = LaunchConfiguration("show_gui")
-    yolo_model_path = PathJoinSubstitution([FindPackageShare("vision"), "models", "yolo11n.pt"])
+    # Section: Use the requested workspace YOLOE segmentation weights for COUNT_OBJECTS.
+    yolo_model_path = "/home/yanjiun68/workspace/WS1/PutrabotUPM-project/yoloe-26s-seg.pt"
 
     # Section: Temporal confirmation configuration shared with the existing test launch.
     confirmation_window_sec = LaunchConfiguration("confirmation_window_sec")

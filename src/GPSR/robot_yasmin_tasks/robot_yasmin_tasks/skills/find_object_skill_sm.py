@@ -237,6 +237,7 @@ class WaitResultState(State):
         payload = {
             "found": bool(result.found),
             "approached": bool(result.approached),
+            "localized": bool(result.object_pose.header.frame_id),
             "result_code": int(result.result_code),
             "object_pose": pose_to_dict(result.object_pose),
             "observation_pose": pose_to_dict(result.observation_pose),
@@ -248,17 +249,19 @@ class WaitResultState(State):
         }
         code = int(result.result_code)
         if code == int(FindObject.Result.SUCCESS):
-            # Section: Store only the localized map pose, never an image bbox string.
+            # Section: Retain the detector identity even when RGB-only mode has no valid map pose.
             blackboard[bb.TARGET_OBJECT] = str(result.object_id)
-            blackboard[bb.TARGET_POSE] = result.object_pose
-            memory = dict(bb_get(blackboard, bb.ENTITY_MEMORY, {}))
-            memory[str(result.object_id)] = {
-                "type": "object",
-                "pose": payload["object_pose"],
-                "room": str(result.found_room),
-                "viewpoint": str(result.found_viewpoint),
-            }
-            blackboard[bb.ENTITY_MEMORY] = memory
+            # Section: Publish spatial blackboard data only when depth produced a framed 3D pose.
+            if payload["localized"]:
+                blackboard[bb.TARGET_POSE] = result.object_pose
+                memory = dict(bb_get(blackboard, bb.ENTITY_MEMORY, {}))
+                memory[str(result.object_id)] = {
+                    "type": "object",
+                    "pose": payload["object_pose"],
+                    "room": str(result.found_room),
+                    "viewpoint": str(result.found_viewpoint),
+                }
+                blackboard[bb.ENTITY_MEMORY] = memory
             return self.store_outcome(
                 blackboard,
                 action,

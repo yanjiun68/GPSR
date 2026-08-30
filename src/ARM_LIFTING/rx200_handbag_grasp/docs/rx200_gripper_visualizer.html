@@ -1,0 +1,757 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Interactive Interbotix RX200 gripper opening visualizer driven by the returned gripper servo angle.">
+  <title>RX200 Gripper Opening Visualizer</title>
+
+  <!-- Section: Self-contained visual design and responsive layout. -->
+  <style>
+    :root {
+      --ink: #102a2b;
+      --muted: #667c7b;
+      --paper: #f3efe5;
+      --panel: rgba(255, 253, 247, 0.88);
+      --line: rgba(16, 42, 43, 0.13);
+      --orange: #ff6b35;
+      --orange-dark: #c84016;
+      --teal: #0f766e;
+      --teal-soft: #b9e1da;
+      --yellow: #f4c95d;
+      --shadow: 0 24px 70px rgba(25, 50, 49, 0.12);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      min-height: 100vh;
+      margin: 0;
+      overflow-x: hidden;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 8% 10%, rgba(244, 201, 93, 0.24), transparent 28rem),
+        radial-gradient(circle at 92% 90%, rgba(15, 118, 110, 0.15), transparent 32rem),
+        var(--paper);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    body::before {
+      position: fixed;
+      inset: 0;
+      z-index: -1;
+      background-image: linear-gradient(rgba(16, 42, 43, 0.035) 1px, transparent 1px), linear-gradient(90deg, rgba(16, 42, 43, 0.035) 1px, transparent 1px);
+      background-size: 32px 32px;
+      content: "";
+      mask-image: linear-gradient(to bottom, black, transparent 85%);
+    }
+
+    .shell {
+      width: min(1180px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 42px 0 48px;
+    }
+
+    .eyebrow {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 14px;
+      color: var(--teal);
+      font-size: 0.75rem;
+      font-weight: 800;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+    }
+
+    .eyebrow::before {
+      width: 32px;
+      height: 3px;
+      border-radius: 999px;
+      background: var(--orange);
+      content: "";
+    }
+
+    h1 {
+      max-width: 830px;
+      margin: 0;
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: clamp(2.6rem, 6vw, 5.6rem);
+      font-weight: 500;
+      letter-spacing: -0.055em;
+      line-height: 0.9;
+    }
+
+    h1 em {
+      color: var(--orange);
+      font-weight: 500;
+    }
+
+    .lede {
+      max-width: 650px;
+      margin: 22px 0 34px;
+      color: var(--muted);
+      font-size: 1rem;
+      line-height: 1.7;
+    }
+
+    .dashboard {
+      display: grid;
+      grid-template-columns: minmax(0, 1.45fr) minmax(310px, 0.75fr);
+      gap: 18px;
+    }
+
+    .card {
+      position: relative;
+      overflow: hidden;
+      border: 1px solid rgba(255, 255, 255, 0.82);
+      border-radius: 28px;
+      background: var(--panel);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(18px);
+    }
+
+    .visual-card {
+      min-height: 620px;
+      padding: 24px;
+    }
+
+    .card-topline {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+    }
+
+    .card-label {
+      color: var(--muted);
+      font-size: 0.72rem;
+      font-weight: 800;
+      letter-spacing: 0.13em;
+      text-transform: uppercase;
+    }
+
+    .status {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      border-radius: 999px;
+      background: #e6f4ef;
+      color: #176453;
+      font-size: 0.74rem;
+      font-weight: 800;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    .status::before {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #24a37f;
+      box-shadow: 0 0 0 5px rgba(36, 163, 127, 0.12);
+      content: "";
+    }
+
+    .status.warning {
+      background: #fff0e8;
+      color: var(--orange-dark);
+    }
+
+    .status.warning::before {
+      background: var(--orange);
+      box-shadow: 0 0 0 5px rgba(255, 107, 53, 0.12);
+    }
+
+    .opening-readout {
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+      margin: 30px 0 8px;
+    }
+
+    .opening-value {
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: clamp(4rem, 9vw, 7.4rem);
+      font-variant-numeric: tabular-nums;
+      letter-spacing: -0.075em;
+      line-height: 0.8;
+    }
+
+    .opening-unit {
+      color: var(--orange);
+      font-size: 1.1rem;
+      font-weight: 900;
+      letter-spacing: 0.04em;
+    }
+
+    .opening-caption {
+      color: var(--muted);
+      font-size: 0.82rem;
+    }
+
+    .gripper-stage {
+      position: relative;
+      min-height: 390px;
+      margin-top: 8px;
+      border-radius: 22px;
+      background: linear-gradient(145deg, #173f3e, #0d2627);
+      box-shadow: inset 0 1px rgba(255, 255, 255, 0.08);
+    }
+
+    .gripper-stage::after {
+      position: absolute;
+      right: 18px;
+      bottom: 14px;
+      color: rgba(255, 255, 255, 0.34);
+      content: "TOP VIEW · NOT TO SCALE";
+      font-size: 0.62rem;
+      font-weight: 800;
+      letter-spacing: 0.14em;
+    }
+
+    #gripperSvg {
+      display: block;
+      width: 100%;
+      height: 390px;
+    }
+
+    .finger {
+      transition: transform 260ms cubic-bezier(0.2, 0.75, 0.25, 1);
+    }
+
+    .linkage-line {
+      transition: all 260ms cubic-bezier(0.2, 0.75, 0.25, 1);
+    }
+
+    .side-panel {
+      display: grid;
+      gap: 18px;
+    }
+
+    .control-card,
+    .details-card {
+      padding: 24px;
+    }
+
+    .input-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 14px;
+      margin: 18px 0 8px;
+    }
+
+    .angle-input-wrap {
+      display: flex;
+      align-items: baseline;
+      border-bottom: 2px solid var(--ink);
+    }
+
+    #angleInput {
+      width: 128px;
+      border: 0;
+      outline: 0;
+      color: var(--ink);
+      background: transparent;
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: 2.4rem;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .input-unit {
+      color: var(--muted);
+      font-size: 0.8rem;
+      font-weight: 800;
+    }
+
+    .unit-toggle {
+      display: flex;
+      padding: 4px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: rgba(16, 42, 43, 0.04);
+    }
+
+    .unit-button {
+      border: 0;
+      border-radius: 999px;
+      padding: 8px 10px;
+      color: var(--muted);
+      background: transparent;
+      cursor: pointer;
+      font-size: 0.72rem;
+      font-weight: 800;
+    }
+
+    .unit-button.active {
+      color: white;
+      background: var(--teal);
+    }
+
+    .range-wrap {
+      margin-top: 24px;
+    }
+
+    #angleRange {
+      width: 100%;
+      height: 6px;
+      margin: 0;
+      appearance: none;
+      border-radius: 999px;
+      outline: none;
+      background: linear-gradient(90deg, var(--orange) var(--range-progress), #d7ded9 var(--range-progress));
+    }
+
+    #angleRange::-webkit-slider-thumb {
+      width: 24px;
+      height: 24px;
+      appearance: none;
+      border: 4px solid white;
+      border-radius: 50%;
+      background: var(--orange);
+      box-shadow: 0 3px 12px rgba(16, 42, 43, 0.25);
+      cursor: grab;
+    }
+
+    #angleRange::-moz-range-thumb {
+      width: 18px;
+      height: 18px;
+      border: 4px solid white;
+      border-radius: 50%;
+      background: var(--orange);
+      box-shadow: 0 3px 12px rgba(16, 42, 43, 0.25);
+      cursor: grab;
+    }
+
+    .range-labels {
+      display: flex;
+      justify-content: space-between;
+      margin-top: 10px;
+      color: var(--muted);
+      font-size: 0.7rem;
+      font-weight: 700;
+    }
+
+    .presets {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+      margin-top: 22px;
+    }
+
+    .preset {
+      min-height: 58px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      color: var(--ink);
+      background: rgba(255, 255, 255, 0.45);
+      cursor: pointer;
+      font-size: 0.73rem;
+      font-weight: 800;
+      transition: transform 160ms ease, border-color 160ms ease, background 160ms ease;
+    }
+
+    .preset:hover {
+      transform: translateY(-2px);
+      border-color: var(--orange);
+      background: white;
+    }
+
+    .data-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 1px;
+      overflow: hidden;
+      margin-top: 18px;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: var(--line);
+    }
+
+    .datum {
+      padding: 16px;
+      background: rgba(255, 255, 255, 0.55);
+    }
+
+    .datum-name {
+      display: block;
+      margin-bottom: 7px;
+      color: var(--muted);
+      font-size: 0.64rem;
+      font-weight: 800;
+      letter-spacing: 0.09em;
+      text-transform: uppercase;
+    }
+
+    .datum-value {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.88rem;
+      font-weight: 800;
+    }
+
+    .formula {
+      margin: 16px 0 0;
+      padding: 14px 16px;
+      border-left: 3px solid var(--orange);
+      color: var(--muted);
+      background: rgba(255, 107, 53, 0.055);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.72rem;
+      line-height: 1.7;
+    }
+
+    .source-note {
+      margin: 14px 0 0;
+      color: var(--muted);
+      font-size: 0.72rem;
+      line-height: 1.55;
+    }
+
+    @media (max-width: 880px) {
+      .dashboard {
+        grid-template-columns: 1fr;
+      }
+
+      .visual-card {
+        min-height: auto;
+      }
+    }
+
+    @media (max-width: 540px) {
+      .shell {
+        width: min(100% - 18px, 1180px);
+        padding-top: 24px;
+      }
+
+      .card {
+        border-radius: 20px;
+      }
+
+      .visual-card,
+      .control-card,
+      .details-card {
+        padding: 18px;
+      }
+
+      .gripper-stage,
+      #gripperSvg {
+        min-height: 330px;
+        height: 330px;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        scroll-behavior: auto !important;
+        transition-duration: 0.01ms !important;
+      }
+    }
+  </style>
+</head>
+<body>
+  <!-- Section: Page heading and purpose. -->
+  <main class="shell">
+    <div class="eyebrow">Interbotix · RX200 telemetry tool</div>
+    <h1>See the angle.<br><em>Know the opening.</em></h1>
+    <p class="lede">Enter the returned <strong>gripper servo angle</strong> from <code>/rx200/sdk_joint_states</code>. The linkage model converts it into the estimated center-to-center finger opening and animates the mechanism.</p>
+
+    <!-- Section: Interactive dashboard. -->
+    <section class="dashboard" aria-label="RX200 gripper dashboard">
+      <!-- Section: Animated top-view gripper visualization. -->
+      <article class="card visual-card">
+        <div class="card-topline">
+          <span class="card-label">Estimated finger opening</span>
+          <span id="statusBadge" class="status">Within URDF range</span>
+        </div>
+
+        <div class="opening-readout" aria-live="polite">
+          <span id="openingValue" class="opening-value">39.0</span>
+          <span class="opening-unit">mm</span>
+        </div>
+        <div class="opening-caption">Full distance between mirrored finger-joint centers</div>
+
+        <div class="gripper-stage">
+          <svg id="gripperSvg" viewBox="0 0 680 390" role="img" aria-labelledby="svgTitle svgDescription">
+            <title id="svgTitle">Animated RX200 gripper viewed from above</title>
+            <desc id="svgDescription">Two gripper fingers move apart as the entered servo angle increases.</desc>
+
+            <!-- Section: Background guides and measurement scale. -->
+            <g opacity="0.17" stroke="#d9f0ea" stroke-width="1">
+              <line x1="40" y1="195" x2="640" y2="195" stroke-dasharray="6 9"/>
+              <line x1="340" y1="35" x2="340" y2="355" stroke-dasharray="6 9"/>
+              <circle cx="340" cy="195" r="100" fill="none"/>
+              <circle cx="340" cy="195" r="155" fill="none"/>
+            </g>
+
+            <!-- Section: Opening dimension line. -->
+            <g fill="#f4c95d" stroke="#f4c95d" stroke-width="2">
+              <line id="dimensionLine" x1="245" y1="78" x2="435" y2="78"/>
+              <path id="leftArrow" d="M245 78 l10 -6 v12 z"/>
+              <path id="rightArrow" d="M435 78 l-10 -6 v12 z"/>
+              <rect x="299" y="58" width="82" height="28" rx="14" fill="#173f3e" stroke="none"/>
+              <text id="dimensionText" x="340" y="77" fill="#f4c95d" stroke="none" text-anchor="middle" font-family="ui-monospace, monospace" font-size="13" font-weight="800">39.0 mm</text>
+            </g>
+
+            <!-- Section: Static RX200 gripper body. -->
+            <g>
+              <path d="M272 314 H408 L433 245 V151 L405 112 H275 L247 151 V245 Z" fill="#092021" stroke="#3d6965" stroke-width="3"/>
+              <rect x="286" y="143" width="108" height="142" rx="34" fill="#183d3c" stroke="#537c77" stroke-width="2"/>
+              <circle cx="340" cy="213" r="47" fill="#0b2425" stroke="#628d86" stroke-width="3"/>
+              <circle cx="340" cy="213" r="31" fill="#ff6b35"/>
+              <circle cx="340" cy="213" r="10" fill="#542111"/>
+              <text x="340" y="344" fill="#82a7a2" text-anchor="middle" font-family="ui-sans-serif, system-ui" font-size="11" font-weight="800" letter-spacing="2">RX200 · GRIPPER</text>
+            </g>
+
+            <!-- Section: Moving linkage rods from servo horn to each finger. -->
+            <g fill="none" stroke="#f4c95d" stroke-linecap="round" stroke-width="9">
+              <line id="leftLink" class="linkage-line" x1="319" y1="193" x2="250" y2="183"/>
+              <line id="rightLink" class="linkage-line" x1="361" y1="233" x2="430" y2="207"/>
+            </g>
+            <g fill="#f4c95d">
+              <circle id="leftJoint" class="linkage-line" cx="250" cy="183" r="8"/>
+              <circle id="rightJoint" class="linkage-line" cx="430" cy="207" r="8"/>
+            </g>
+
+            <!-- Section: Mirrored moving gripper fingers. -->
+            <g id="leftFinger" class="finger">
+              <path d="M205 135 Q205 119 221 119 H263 Q276 119 276 132 V154 H244 V270 Q244 286 228 286 H205 Z" fill="#cdd8d4" stroke="#f7fbf8" stroke-width="3"/>
+              <rect x="212" y="151" width="21" height="105" rx="7" fill="#173f3e"/>
+              <path d="M211 158 h22 M211 177 h22 M211 196 h22 M211 215 h22 M211 234 h22" stroke="#5a817d" stroke-width="3"/>
+            </g>
+            <g id="rightFinger" class="finger">
+              <path d="M475 135 Q475 119 459 119 H417 Q404 119 404 132 V154 H436 V270 Q436 286 452 286 H475 Z" fill="#cdd8d4" stroke="#f7fbf8" stroke-width="3"/>
+              <rect x="447" y="151" width="21" height="105" rx="7" fill="#173f3e"/>
+              <path d="M447 158 h22 M447 177 h22 M447 196 h22 M447 215 h22 M447 234 h22" stroke="#5a817d" stroke-width="3"/>
+            </g>
+
+            <!-- Section: Servo horn angle indicator. -->
+            <g id="hornIndicator" transform="rotate(0 340 213)">
+              <line x1="340" y1="213" x2="340" y2="163" stroke="#fff7e3" stroke-width="5" stroke-linecap="round"/>
+              <circle cx="340" cy="163" r="6" fill="#fff7e3"/>
+            </g>
+          </svg>
+        </div>
+      </article>
+
+      <!-- Section: Angle controls and calculated linkage details. -->
+      <aside class="side-panel">
+        <section class="card control-card">
+          <span class="card-label">Returned servo angle</span>
+          <div class="input-header">
+            <label class="angle-input-wrap" for="angleInput">
+              <input id="angleInput" type="number" value="0.000" step="0.001" inputmode="decimal" aria-label="Returned servo angle">
+              <span id="inputUnit" class="input-unit">rad</span>
+            </label>
+            <div class="unit-toggle" aria-label="Angle unit">
+              <button id="radianButton" class="unit-button active" type="button">RAD</button>
+              <button id="degreeButton" class="unit-button" type="button">DEG</button>
+            </div>
+          </div>
+
+          <div class="range-wrap">
+            <input id="angleRange" type="range" min="-0.377984" max="1.268426" value="0" step="0.001" aria-label="Servo angle slider">
+            <div class="range-labels">
+              <span id="rangeMinimum">−0.378 rad · closed</span>
+              <span id="rangeMaximum">1.268 rad · open</span>
+            </div>
+          </div>
+
+          <div class="presets" aria-label="Opening presets">
+            <button class="preset" type="button" data-opening="30">Closed<br>30 mm</button>
+            <button class="preset" type="button" data-opening="52">Mid<br>52 mm</button>
+            <button class="preset" type="button" data-opening="74">Open<br>74 mm</button>
+          </div>
+        </section>
+
+        <section class="card details-card">
+          <span class="card-label">Linkage calculation</span>
+          <div class="data-grid">
+            <div class="datum">
+              <span class="datum-name">Angle</span>
+              <span id="radianValue" class="datum-value">0.000 rad</span>
+            </div>
+            <div class="datum">
+              <span class="datum-name">Degrees</span>
+              <span id="degreeValue" class="datum-value">0.00°</span>
+            </div>
+            <div class="datum">
+              <span class="datum-name">Each finger</span>
+              <span id="fingerValue" class="datum-value">19.49 mm</span>
+            </div>
+            <div class="datum">
+              <span class="datum-name">Opening</span>
+              <span id="openingDetail" class="datum-value">38.99 mm</span>
+            </div>
+          </div>
+          <p class="formula">d = 2 × [r·sin(θ) + √(L² − (r·cos(θ))²)]</p>
+          <p class="source-note">Uses the RX200 driver constants <strong>r = 14 mm</strong> and <strong>L = 24 mm</strong>. The expected URDF range is 15–37 mm per finger, mirrored about the center.</p>
+        </section>
+      </aside>
+    </section>
+  </main>
+
+  <!-- Section: Self-contained RX200 linkage calculation and interaction logic. -->
+  <script>
+    "use strict";
+
+    // Section: RX200 geometry and expected joint limits from the project configuration.
+    const HORN_RADIUS_METERS = 0.014;
+    const ARM_LENGTH_METERS = 0.024;
+    const MIN_FINGER_METERS = 0.015;
+    const MAX_FINGER_METERS = 0.037;
+    const MIN_ANGLE_RADIANS = -0.37798409686720724;
+    const MAX_ANGLE_RADIANS = 1.2684255905402169;
+
+    // Section: Cache interactive elements so every update stays synchronized.
+    const elements = {
+      angleInput: document.querySelector("#angleInput"),
+      angleRange: document.querySelector("#angleRange"),
+      inputUnit: document.querySelector("#inputUnit"),
+      radianButton: document.querySelector("#radianButton"),
+      degreeButton: document.querySelector("#degreeButton"),
+      rangeMinimum: document.querySelector("#rangeMinimum"),
+      rangeMaximum: document.querySelector("#rangeMaximum"),
+      openingValue: document.querySelector("#openingValue"),
+      openingDetail: document.querySelector("#openingDetail"),
+      fingerValue: document.querySelector("#fingerValue"),
+      radianValue: document.querySelector("#radianValue"),
+      degreeValue: document.querySelector("#degreeValue"),
+      dimensionText: document.querySelector("#dimensionText"),
+      dimensionLine: document.querySelector("#dimensionLine"),
+      leftArrow: document.querySelector("#leftArrow"),
+      rightArrow: document.querySelector("#rightArrow"),
+      leftFinger: document.querySelector("#leftFinger"),
+      rightFinger: document.querySelector("#rightFinger"),
+      leftLink: document.querySelector("#leftLink"),
+      rightLink: document.querySelector("#rightLink"),
+      leftJoint: document.querySelector("#leftJoint"),
+      rightJoint: document.querySelector("#rightJoint"),
+      hornIndicator: document.querySelector("#hornIndicator"),
+      statusBadge: document.querySelector("#statusBadge"),
+      presetButtons: document.querySelectorAll(".preset")
+    };
+
+    // Section: Store the canonical angle in radians even when the visible unit changes.
+    let angleRadians = 0;
+    let displayUnit = "rad";
+
+    /** Special function: Keep a number inside a closed interval. */
+    function clamp(value, minimum, maximum) {
+      return Math.min(Math.max(value, minimum), maximum);
+    }
+
+    /** Special function: Convert the returned servo angle into one finger's center offset. */
+    function angleToFingerDistance(angle) {
+      const hornProjection = HORN_RADIUS_METERS * Math.sin(angle);
+      const linkageRadicand = (ARM_LENGTH_METERS ** 2) - ((HORN_RADIUS_METERS * Math.cos(angle)) ** 2);
+      return hornProjection + Math.sqrt(Math.max(0, linkageRadicand));
+    }
+
+    /** Special function: Convert a requested full opening back into the driver servo angle. */
+    function openingToAngle(openingMillimeters) {
+      const halfDistanceMeters = (openingMillimeters / 1000) / 2;
+      const cosineTerm = ((HORN_RADIUS_METERS ** 2) + (halfDistanceMeters ** 2) - (ARM_LENGTH_METERS ** 2)) / (2 * HORN_RADIUS_METERS * halfDistanceMeters);
+      return (Math.PI / 2) - Math.acos(clamp(cosineTerm, -1, 1));
+    }
+
+    /** Special function: Format the active angle unit for the editable input. */
+    function formatInputAngle(angle) {
+      return displayUnit === "rad" ? angle.toFixed(3) : (angle * 180 / Math.PI).toFixed(2);
+    }
+
+    /** Special function: Update the unit controls without changing the physical angle. */
+    function setDisplayUnit(unit) {
+      displayUnit = unit;
+      const usesRadians = displayUnit === "rad";
+      elements.radianButton.classList.toggle("active", usesRadians);
+      elements.degreeButton.classList.toggle("active", !usesRadians);
+      elements.inputUnit.textContent = usesRadians ? "rad" : "deg";
+      elements.angleInput.step = usesRadians ? "0.001" : "0.1";
+      elements.angleInput.value = formatInputAngle(angleRadians);
+      elements.rangeMinimum.textContent = usesRadians ? "−0.378 rad · closed" : "−21.66° · closed";
+      elements.rangeMaximum.textContent = usesRadians ? "1.268 rad · open" : "72.68° · open";
+    }
+
+    /** Special function: Position the SVG fingers, linkage rods, arrows, and horn indicator. */
+    function updateGripperDrawing(openingMillimeters, angle) {
+      const normalizedOpening = clamp((openingMillimeters - 30) / (74 - 30), 0, 1);
+      const horizontalTravel = normalizedOpening * 66;
+      const leftFingerX = 0 - horizontalTravel;
+      const rightFingerX = horizontalTravel;
+      const leftInnerX = 244 + leftFingerX;
+      const rightInnerX = 436 + rightFingerX;
+      const leftJointX = 250 + leftFingerX;
+      const rightJointX = 430 + rightFingerX;
+      elements.leftFinger.style.transform = `translateX(${leftFingerX}px)`;
+      elements.rightFinger.style.transform = `translateX(${rightFingerX}px)`;
+      elements.leftLink.setAttribute("x2", leftJointX);
+      elements.rightLink.setAttribute("x2", rightJointX);
+      elements.leftJoint.setAttribute("cx", leftJointX);
+      elements.rightJoint.setAttribute("cx", rightJointX);
+      elements.dimensionLine.setAttribute("x1", leftInnerX);
+      elements.dimensionLine.setAttribute("x2", rightInnerX);
+      elements.leftArrow.setAttribute("d", `M${leftInnerX} 78 l10 -6 v12 z`);
+      elements.rightArrow.setAttribute("d", `M${rightInnerX} 78 l-10 -6 v12 z`);
+      elements.hornIndicator.setAttribute("transform", `rotate(${angle * 180 / Math.PI} 340 213)`);
+    }
+
+    /** Special function: Render every visual and numeric result from the canonical angle. */
+    function render() {
+      const fingerMeters = angleToFingerDistance(angleRadians);
+      const openingMillimeters = fingerMeters * 2 * 1000;
+      const degrees = angleRadians * 180 / Math.PI;
+      const withinRange = fingerMeters >= MIN_FINGER_METERS && fingerMeters <= MAX_FINGER_METERS;
+      const rangeProgress = clamp((angleRadians - MIN_ANGLE_RADIANS) / (MAX_ANGLE_RADIANS - MIN_ANGLE_RADIANS), 0, 1) * 100;
+      elements.openingValue.textContent = openingMillimeters.toFixed(1);
+      elements.openingDetail.textContent = `${openingMillimeters.toFixed(2)} mm`;
+      elements.fingerValue.textContent = `${(fingerMeters * 1000).toFixed(2)} mm`;
+      elements.radianValue.textContent = `${angleRadians.toFixed(3)} rad`;
+      elements.degreeValue.textContent = `${degrees.toFixed(2)}°`;
+      elements.dimensionText.textContent = `${openingMillimeters.toFixed(1)} mm`;
+      elements.angleRange.value = clamp(angleRadians, MIN_ANGLE_RADIANS, MAX_ANGLE_RADIANS);
+      elements.angleRange.style.setProperty("--range-progress", `${rangeProgress}%`);
+      elements.statusBadge.textContent = withinRange ? "Within URDF range" : "Outside URDF range";
+      elements.statusBadge.classList.toggle("warning", !withinRange);
+      updateGripperDrawing(openingMillimeters, angleRadians);
+    }
+
+    /** Special function: Parse typed input, convert units, and refresh when the value is valid. */
+    function handleAngleInput() {
+      const enteredValue = Number.parseFloat(elements.angleInput.value);
+      if (!Number.isFinite(enteredValue)) return;
+      angleRadians = displayUnit === "rad" ? enteredValue : enteredValue * Math.PI / 180;
+      render();
+    }
+
+    /** Special function: Apply a physical slider value and mirror it into the typed input. */
+    function handleRangeInput() {
+      angleRadians = Number.parseFloat(elements.angleRange.value);
+      elements.angleInput.value = formatInputAngle(angleRadians);
+      render();
+    }
+
+    /** Special function: Apply a named finger-opening preset using the inverse linkage equation. */
+    function applyPreset(event) {
+      const openingMillimeters = Number.parseFloat(event.currentTarget.dataset.opening);
+      angleRadians = openingToAngle(openingMillimeters);
+      elements.angleInput.value = formatInputAngle(angleRadians);
+      render();
+    }
+
+    // Section: Bind all direct-manipulation controls.
+    elements.angleInput.addEventListener("input", handleAngleInput);
+    elements.angleRange.addEventListener("input", handleRangeInput);
+    elements.radianButton.addEventListener("click", () => setDisplayUnit("rad"));
+    elements.degreeButton.addEventListener("click", () => setDisplayUnit("deg"));
+    elements.presetButtons.forEach((button) => button.addEventListener("click", applyPreset));
+
+    // Section: Paint the initial zero-radian gripper state.
+    setDisplayUnit("rad");
+    render();
+  </script>
+</body>
+</html>

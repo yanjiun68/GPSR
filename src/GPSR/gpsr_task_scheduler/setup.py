@@ -1,3 +1,6 @@
+"""Section: Install the deterministic GPSR scheduler as an ament Python package."""
+
+# Section: Packaging dependencies and setuptools entrypoint.
 from glob import glob
 from setuptools import find_packages, setup
 

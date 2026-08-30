@@ -91,14 +91,9 @@
     cartesian_jump_threshold: 0.0  # Disable jump detection
 
     # ========================================
-    # Gripper Strategy (Two-Stage Squeeze)
+    # Gripper sequencing; physical guarded close is owned by rx200_gripper_guard.
     # ========================================
-    gripper_second_squeeze: true
-    gripper_first_close_effort: 0.5
-    gripper_squeeze_effort: 0.8
     gripper_close_delay: 0.3
-    gripper_current_limit_grasp: 60
-    gripper_current_limit_max: 150
 
     # ========================================
     # Pose Filtering (Anti-Jitter) - OPTIMIZED
@@ -167,16 +162,6 @@
     visual_servo.settle_time_near: 0.30    # More careful near target
 
     # ========================================
-    # Contact Detection (NEW)
-    # ========================================
-    contact_detection.enabled: true
-    contact_detection.current_threshold: 45   # mA threshold for contact
-    contact_detection.approach_speed: 0.003   # 3mm/s approach speed
-    contact_detection.max_extra_descent: 0.03 # Max 3cm extra descent
-    contact_detection.check_interval: 0.05    # Check every 50ms
-    contact_detection.current_window: 5       # Average over 5 readings
-
-    # ========================================
     # MoveIt Motion Planning
     # ========================================
     arm_group: "interbotix_arm"
@@ -195,8 +180,9 @@
     gripper_pwm_open: 200
     gripper_pwm_close: -75
     gripper_close_duration: 2.5
-    gripper_current_limit_grasp: 250
-    gripper_current_limit_max: 500
+    gripper_guard.action_name: "/rx200/gripper_guard/close_until_contact"
+    gripper_guard.hold_pwm: 0.0
+    gripper_guard.timeout_sec: 5.0
 
     # ========================================
     # Workspace Limits (in lift_base_link frame, meters)

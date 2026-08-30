@@ -1,4 +1,6 @@
 """Section: GREET skill."""
+
+# Section: State-machine composition and skill-specific execution behavior.
 from robot_yasmin_tasks.gpsr.models import ActionStepData
 from robot_yasmin_tasks.ros_clients.speech_clients import SpeechClients
 from robot_yasmin_tasks.skills.skill_base import SimpleSkillSM, require_any_field

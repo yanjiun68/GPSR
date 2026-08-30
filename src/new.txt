@@ -1,0 +1,115 @@
+ros2 launch gpsr_task_scheduler gpsr_scheduler.launch.py \
+  dry_run:=false \
+  start_executor:=true \
+  start_find_object_pipeline:=true \
+  start_count_objects_pipeline:=false \
+  start_count_people_pipeline:=false \
+  start_find_person_pipeline:=false \
+  start_find_person_attribute_pipeline:=false \
+  start_follow_person_pipeline:=false \
+  start_voice_stt:=false \
+  start_voice_tts:=true \
+  rgb_topic:=/camera/image_raw \
+  show_gui:=true
+
+=======================================================================
+## For interbotix arm ## 
+=======================================================================
+
+  ros2 action send_goal \
+/rx200/arm_controller/follow_joint_trajectory \
+control_msgs/action/FollowJointTrajectory \
+"{
+  trajectory: {
+    joint_names: [
+      'waist',
+      'shoulder',
+      'elbow',
+      'wrist_angle',
+      'wrist_rotate'
+    ],
+    points: [
+      {
+       positions: [-0.089, -0.219, -0.517 , 0.827 , 1.687] ,
+        time_from_start: {sec: 6, nanosec: 0}
+      }
+    ]
+  }
+}" --feedback
+
+=======================================================================
+arm pose : trajectory: {
+    joint_names: [
+      'waist',
+      'shoulder',
+      'elbow',
+      'wrist_angle',
+      'wrist_rotate'
+    ]
+---------------------------------------------
+positions: [-0.089, 1.878, -0.365 , -0.358, 0.000] lowest possible pose
+
+positions: [-0.089, -0.219, -0.517 , 0.827 , 1.687]  90 degree rotated gripper pose - home pose
+---------------------------------------------
+positions: [-0.089, -0.010, -0.131 , 0.215, 0.0]
+
+======================================================================
+## Open gripper
+======================================================================
+ros2 action send_goal \
+  /rx200/gripper_controller/follow_joint_trajectory \
+  control_msgs/action/FollowJointTrajectory \
+  "{
+    trajectory: {
+      joint_names: ['left_finger'],
+      points: [
+        {
+          positions: [0.037],
+          time_from_start: {sec: 2, nanosec: 0}
+        }
+      ]
+    }
+  }" \
+  --feedback 
+
+======================================================================
+## Close gripper ##
+======================================================================
+ros2 action send_goal \
+  /rx200/gripper_controller/follow_joint_trajectory \
+  control_msgs/action/FollowJointTrajectory \
+  "{
+    trajectory: {
+      joint_names: ['left_finger'],
+      points: [
+        {
+          positions: [0.015],
+          time_from_start: {sec: 2, nanosec: 0}
+        }
+      ]
+    }
+  }" \
+  --feedback
+
+  ______________________________________________________________
+  Save close gripper 
+  ______________________________________________________________
+  ros2 action send_goal \
+  /rx200/gripper_guard/close_until_contact \
+  rx200_gripper_guard_interfaces/action/CloseUntilContact \
+  "{close_pwm: -75.0, hold_pwm: 0.0, timeout_sec: 5.0}" \
+  --feedback
+  _______________________________________________________________
+  
+
+======================================================================
+Check for enable servo 
+======================================================================
+ros2 service call \
+  /rx200/torque_enable \
+  interbotix_xs_msgs/srv/TorqueEnable \
+  "{cmd_type: 'single', name: 'gripper', enable: true}"
+
+=======================================================================
+## For testing robot skills ## 
+=======================================================================

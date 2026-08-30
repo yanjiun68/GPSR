@@ -24,6 +24,11 @@ def generate_launch_description() -> LaunchDescription:
     default_skill_registry_file = PathJoinSubstitution(
         [FindPackageShare("robot_yasmin_tasks"), "config", "skill_registry.yaml"]
     )
+    # Section: Person find skills share one installed waypoint search policy.
+    find_person_search_config_file = LaunchConfiguration("find_person_search_config_file")
+    default_find_person_search_config_file = PathJoinSubstitution(
+        [FindPackageShare("robot_yasmin_tasks"), "config", "find_person_search.yaml"]
+    )
 
     # Section: Optional integrated runtime nodes.
     start_executor = LaunchConfiguration("start_executor")
@@ -32,18 +37,24 @@ def generate_launch_description() -> LaunchDescription:
     start_find_object_pipeline = LaunchConfiguration("start_find_object_pipeline")
     start_find_person_pipeline = LaunchConfiguration("start_find_person_pipeline")
     start_find_person_attribute_pipeline = LaunchConfiguration("start_find_person_attribute_pipeline")
+    start_follow_person_pipeline = LaunchConfiguration("start_follow_person_pipeline")
     start_voice_tts = LaunchConfiguration("start_voice_tts")
     start_voice_stt = LaunchConfiguration("start_voice_stt")
     allow_simulated_primitives = LaunchConfiguration("allow_simulated_primitives")
 
     # Section: Shared perception launch-time controls.
     rgb_topic = LaunchConfiguration("rgb_topic")
+    enable_depth = LaunchConfiguration("enable_depth")
     depth_topic = LaunchConfiguration("depth_topic")
     camera_info_topic = LaunchConfiguration("camera_info_topic")
     show_gui = LaunchConfiguration("show_gui")
     enable_count_report_tts = LaunchConfiguration("enable_count_report_tts")
     yolo_model_path = LaunchConfiguration("yolo_model_path")
-    default_yolo_model_path = PathJoinSubstitution([FindPackageShare("vision"), "models", "yolo11n.pt"])
+    human_yolo_model_path = LaunchConfiguration("human_yolo_model_path")
+    # Section: Use the requested workspace YOLOE segmentation weights for shared object detection.
+    default_yolo_model_path = "/home/yanjiun68/workspace/WS1/PutrabotUPM-project/yoloe-26s-seg.pt"
+    # Section: Preserve the class-labelled YOLO11 model for human-only perception.
+    default_human_yolo_model_path = PathJoinSubstitution([FindPackageShare("vision"), "models", "yolo11n.pt"])
     default_pose_model_path = PathJoinSubstitution([FindPackageShare("vision"), "models", "pose_landmarker_full.task"])
 
     # Section: Count stability parameters shared by object and people perception services.
@@ -59,13 +70,23 @@ def generate_launch_description() -> LaunchDescription:
     return_after_failure = LaunchConfiguration("return_after_failure")
     max_commands = LaunchConfiguration("max_commands")
     navigate_to_instruction_point_on_start = LaunchConfiguration("navigate_to_instruction_point_on_start")
+    return_target_mode = LaunchConfiguration("return_target_mode")
+    amcl_pose_topic = LaunchConfiguration("amcl_pose_topic")
+    amcl_pose_max_age_sec = LaunchConfiguration("amcl_pose_max_age_sec")
+    amcl_pose_capture_timeout_sec = LaunchConfiguration("amcl_pose_capture_timeout_sec")
+    return_fallback_named_location = LaunchConfiguration("return_fallback_named_location")
     enable_error_recovery = LaunchConfiguration("enable_error_recovery")
     error_recovery_max_attempts = LaunchConfiguration("error_recovery_max_attempts")
     error_recovery_retry_delay_sec = LaunchConfiguration("error_recovery_retry_delay_sec")
     executor_goal_response_timeout_sec = LaunchConfiguration("executor_goal_response_timeout_sec")
     navigation_action = LaunchConfiguration("navigation_action")
+    navigate_to_pose_action = LaunchConfiguration("navigate_to_pose_action")
+    navigate_to_named_pose_action = LaunchConfiguration("navigate_to_named_pose_action")
     find_object_action = LaunchConfiguration("find_object_action")
     find_person_action = LaunchConfiguration("find_person_action")
+    lifecycle_transition_timeout_sec = LaunchConfiguration("lifecycle_transition_timeout_sec")
+    lifecycle_operation_timeout_margin_sec = LaunchConfiguration("lifecycle_operation_timeout_margin_sec")
+    startup_dependency_poll_sec = LaunchConfiguration("startup_dependency_poll_sec")
     tts_action = LaunchConfiguration("tts_action")
     default_skill_timeout_sec = LaunchConfiguration("default_skill_timeout_sec")
     default_skill_retries = LaunchConfiguration("default_skill_retries")
@@ -108,6 +129,11 @@ def generate_launch_description() -> LaunchDescription:
                 "return_after_failure": return_after_failure,
                 "max_commands": max_commands,
                 "navigate_to_instruction_point_on_start": navigate_to_instruction_point_on_start,
+                "return_target_mode": return_target_mode,
+                "amcl_pose_topic": amcl_pose_topic,
+                "amcl_pose_max_age_sec": ParameterValue(amcl_pose_max_age_sec, value_type=float),
+                "amcl_pose_capture_timeout_sec": ParameterValue(amcl_pose_capture_timeout_sec, value_type=float),
+                "return_fallback_named_location": return_fallback_named_location,
                 "enable_error_recovery": ParameterValue(enable_error_recovery, value_type=bool),
                 "error_recovery_max_attempts": ParameterValue(error_recovery_max_attempts, value_type=int),
                 "error_recovery_retry_delay_sec": ParameterValue(error_recovery_retry_delay_sec, value_type=float),
@@ -123,6 +149,8 @@ def generate_launch_description() -> LaunchDescription:
                 "enable_manipulation": enable_manipulation,
                 "enable_tts": enable_tts,
                 "enable_scheduler_viewer": ParameterValue(enable_scheduler_viewer, value_type=bool),
+                # Section: A disabled executor permits planning-only startup without a false wait.
+                "require_executor_ready": ParameterValue(start_executor, value_type=bool),
             }
         ],
     )
@@ -137,6 +165,12 @@ def generate_launch_description() -> LaunchDescription:
         parameters=[{
             "skill_registry_file": skill_registry_file,
             "allow_simulated_primitives": ParameterValue(allow_simulated_primitives, value_type=bool),
+            "navigate_to_pose_action": navigate_to_pose_action,
+            "navigate_to_named_pose_action": navigate_to_named_pose_action,
+            "find_person_search_config_file": find_person_search_config_file,
+            "lifecycle_transition_timeout_sec": ParameterValue(lifecycle_transition_timeout_sec, value_type=float),
+            "lifecycle_operation_timeout_margin_sec": ParameterValue(lifecycle_operation_timeout_margin_sec, value_type=float),
+            "startup_dependency_poll_sec": ParameterValue(startup_dependency_poll_sec, value_type=float),
         }],
     )
 
@@ -150,6 +184,7 @@ def generate_launch_description() -> LaunchDescription:
         parameters=[{
             "registry_file": skill_registry_file,
             "allow_simulated_primitives": ParameterValue(allow_simulated_primitives, value_type=bool),
+            "transition_timeout_sec": ParameterValue(lifecycle_transition_timeout_sec, value_type=float),
         }],
     )
 
@@ -204,7 +239,7 @@ def generate_launch_description() -> LaunchDescription:
             "rgb_topic": rgb_topic,
             "detections_topic": "/perception/raw_human_detections",
             "annotated_image_topic": "/perception/human_detections_image",
-            "yolo_model_path": yolo_model_path,
+            "yolo_model_path": human_yolo_model_path,
             "confidence_threshold": 0.35,
             "include_classes": ["person"],
             "exclude_classes": ["__none__"],
@@ -255,6 +290,9 @@ def generate_launch_description() -> LaunchDescription:
             "exclude_classes": ["person"],
             "publish_annotated_image": True,
             "show_gui": show_gui,
+            # Section: Publish readiness only after the object model handles a live camera frame.
+            "ready_topic": "/perception/object_detector_ready",
+            "enable_model_warmup": True,
         }],
     )
 
@@ -375,10 +413,12 @@ def generate_launch_description() -> LaunchDescription:
         condition=IfCondition(start_find_object_pipeline),
         parameters=[{
             "detections_topic": "/perception/raw_object_detections",
+            "enable_depth": ParameterValue(enable_depth, value_type=bool),
             "depth_topic": depth_topic,
             "camera_info_topic": camera_info_topic,
             "action_name": "/gpsr/find_object",
             "target_status_topic": "/gpsr/find_object/target_status",
+            "detector_ready_topic": "/perception/object_detector_ready",
         }],
     )
 
@@ -410,7 +450,8 @@ def generate_launch_description() -> LaunchDescription:
         condition=IfCondition(start_find_person_pipeline),
         launch_arguments={
             "image_topic": rgb_topic,
-            "enable_depth": "false",
+            "enable_depth": enable_depth,
+            "depth_topic": depth_topic,
             "enable_profile_capture": "true",
             "enable_identification": "true",
             "enable_appearance_node": "false",
@@ -418,14 +459,41 @@ def generate_launch_description() -> LaunchDescription:
         }.items(),
     )
 
-    # Section: Identity availability marker makes the name pipeline switch lifecycle-visible.
-    find_person_identity_resource = LifecycleNode(
-        package="robot_yasmin_tasks",
-        executable="skill_availability_resource",
-        name="find_person_identity_resource",
+    # Section: The opt-in master follower uses external robot drivers and explicit action enrollment.
+    follow_person_pipeline = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(
+            PathJoinSubstitution(
+                [FindPackageShare("person_follower_master"), "launch", "person_follow.launch.py"]
+            )
+        ),
+        condition=IfCondition(start_follow_person_pipeline),
+        launch_arguments={
+            "use_sim_time": use_sim_time,
+            "use_external_drivers": "true",
+            "auto_enroll": "false",
+            "cmd_vel_topic": "/cmd_vel_follow",
+            "rviz": "false",
+            "publish_map_tf": "false",
+        }.items(),
+    )
+
+    # Section: Lifecycle gating exposes /person_follow/control only for a prepared FOLLOW_PERSON step.
+    follow_person_skill_server = LifecycleNode(
+        package="person_follower_master",
+        executable="person_follow_action_adapter.py",
+        name="follow_person_skill_server",
         namespace="",
         output="screen",
-        condition=IfCondition(start_find_person_pipeline),
+        condition=IfCondition(start_follow_person_pipeline),
+        parameters=[{
+            "action_name": "/person_follow/control",
+            "master_topic": "/master_target",
+            "enroll_service": "/enroll_master",
+            "reset_service": "/reset_master",
+            "controller_parameter_service": "/follow_controller_node/set_parameters",
+            "follow_cmd_topic": "/cmd_vel_follow",
+            "output_cmd_topic": "/cmd_vel",
+        }],
     )
 
     # Section: Optional people count reporter that speaks stable human quantities.
@@ -472,21 +540,32 @@ def generate_launch_description() -> LaunchDescription:
             DeclareLaunchArgument("schedule_command_service", default_value="/gpsr/schedule_command", description="Service endpoint for one-shot GPSR command scheduling."),
             DeclareLaunchArgument("reset_state_service", default_value="/gpsr/reset_state", description="Guarded service that re-arms recovery from scheduler ERROR."),
             DeclareLaunchArgument("skill_registry_file", default_value=default_skill_registry_file, description="Authoritative executable primitive capability registry."),
+            DeclareLaunchArgument("find_person_search_config_file", default_value=default_find_person_search_config_file, description="Shared YAML waypoint policy for name and attribute person searches."),
+            DeclareLaunchArgument("lifecycle_transition_timeout_sec", default_value="60.0", description="Absolute manager deadline for one lifecycle group operation."),
+            DeclareLaunchArgument("lifecycle_operation_timeout_margin_sec", default_value="10.0", description="Executor wait margin beyond the manager lifecycle deadline."),
+            DeclareLaunchArgument("startup_dependency_poll_sec", default_value="5.0", description="Bounded retry interval while the executor waits for lifecycle-manager services."),
             DeclareLaunchArgument("start_executor", default_value="true", description="Start the GPSR action queue executor."),
-            DeclareLaunchArgument("start_count_people_pipeline", default_value="true", description="Start people detection, people count service, and people count action bridge."),
-            DeclareLaunchArgument("start_count_objects_pipeline", default_value="true", description="Start object detection, object count service, and object count action bridge."),
-            DeclareLaunchArgument("start_find_object_pipeline", default_value="true", description="Start the compound FIND_OBJECT server and its shared object detector."),
+            DeclareLaunchArgument("start_count_people_pipeline", default_value="true", description="Instantiate UNCONFIGURED people-count lifecycle resources for on-demand activation."),
+            DeclareLaunchArgument("start_count_objects_pipeline", default_value="true", description="Instantiate UNCONFIGURED object-count lifecycle resources for on-demand activation."),
+            DeclareLaunchArgument("start_find_object_pipeline", default_value="true", description="Instantiate UNCONFIGURED FIND_OBJECT lifecycle resources for on-demand activation."),
             DeclareLaunchArgument("start_find_person_pipeline", default_value="true", description="Start shared YuNet/SFace identity, lookup, and enrollment interfaces."),
-            DeclareLaunchArgument("start_find_person_attribute_pipeline", default_value="true", description="Start real human pose resources for FIND_PERSON_BY_ATTRIBUTE."),
+            DeclareLaunchArgument("start_find_person_attribute_pipeline", default_value="true", description="Instantiate UNCONFIGURED person-attribute lifecycle resources for on-demand activation."),
+            DeclareLaunchArgument(
+                "start_follow_person_pipeline",
+                default_value="false",
+                description="Opt in to person_follower_master and its GPSR PersonFollow adapter.",
+            ),
             DeclareLaunchArgument("start_voice_tts", default_value="true", description="Start the local /voice/tts/say service."),
             DeclareLaunchArgument("start_voice_stt", default_value="true", description="Start local STT used by verbal FIND_PERSON confirmation."),
             DeclareLaunchArgument("allow_simulated_primitives", default_value="false", description="Test-only opt-in for registry entries explicitly marked simulated."),
             DeclareLaunchArgument("rgb_topic", default_value="/camera/camera/color/image_raw", description="RGB image topic for GPSR perception detectors."),
+            DeclareLaunchArgument("enable_depth", default_value="true", description="Enable aligned-depth localization and target approach; false permits RGB-only object and face searches."),
             DeclareLaunchArgument("depth_topic", default_value="/camera/camera/aligned_depth_to_color/image_raw", description="Aligned depth topic for managed FIND_OBJECT."),
             DeclareLaunchArgument("camera_info_topic", default_value="/camera/camera/color/camera_info", description="Color CameraInfo topic for managed FIND_OBJECT."),
             DeclareLaunchArgument("show_gui", default_value="false", description="Open OpenCV debug windows for GPSR detectors."),
             DeclareLaunchArgument("enable_count_report_tts", default_value="false", description="Speak stable count summaries from perception blackboard reporters."),
-            DeclareLaunchArgument("yolo_model_path", default_value=default_yolo_model_path, description="YOLO model path used by GPSR object/person detectors."),
+            DeclareLaunchArgument("yolo_model_path", default_value=default_yolo_model_path, description="YOLO model path used by GPSR object detectors."),
+            DeclareLaunchArgument("human_yolo_model_path", default_value=default_human_yolo_model_path, description="YOLO model path used by GPSR human detectors."),
             DeclareLaunchArgument("confirmation_window_sec", default_value="2.0", description="Seconds of recent frames used to confirm detections."),
             DeclareLaunchArgument("confirmation_required_ratio", default_value="0.60", description="Minimum fraction of frames where a target must appear."),
             DeclareLaunchArgument("confirmation_confidence_threshold", default_value="0.35", description="Minimum detection confidence required for a frame vote."),
@@ -496,12 +575,19 @@ def generate_launch_description() -> LaunchDescription:
             DeclareLaunchArgument("return_after_completion", default_value="false", description="Append return-to-instruction-point after success."),
             DeclareLaunchArgument("return_after_failure", default_value="false", description="Reserved policy flag for failure recovery return."),
             DeclareLaunchArgument("max_commands", default_value="3", description="Maximum competition commands; zero runs indefinitely."),
-            DeclareLaunchArgument("navigate_to_instruction_point_on_start", default_value="true", description="Navigate to the Instruction Point before command intake."),
+            DeclareLaunchArgument("navigate_to_instruction_point_on_start", default_value="false", description="Opt in to named Instruction Point navigation before command intake."),
+            DeclareLaunchArgument("return_target_mode", default_value="command_start_amcl", description="Return policy: command_start_amcl or named_location."),
+            DeclareLaunchArgument("amcl_pose_topic", default_value="/amcl_pose", description="Localization pose captured when each command begins."),
+            DeclareLaunchArgument("amcl_pose_max_age_sec", default_value="1.0", description="Maximum age of an AMCL observation accepted for command-start capture."),
+            DeclareLaunchArgument("amcl_pose_capture_timeout_sec", default_value="3.0", description="Maximum wait for a fresh command-start AMCL pose."),
+            DeclareLaunchArgument("return_fallback_named_location", default_value="instruction_point", description="Named return target used when AMCL capture is unavailable."),
             DeclareLaunchArgument("enable_error_recovery", default_value="true", description="Retry returning to the Instruction Point after scheduler ERROR."),
             DeclareLaunchArgument("error_recovery_max_attempts", default_value="3", description="Maximum automatic recovery returns; zero retries indefinitely."),
             DeclareLaunchArgument("error_recovery_retry_delay_sec", default_value="5.0", description="Delay between failed automatic recovery returns."),
             DeclareLaunchArgument("executor_goal_response_timeout_sec", default_value="10.0", description="Seconds to wait for executor goal acceptance or rejection."),
             DeclareLaunchArgument("navigation_action", default_value="/nav/navigate_named_pose", description="Existing navigation skill action endpoint."),
+            DeclareLaunchArgument("navigate_to_pose_action", default_value="/navigate_to_pose", description="Nav2 action used for captured raw-pose returns."),
+            DeclareLaunchArgument("navigate_to_named_pose_action", default_value="/nav/navigate_named_pose", description="Named-pose action used for semantic navigation and fallback return."),
             DeclareLaunchArgument("find_object_action", default_value="/perception/find_object", description="Existing object perception action endpoint."),
             DeclareLaunchArgument("find_person_action", default_value="/perception/find_person", description="Existing person perception action endpoint."),
             DeclareLaunchArgument("tts_action", default_value="/voice/tts/say", description="Existing TTS service/action endpoint."),
@@ -531,7 +617,8 @@ def generate_launch_description() -> LaunchDescription:
             voice_tts_node,
             voice_stt_node,
             find_person_pipeline,
-            find_person_identity_resource,
+            follow_person_pipeline,
+            follow_person_skill_server,
             count_people_blackboard_tts_node,
             count_objects_blackboard_tts_node,
         ]

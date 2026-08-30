@@ -29,7 +29,17 @@ def parse_llm_pairs(pairs: list[str]) -> list[ActionStepData]:
             steps.append(ActionStepData("FIND_OBJECT", target_object=args[0], target_location=args[1] if len(args) > 1 else "", timeout_sec=20.0))
         elif action == "find_pers" and args:
             selector = _attribute_selector(args[0])
-            steps.append(ActionStepData(FIND_PERSON_BY_ATTRIBUTE, target_location=args[1] if len(args) > 1 else "", parameters={"selector": selector, "description": args[0]}, timeout_sec=20.0))
+            location = args[1] if len(args) > 1 else ""
+            steps.append(ActionStepData(
+                FIND_PERSON_BY_ATTRIBUTE,
+                target_location=location,
+                parameters={
+                    "selector": selector,
+                    "description": args[0],
+                    "search_scope": "STRICT_LOCATION" if location else "GLOBAL",
+                },
+                timeout_sec=300.0,
+            ))
         elif action in {"count_people", "count_persons", "count_humans"}:
             location = _sym(args[0]) if args else ""
             if location and location not in {"here", "current_view"}:
@@ -62,11 +72,25 @@ def fallback_parse_transcript(transcript: str) -> list[ActionStepData]:
         obj = _sym(bring.group("object"))
         place = _sym(bring.group("place") or "")
         return [ActionStepData(NAVIGATE, target_location=room, timeout_sec=30.0), ActionStepData(FIND_OBJECT, target_object=obj, target_location=place, timeout_sec=20.0), ActionStepData(PICK_OBJECT, target_object=obj, timeout_sec=20.0), ActionStepData(NAVIGATE, target_location="operator", timeout_sec=30.0), ActionStepData(HANDOVER_OBJECT, target_person="operator", timeout_sec=20.0)]
-    find_person = re.search(r"find\s+(?:a\s+|the\s+)?(?P<desc>[\w\s]+?)\s+person\s+(?:in|at)\s+(?:the\s+)?(?P<room>[\w\s]+)", lower)
+    find_person = re.search(
+        r"find\s+(?:a\s+|the\s+)?(?P<desc>[\w\s]*?)\s*person"
+        r"(?:\s+(?:in|at)\s+(?:the\s+)?(?P<room>[\w\s]+))?$",
+        lower,
+    )
     if find_person:
-        room = _sym(find_person.group("room"))
+        room = _sym(find_person.group("room") or "")
         desc = find_person.group("desc").strip()
-        steps = [ActionStepData(NAVIGATE, target_location=room, timeout_sec=30.0), ActionStepData(FIND_PERSON_BY_ATTRIBUTE, target_location=room, parameters={"selector": _attribute_selector(desc), "description": desc}, timeout_sec=20.0)]
+        # Section: The compound person skill owns strict or global waypoint navigation.
+        steps = [ActionStepData(
+            FIND_PERSON_BY_ATTRIBUTE,
+            target_location=room,
+            parameters={
+                "selector": _attribute_selector(desc),
+                "description": desc,
+                "search_scope": "STRICT_LOCATION" if room else "GLOBAL",
+            },
+            timeout_sec=300.0,
+        )]
         if "introduce" in lower:
             steps.append(ActionStepData(SAY, parameters={"text": "Hello, I am a service robot."}, timeout_sec=8.0))
         return steps

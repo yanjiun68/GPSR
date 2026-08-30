@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from gpsr_task_scheduler.cycle import GpsrCycleController, SchedulerState
+from gpsr_task_scheduler.models import ReturnTarget
 from gpsr_task_scheduler.scheduler_node import GpsrTaskSchedulerNode
 
 
@@ -42,7 +43,7 @@ class _Logger:
         """Special function: Initialize recovery log storage."""
         self.messages = []
 
-    def info(self, message: str) -> None:
+    def info(self, message: str, **_kwargs) -> None:
         """Special function: Capture one recovery success message."""
         self.messages.append(("info", message))
 
@@ -70,6 +71,9 @@ class _RecoveryHarness:
         self.max_attempts = max_attempts
         self.states = []
         self.logger = _Logger()
+        # Section: Preserve the same per-command contexts used by the production scheduler.
+        self.command_return_targets = {}
+        self.pending_post_return = {}
 
     def get_parameter(self, name: str) -> _Param:
         """Special function: Supply automatic-recovery policy parameters."""
@@ -96,6 +100,18 @@ class _RecoveryHarness:
             "message": "returned" if success else "navigation unavailable",
         }
 
+    def submit_return_to_command_start(self, _command_id: str, queue_id: str = "") -> dict:
+        """Special function: Reuse the deterministic return result for command recovery."""
+        return self.submit_return_to_instruction_point(queue_id)
+
+    def execute_post_return_report(self, *_args) -> dict:
+        """Special function: Complete a pending report without a live TTS service."""
+        return {"success": True, "outcome": "success", "message": "reported"}
+
+    def clear_command_context(self, command_id: str) -> None:
+        """Special function: Reuse production cleanup for frozen test context."""
+        GpsrTaskSchedulerNode.clear_command_context(self, command_id)
+
     def recover(self) -> None:
         """Special function: Invoke the production automatic recovery callback."""
         GpsrTaskSchedulerNode.recover_from_error(self)
@@ -113,6 +129,18 @@ class _Timer:
         self.canceled = True
 
 
+class _ExecutorReadiness:
+    """Special function: Model discovery of the delayed ActionQueue action server."""
+
+    def __init__(self, ready: bool) -> None:
+        """Special function: Store the current action-server discovery state."""
+        self.ready = ready
+
+    def server_is_ready(self) -> bool:
+        """Special function: Return the configured executor discovery state."""
+        return self.ready
+
+
 class _InitializationHarness:
     """Special function: Exercise dry-run initialization without commanding navigation."""
 
@@ -122,13 +150,30 @@ class _InitializationHarness:
         self.initialization_started = False
         self.initialization_timer = _Timer()
         self.navigation_submitted = False
+        self.executor_client = _ExecutorReadiness(True)
+        self.command_intake_enabled = False
+        self.ready_logged = False
+        self.logger = _Logger()
 
     def get_parameter(self, name: str) -> _Param:
         """Special function: Enable both dry-run and the normally enabled startup return."""
         return _Param({
             "dry_run": True,
             "navigate_to_instruction_point_on_start": True,
+            "require_executor_ready": True,
         }[name])
+
+    def get_logger(self) -> _Logger:
+        """Special function: Return the initialization logger."""
+        return self.logger
+
+    def enable_command_topic_intake(self) -> None:
+        """Special function: Record the final command-subscription readiness barrier."""
+        self.command_intake_enabled = True
+
+    def log_command_ready(self) -> None:
+        """Special function: Record the final externally visible readiness announcement."""
+        self.ready_logged = True
 
     def publish_cycle_state(self) -> None:
         """Special function: Accept startup state publications in the pure unit test."""
@@ -143,17 +188,38 @@ class _InitializationHarness:
 class _CycleHarness:
     """Special function: Exercise node cycle logic without ROS graph dependencies."""
 
-    def __init__(self, skills: list[str], task_success: bool = True, max_commands: int = 3) -> None:
+    def __init__(
+        self,
+        skills: list[str],
+        task_success: bool = True,
+        max_commands: int = 3,
+        report_after_return: bool = False,
+        report_success: bool = True,
+        task_results: list[dict] | None = None,
+    ) -> None:
         """Special function: Configure a ready scheduler with deterministic queue outcomes."""
         self.cycle = GpsrCycleController(max_commands)
         self.cycle.start_initial_return()
         self.cycle.finish_initial_return(True)
         self.skills = list(skills)
         self.task_success = task_success
+        self.report_after_return = report_after_return
+        self.report_success = report_success
+        self.task_results = list(task_results or [])
         self.command_result_pub = _Publisher()
         self.states = []
         self.submissions = []
         self.second_command_accepted = None
+        # Section: Model immutable return and deferred-report scheduler storage.
+        self.command_return_targets = {}
+        self.pending_post_return = {}
+
+    def capture_return_target(self, _command_id: str, _dry_run: bool) -> ReturnTarget:
+        """Special function: Supply one deterministic raw-pose-independent return target."""
+        return ReturnTarget(
+            source="instruction_point_fallback",
+            target_location="instruction_point",
+        )
 
     def publish_cycle_state(self) -> None:
         """Special function: Capture each externally visible lifecycle transition."""
@@ -177,6 +243,23 @@ class _CycleHarness:
                 }
                 for index, skill in enumerate(self.skills)
             ],
+            "post_return_steps": (
+                [{
+                    "step_id": "tts_say_output",
+                    "skill_name": "SAY",
+                    "arguments": {"text": "report"},
+                    "dependencies": [f"step_{len(self.skills) - 1}"],
+                    "timeout": 10.0,
+                    "retry_count": 0,
+                    "result_variable": None,
+                }]
+                if self.report_after_return
+                else []
+            ),
+            "task_request": {
+                "task_type": "find_object" if "FIND_OBJECT" in self.skills else "count_objects",
+                "target": {"object_name": "bottle"},
+            },
             "issues": [],
         }
 
@@ -195,10 +278,11 @@ class _CycleHarness:
             "completed_steps": len(skills),
             "message": "success" if self.task_success else "task failed",
             "outcome": "success" if self.task_success else "fatal_failure",
+            "results": list(self.task_results),
         }
 
-    def submit_return_to_instruction_point(self, command_id: str) -> dict:
-        """Special function: Record the return request after the task queue terminates."""
+    def submit_return_to_command_start(self, command_id: str) -> dict:
+        """Special function: Record return to the frozen per-command destination."""
         self.submissions.append((f"{command_id}_return", ["NAVIGATE"]))
         return {
             "success": True,
@@ -206,6 +290,28 @@ class _CycleHarness:
             "message": "returned",
             "outcome": "success",
         }
+
+    def clear_command_context(self, command_id: str) -> None:
+        """Special function: Reuse production cleanup after terminal command handling."""
+        GpsrTaskSchedulerNode.clear_command_context(self, command_id)
+
+    def execute_post_return_report(self, command_id: str, *_args) -> dict:
+        """Special function: Record deterministic post-return speech submission."""
+        self.submissions.append((f"{command_id}_report", ["SAY"]))
+        return {
+            "success": self.report_success,
+            "completed_steps": 1,
+            "message": "reported" if self.report_success else "tts failed",
+            "outcome": "success" if self.report_success else "fatal_failure",
+        }
+
+    def command_completion_message(self, **kwargs) -> str:
+        """Special function: Reuse production aggregate command-result wording."""
+        return GpsrTaskSchedulerNode.command_completion_message(**kwargs)
+
+    def requires_not_found_report(self, planned: dict, task_result: dict) -> bool:
+        """Special function: Reuse production mandatory FIND_OBJECT report detection."""
+        return GpsrTaskSchedulerNode.requires_not_found_report(planned, task_result)
 
     def process(self, command_id: str) -> dict:
         """Special function: Invoke production command-cycle orchestration."""
@@ -226,6 +332,7 @@ def test_initial_navigation_gates_command_intake() -> None:
     assert cycle.try_accept_command("still_returning") is False
     assert cycle.finish_initial_return(True) is True
     assert cycle.try_accept_command("command_1") is True
+    assert cycle.snapshot().state == SchedulerState.CAPTURING_RETURN_POSE
 
 
 def test_dry_run_skips_physical_initial_navigation() -> None:
@@ -235,6 +342,27 @@ def test_dry_run_skips_physical_initial_navigation() -> None:
     assert harness.navigation_submitted is False
     assert harness.initialization_timer.canceled is True
     assert harness.cycle.snapshot().state == SchedulerState.WAITING_FOR_COMMAND
+    assert harness.command_intake_enabled is True
+    assert harness.ready_logged is True
+
+
+def test_scheduler_remains_initializing_until_executor_is_ready() -> None:
+    """Special function: Do not open command intake before ActionQueue dependencies exist."""
+    harness = _InitializationHarness()
+    harness.executor_client.ready = False
+
+    GpsrTaskSchedulerNode.initialize_competition_cycle(harness)
+
+    assert harness.initialization_started is False
+    assert harness.initialization_timer.canceled is False
+    assert harness.command_intake_enabled is False
+    assert harness.cycle.snapshot().state == SchedulerState.INITIALIZING
+
+    # Section: The next timer tick completes initialization after discovery succeeds.
+    harness.executor_client.ready = True
+    GpsrTaskSchedulerNode.initialize_competition_cycle(harness)
+    assert harness.command_intake_enabled is True
+    assert harness.cycle.snapshot().state == SchedulerState.WAITING_FOR_COMMAND
 
 
 def test_failed_initial_return_recovers_command_intake() -> None:
@@ -242,7 +370,7 @@ def test_failed_initial_return_recovers_command_intake() -> None:
     harness = _RecoveryHarness([True])
     harness.recover()
     assert harness.states == [
-        SchedulerState.RECOVERING_TO_INSTRUCTION_POINT,
+        SchedulerState.RECOVERING_TO_COMMAND_START,
         SchedulerState.WAITING_FOR_COMMAND,
     ]
     assert harness.cycle.try_accept_command("command_after_recovery") is True
@@ -266,6 +394,7 @@ def test_post_command_recovery_commits_cycle_and_clears_ownership() -> None:
     harness.cycle.start_initial_return()
     harness.cycle.finish_initial_return(True)
     harness.cycle.try_accept_command("command_1")
+    harness.cycle.finish_return_pose_capture("command_1")
     harness.cycle.finish_planning("command_1", True)
     harness.cycle.finish_execution("command_1")
     harness.cycle.finish_return("command_1", False)
@@ -327,9 +456,10 @@ def test_normal_command_returns_before_waiting_again() -> None:
     result = harness.process("command_1")
     assert result["success"] is True
     assert harness.states == [
+        SchedulerState.CAPTURING_RETURN_POSE,
         SchedulerState.PLANNING,
         SchedulerState.EXECUTING,
-        SchedulerState.RETURNING_TO_INSTRUCTION_POINT,
+        SchedulerState.RETURNING_TO_COMMAND_START,
         SchedulerState.WAITING_FOR_COMMAND,
     ]
 
@@ -373,12 +503,67 @@ def test_terminal_task_failure_returns_and_releases_scheduler() -> None:
     assert harness.cycle.snapshot().state == SchedulerState.WAITING_FOR_COMMAND
 
 
+def test_report_is_submitted_only_after_confirmed_return() -> None:
+    """Special function: Enforce task, return, then report queue ordering."""
+    harness = _CycleHarness(["FIND_OBJECT"], report_after_return=True)
+    result = harness.process("command_1")
+    assert result["success"] is True
+    assert harness.submissions == [
+        ("command_1", ["FIND_OBJECT"]),
+        ("command_1_return", ["NAVIGATE"]),
+        ("command_1_report", ["SAY"]),
+    ]
+    assert SchedulerState.REPORTING_RESULT in harness.states
+
+
+def test_find_object_not_found_returns_then_reports_automatically() -> None:
+    """Special function: Announce an exhaustive miss after returning to the frozen pose."""
+    # Section: Model a FIND_OBJECT miss without an explicit report phrase in the command.
+    harness = _CycleHarness(
+        ["FIND_OBJECT"],
+        task_success=False,
+        task_results=[{
+            "action_type": "FIND_OBJECT",
+            "outcome": "not_found",
+            "message": "All eligible viewpoints were exhausted.",
+            "result": {},
+        }],
+    )
+
+    # Section: Verify cleanup-complete execution is followed by return and then speech.
+    result = harness.process("command_1")
+    assert result["success"] is False
+    assert harness.submissions == [
+        ("command_1", ["FIND_OBJECT"]),
+        ("command_1_return", ["NAVIGATE"]),
+        ("command_1_report", ["SAY"]),
+    ]
+    assert SchedulerState.REPORTING_RESULT in harness.states
+
+
+def test_tts_failure_releases_intake_without_navigation_recovery() -> None:
+    """Special function: Treat post-return TTS failure as terminal without another return."""
+    harness = _CycleHarness(
+        ["FIND_OBJECT"],
+        report_after_return=True,
+        report_success=False,
+    )
+    result = harness.process("command_1")
+    assert result["success"] is False
+    assert result["failed_step"] == "post_return_report"
+    assert [entry for entry in harness.submissions if entry[1] == ["NAVIGATE"]] == [
+        ("command_1_return", ["NAVIGATE"]),
+    ]
+    assert harness.cycle.snapshot().state == SchedulerState.WAITING_FOR_COMMAND
+
+
 def test_stale_result_cannot_mutate_new_command_state() -> None:
     """Special function: Reject an old return result after a new command becomes active."""
     cycle = GpsrCycleController(max_commands=0)
     cycle.start_initial_return()
     cycle.finish_initial_return(True)
     cycle.try_accept_command("command_1")
+    cycle.finish_return_pose_capture("command_1")
     cycle.finish_planning("command_1", True)
     cycle.finish_execution("command_1")
     cycle.finish_return("command_1", True)
@@ -386,4 +571,4 @@ def test_stale_result_cannot_mutate_new_command_state() -> None:
     assert cycle.finish_return("command_1", True) is False
     snapshot = cycle.snapshot()
     assert snapshot.active_command_id == "command_2"
-    assert snapshot.state == SchedulerState.PLANNING
+    assert snapshot.state == SchedulerState.CAPTURING_RETURN_POSE

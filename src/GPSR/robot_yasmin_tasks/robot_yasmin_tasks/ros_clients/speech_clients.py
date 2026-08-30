@@ -33,8 +33,14 @@ class SpeechClients:
         # Section: Resolve only explicit dotted placeholders from one named result variable.
         substitution = str(action.parameters.get("substitution", "")).strip()
         if substitution:
+            # Section: Deferred report queues carry explicit immutable cross-queue result data.
+            explicit_data = action.parameters.get("substitution_data")
             variables = dict(bb_get(blackboard, bb.RESULT_VARIABLES, {}))
-            source = variables.get(substitution, bb_get(blackboard, substitution, {}))
+            source = (
+                explicit_data
+                if isinstance(explicit_data, dict)
+                else variables.get(substitution, bb_get(blackboard, substitution, {}))
+            )
             text, missing = self.resolve_template(str(text), source)
             if missing:
                 return make_skill_result(

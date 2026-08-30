@@ -20,32 +20,42 @@ SHUTDOWN_OUTCOME = "shutdown"
 SCHEDULER_TRANSITIONS: dict[str, tuple[str, ...]] = {
     SchedulerState.INITIALIZING.value: (
         SchedulerState.GO_TO_INSTRUCTION_POINT.value,
+        SchedulerState.WAITING_FOR_COMMAND.value,
     ),
     SchedulerState.GO_TO_INSTRUCTION_POINT.value: (
         SchedulerState.WAITING_FOR_COMMAND.value,
         SchedulerState.ERROR.value,
     ),
     SchedulerState.WAITING_FOR_COMMAND.value: (
-        SchedulerState.PLANNING.value,
+        SchedulerState.CAPTURING_RETURN_POSE.value,
         SchedulerState.FINISHED.value,
+    ),
+    SchedulerState.CAPTURING_RETURN_POSE.value: (
+        SchedulerState.PLANNING.value,
     ),
     SchedulerState.PLANNING.value: (
         SchedulerState.EXECUTING.value,
         SchedulerState.WAITING_FOR_COMMAND.value,
     ),
     SchedulerState.EXECUTING.value: (
-        SchedulerState.RETURNING_TO_INSTRUCTION_POINT.value,
+        SchedulerState.RETURNING_TO_COMMAND_START.value,
     ),
-    SchedulerState.RETURNING_TO_INSTRUCTION_POINT.value: (
+    SchedulerState.RETURNING_TO_COMMAND_START.value: (
+        SchedulerState.REPORTING_RESULT.value,
         SchedulerState.WAITING_FOR_COMMAND.value,
         SchedulerState.FINISHED.value,
         SchedulerState.ERROR.value,
     ),
+    SchedulerState.REPORTING_RESULT.value: (
+        SchedulerState.WAITING_FOR_COMMAND.value,
+        SchedulerState.FINISHED.value,
+    ),
     SchedulerState.ERROR.value: (
-        SchedulerState.RECOVERING_TO_INSTRUCTION_POINT.value,
+        SchedulerState.RECOVERING_TO_COMMAND_START.value,
         SchedulerState.WAITING_FOR_COMMAND.value,
     ),
-    SchedulerState.RECOVERING_TO_INSTRUCTION_POINT.value: (
+    SchedulerState.RECOVERING_TO_COMMAND_START.value: (
+        SchedulerState.REPORTING_RESULT.value,
         SchedulerState.WAITING_FOR_COMMAND.value,
         SchedulerState.FINISHED.value,
         SchedulerState.ERROR.value,

@@ -1,5 +1,7 @@
 """Section: GPSR scheduler service callback tests."""
 
+# Section: Test fixtures, deterministic fakes, and regression scenarios.
+
 from __future__ import annotations
 
 import json

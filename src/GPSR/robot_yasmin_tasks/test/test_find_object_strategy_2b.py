@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import threading
 import time
 from pathlib import Path
@@ -12,11 +13,12 @@ import rclpy
 from geometry_msgs.msg import PoseStamped
 from rclpy.lifecycle import TransitionCallbackReturn
 from rclpy.parameter import Parameter
-from sensor_msgs.msg import CameraInfo
+from sensor_msgs.msg import CameraInfo, Image
 from std_msgs.msg import Header
 from yasmin import Blackboard
 
-from putrabot_interfaces.msg import ObjectDetection
+from putrabot_interfaces.msg import ObjectDetection, ObjectDetections
+import robot_yasmin_tasks.ros_servers.find_object_skill_server as find_object_server_module
 from robot_yasmin_tasks.ros_servers.find_object_skill_server import (
     CANCELED,
     CANDIDATE,
@@ -24,6 +26,8 @@ from robot_yasmin_tasks.ros_servers.find_object_skill_server import (
     READY,
     TIMEOUT,
     AdvanceSearchState,
+    BuildSearchPlanState,
+    CandidateStore,
     DetectionSample,
     FindObjectMissionSM,
     FindObjectSkillServer,
@@ -360,6 +364,181 @@ def test_target_status_clears_unverified_detection_after_false_candidate() -> No
     assert payload["detected"] is False
     assert payload["verified"] is False
     assert payload["found"] is False
+
+
+def test_perception_readiness_requires_all_live_inputs() -> None:
+    """Special function: ACTIVE alone cannot admit search without detector, depth, and intrinsics."""
+    server = object.__new__(FindObjectSkillServer)
+    # Section: Preserve the production default that requires 3D localization inputs.
+    server.enable_depth = True
+    server.detector_ready_event = threading.Event()
+    server.candidates = CandidateStore()
+    server.sensor_lock = threading.Lock()
+    server.latest_depth = None
+    server.latest_camera_info = None
+    server.skill_active = True
+    server.deactivate_event = threading.Event()
+    goal_handle = SimpleNamespace(is_cancel_requested=False)
+    context = context_with_viewpoints()
+
+    ready, message = server.wait_for_perception_ready(0.02, goal_handle, context)
+    assert not ready
+    assert "detector_ready" in message
+    assert "aligned_depth" in message
+    assert "camera_info" in message
+
+    server.detector_ready_event.set()
+    server.candidates.update(ObjectDetections())
+    server.latest_depth = Image()
+    server.latest_camera_info = CameraInfo()
+
+    ready, message = server.wait_for_perception_ready(0.02, goal_handle, context)
+    assert ready
+    assert message == "Object perception inputs are ready."
+
+
+def test_rgb_only_readiness_does_not_require_depth_or_camera_info() -> None:
+    """Special function: Admit live RGB detection when depth localization is disabled."""
+    # Section: Build the minimum active server state used by the readiness barrier.
+    server = object.__new__(FindObjectSkillServer)
+    server.enable_depth = False
+    server.detector_ready_event = threading.Event()
+    server.detector_ready_event.set()
+    server.candidates = CandidateStore()
+    server.candidates.update(ObjectDetections())
+    server.sensor_lock = threading.Lock()
+    server.latest_depth = None
+    server.latest_camera_info = None
+    server.skill_active = True
+    server.deactivate_event = threading.Event()
+    goal_handle = SimpleNamespace(is_cancel_requested=False)
+    context = context_with_viewpoints()
+
+    # Section: A completed detector frame is sufficient in intentional RGB-only mode.
+    ready, message = server.wait_for_perception_ready(0.02, goal_handle, context)
+    assert ready
+    assert message == "Object perception inputs are ready."
+
+
+def test_readiness_wait_preserves_goal_timeout_outcome() -> None:
+    """Special function: A deadline reached during readiness remains TIMEOUT."""
+    # Section: The first guard admits planning; the second reports interruption after the wait.
+    guard_outcomes = iter((None, TIMEOUT))
+    server = SimpleNamespace(
+        search_config={
+            "rooms": {"kitchen": {"viewpoints": ["kitchen"]}},
+            "verification": {"perception_startup_timeout_sec": 0.1},
+        },
+        guard_outcome=lambda *_args: next(guard_outcomes),
+        wait_for_perception_ready=lambda *_args: (False, "interrupted by timeout"),
+    )
+    board = Blackboard()
+    board["context"] = context_with_viewpoints()
+    board["goal_handle"] = SimpleNamespace(is_cancel_requested=False)
+    assert BuildSearchPlanState(server).execute(board) == TIMEOUT
+
+
+class UnhashableServerGoalHandle:
+    """Special function: Reproduce rclpy ServerGoalHandle hash behavior in unit tests."""
+
+    __hash__ = None
+
+    def __init__(self) -> None:
+        """Special function: Track whether exception handling terminates the goal."""
+        self.aborted = False
+
+    def __eq__(self, other: object) -> bool:
+        """Special function: Define equality so Python deliberately disables hashing."""
+        return self is other
+
+    def abort(self) -> None:
+        """Special function: Record the expected exception terminal transition."""
+        self.aborted = True
+
+
+class UnhashableMotionGoalHandle:
+    """Special function: Reproduce rclpy ClientGoalHandle hash and UUID behavior."""
+
+    __hash__ = None
+
+    def __init__(self, identifier: int) -> None:
+        """Special function: Build one deterministic Nav2 goal UUID and cancel marker."""
+        self.goal_id = SimpleNamespace(uuid=[identifier] * 16)
+        self.cancel_requested = False
+
+    def __eq__(self, other: object) -> bool:
+        """Special function: Compare goal UUIDs like the real rclpy client handle."""
+        return (
+            isinstance(other, UnhashableMotionGoalHandle)
+            and self.goal_id.uuid == other.goal_id.uuid
+        )
+
+    def cancel_goal_async(self) -> None:
+        """Special function: Record lifecycle cancellation without a ROS action server."""
+        self.cancel_requested = True
+
+
+def test_execute_callback_accepts_unhashable_server_goal_and_releases_slot(
+    monkeypatch,
+) -> None:
+    """Special function: A real-style server handle cannot crash mission registration."""
+
+    class RaisingMission:
+        """Special function: Force the callback through its exception and finally paths."""
+
+        def __init__(self, _server: object) -> None:
+            """Special function: Accept the production mission constructor contract."""
+            return None
+
+        def __call__(self, _blackboard: Blackboard) -> None:
+            """Special function: Simulate a failure after parent-goal registration."""
+            raise RuntimeError("planned regression failure")
+
+    # Section: Replace only mission execution while preserving the production callback.
+    monkeypatch.setattr(find_object_server_module, "FindObjectMissionSM", RaisingMission)
+    server = object.__new__(FindObjectSkillServer)
+    server.goal_lock = threading.Lock()
+    server.active_goal_handle = None
+    server.goal_admitted = True
+    server.default_stand_off = 0.8
+    server.cancel_all_motion = lambda: None
+    server.publish_target_status = lambda *_args, **_kwargs: None
+    server.get_logger = lambda: SimpleNamespace(error=lambda _message: None)
+    goal_handle = UnhashableServerGoalHandle()
+
+    result = asyncio.run(server.execute_callback(goal_handle))
+
+    assert result.result_code == int(ResultCode.PERCEPTION_FAILED)
+    assert goal_handle.aborted
+    assert server.active_goal_handle is None
+    assert server.goal_admitted is False
+
+
+def test_unhashable_nav2_goals_are_tracked_and_canceled_by_uuid() -> None:
+    """Special function: UUID dictionaries support unhashable Nav2 client handles."""
+    server = object.__new__(FindObjectSkillServer)
+    server.motion_lock = threading.Lock()
+    server.active_motion_goals = {}
+    first_goal = UnhashableMotionGoalHandle(1)
+    second_goal = UnhashableMotionGoalHandle(2)
+
+    server.track_motion(first_goal)
+    server.track_motion(second_goal)
+    assert len(server.active_motion_goals) == 2
+
+    server.cancel_all_motion()
+    assert first_goal.cancel_requested
+    assert second_goal.cancel_requested
+    assert server.active_motion_goals == {}
+
+
+def test_admitted_goal_blocks_lifecycle_cleanup_before_execute_starts() -> None:
+    """Special function: The accepted-before-execute window retains mission ownership."""
+    server = object.__new__(FindObjectSkillServer)
+    server.goal_lock = threading.Lock()
+    server.active_goal_handle = None
+    server.goal_admitted = True
+    assert server.has_active_goal()
 
 
 def test_lifecycle_cleanup_releases_find_object_resources() -> None:

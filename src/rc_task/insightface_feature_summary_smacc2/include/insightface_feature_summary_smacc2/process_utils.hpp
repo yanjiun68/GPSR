@@ -19,7 +19,7 @@
 
 namespace insightface_feature_summary_smacc2::process_utils
 {
-// Section: registry paths shared by the lifecycle wrapper and the SMACC2 child.
+// Section: registry paths shared by the lifecycle wrapper and the YASMIN child.
 inline const std::filesystem::path kRegistryDir{"/tmp/insightface_feature_summary_smacc2"};
 inline const std::filesystem::path kInsightFacePgidFile{kRegistryDir / "active_insightface_pgid"};
 

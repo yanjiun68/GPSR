@@ -18,11 +18,10 @@ from sensor_msgs.msg import Image, CameraInfo
 from vision_msgs.msg import Detection2DArray
 from geometry_msgs.msg import Pose, Point, PoseStamped, TransformStamped, Quaternion, TwistStamped
 from visualization_msgs.msg import Marker, MarkerArray
-# from interbotix_xs_msgs.srv import RobotConfig  # Not available in this version
-from interbotix_xs_msgs.srv import RegisterValues
 from std_srvs.srv import Trigger
 from std_msgs.msg import Bool
 from rx200_handbag_grasp.action import MoveBaseDistance
+from rx200_gripper_guard_interfaces.action import CloseUntilContact
 from moveit_msgs.action import MoveGroup, ExecuteTrajectory
 from moveit_msgs.msg import (
     MotionPlanRequest, Constraints, JointConstraint,
@@ -34,7 +33,6 @@ from shape_msgs.msg import SolidPrimitive
 from control_msgs.action import FollowJointTrajectory
 from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 from builtin_interfaces.msg import Duration as BuiltinDuration
-from interbotix_xs_msgs.msg import JointSingleCommand
 
 from cv_bridge import CvBridge
 import message_filters
@@ -282,13 +280,7 @@ class GraspNode(Node):
         self.declare_parameter('cartesian_jump_threshold', 0.0)  # Disable jump detection
 
         # --- Gripper Strategy ---
-        self.declare_parameter('gripper_second_squeeze', True)  # Enable second squeeze
-        self.declare_parameter('gripper_first_close_effort', 0.5)  # First close effort
-        self.declare_parameter('gripper_squeeze_effort', 0.8)  # Second squeeze effort
         self.declare_parameter('gripper_close_delay', 0.3)  # Delay between closes
-        # Gripper Force Control
-        self.declare_parameter('gripper_current_limit_grasp', 60) # ~60mA for light grasp? (Unit depends on motor)
-        self.declare_parameter('gripper_current_limit_max', 150)  # Max current for opening/strong grasp
 
         # --- Pose Filtering ---
         self.declare_parameter('pose_filter_alpha', 0.3)
@@ -360,14 +352,6 @@ class GraspNode(Node):
         self.declare_parameter('fusion.kalman_process_noise', 0.001)
         self.declare_parameter('fusion.kalman_measurement_noise', 0.01)
 
-        # [NEW] Contact detection
-        self.declare_parameter('contact_detection.enabled', True)
-        self.declare_parameter('contact_detection.current_threshold', 45)
-        self.declare_parameter('contact_detection.approach_speed', 0.003)
-        self.declare_parameter('contact_detection.max_extra_descent', 0.03)
-        self.declare_parameter('contact_detection.check_interval', 0.05)
-        self.declare_parameter('contact_detection.current_window', 5)
-
         self.declare_parameter('grasp_offset_x', 0.0)
         self.declare_parameter('grasp_offset_y', 0.0)
 
@@ -384,8 +368,14 @@ class GraspNode(Node):
 
         # --- Gripper (PWM mode) ---
         self.declare_parameter('gripper_pwm_open', 200)
-        self.declare_parameter("gripper_pwm_close", -300)
+        self.declare_parameter("gripper_pwm_close", -75)
         self.declare_parameter("gripper_close_duration", 2.5)
+        self.declare_parameter(
+            "gripper_guard.action_name",
+            "/rx200/gripper_guard/close_until_contact",
+        )
+        self.declare_parameter("gripper_guard.hold_pwm", 0.0)
+        self.declare_parameter("gripper_guard.timeout_sec", 5.0)
         self.declare_parameter('lift_group', 'interbotix_lift')
 
         # --- Grasp Verification ---
@@ -464,12 +454,7 @@ class GraspNode(Node):
         self.cartesian_jump_threshold = self.get_parameter('cartesian_jump_threshold').value
 
         # Gripper strategy parameters
-        self.gripper_second_squeeze = self.get_parameter('gripper_second_squeeze').value
-        self.gripper_first_close_effort = self.get_parameter('gripper_first_close_effort').value
-        self.gripper_squeeze_effort = self.get_parameter('gripper_squeeze_effort').value
         self.gripper_close_delay = self.get_parameter('gripper_close_delay').value
-        self.gripper_current_limit_grasp = self.get_parameter('gripper_current_limit_grasp').value
-        self.gripper_current_limit_max = self.get_parameter('gripper_current_limit_max').value
         self.contact_threshold = 100.0  # Effort/current threshold for contact detection (sensitive for paper bag)
 
         self.pose_filter_alpha = self.get_parameter('pose_filter_alpha').value
@@ -501,16 +486,15 @@ class GraspNode(Node):
         self.gripper_pwm_open = self.get_parameter('gripper_pwm_open').value
         self.gripper_pwm_close = self.get_parameter('gripper_pwm_close').value
         self.gripper_close_duration = self.get_parameter('gripper_close_duration').value
-        
-        # Client for setting motor registers (for force control)
-        # NOTE: RobotConfig service not available in this interbotix version
-        # Force control disabled - using default gripper behavior
-        self._robot_config_client = None
-        self.get_logger().warn('RobotConfig service not available - gripper force control disabled')
-
-        # Load Force Control Parameters (kept for future use)
-        self.gripper_current_limit_grasp = self.get_parameter("gripper_current_limit_grasp").value
-        self.gripper_current_limit_max = self.get_parameter("gripper_current_limit_max").value
+        self.gripper_guard_action_name = self.get_parameter(
+            "gripper_guard.action_name"
+        ).value
+        self.gripper_guard_hold_pwm = float(
+            self.get_parameter("gripper_guard.hold_pwm").value
+        )
+        self.gripper_guard_timeout_sec = float(
+            self.get_parameter("gripper_guard.timeout_sec").value
+        )
         
         # MoveIt Gripper Setup
         self.gripper_group_name = 'interbotix_gripper'
@@ -651,14 +635,6 @@ class GraspNode(Node):
         kalman_process_noise = self.get_parameter('fusion.kalman_process_noise').value
         kalman_measurement_noise = self.get_parameter('fusion.kalman_measurement_noise').value
 
-        # [NEW] Contact detection parameters
-        self.contact_detection_enabled = self.get_parameter('contact_detection.enabled').value
-        self.contact_current_threshold = self.get_parameter('contact_detection.current_threshold').value
-        self.contact_approach_speed = self.get_parameter('contact_detection.approach_speed').value
-        self.contact_max_extra_descent = self.get_parameter('contact_detection.max_extra_descent').value
-        self.contact_check_interval = self.get_parameter('contact_detection.check_interval').value
-        self.contact_current_window = self.get_parameter('contact_detection.current_window').value
-
         # Initialize Kalman filter and convergence detector
         self.position_kalman = KalmanFilter3D(kalman_process_noise, kalman_measurement_noise)
         self.convergence_detector = ConvergenceDetector(
@@ -671,9 +647,6 @@ class GraspNode(Node):
         # [NEW] SAM mask storage for depth sampling
         self._current_mask = None
         self._current_mask_timestamp = 0.0
-
-        # [NEW] Current readings buffer for contact detection
-        self._current_readings = deque(maxlen=self.contact_current_window)
 
         # Callback Group to prevent Deadlock between Service and ActionClient
         self.cb_group = ReentrantCallbackGroup()
@@ -731,6 +704,14 @@ class GraspNode(Node):
             self, MoveBaseDistance, self.pregrasp_nav_action_name, callback_group=self.cb_group
         )
 
+        # Section: GripperGuard exclusively owns PWM during the physical close operation.
+        self._gripper_guard_client = ActionClient(
+            self,
+            CloseUntilContact,
+            self.gripper_guard_action_name,
+            callback_group=self.cb_group,
+        )
+
         # Direct Gripper Controller Action Client (bypasses MoveIt for reliable gripper control)
         self._gripper_controller_client = ActionClient(
             self, FollowJointTrajectory, '/rx200/gripper_controller/follow_joint_trajectory',
@@ -743,11 +724,6 @@ class GraspNode(Node):
             callback_group=self.cb_group
         )
         
-        # Robot Config Client (for Current Limit)
-        self._robot_config_client = self.create_client(
-            RegisterValues, '/rx200/set_motor_registers', callback_group=self.cb_group
-        )
-
         # ========================================
         # Lift Action Client (DEPRECATED - Moved to MoveIt)
         # ========================================
@@ -766,7 +742,6 @@ class GraspNode(Node):
         self.grasp_pose_pub = self.create_publisher(PoseStamped, '/grasp/target_pose', 10)
         self.pregrasp_pose_pub = self.create_publisher(PoseStamped, '/grasp/pregrasp_pose', 10)
         self.status_pub = self.create_publisher(Bool, '/grasp/busy', 10)
-        self.gripper_pub = self.create_publisher(JointSingleCommand, '/rx200/commands/joint_single', 10)
         self.marker_pub = self.create_publisher(MarkerArray, '/grasp/debug_markers', 10)
         
         # [NEW] MoveIt Servo Continuous Control
@@ -1521,38 +1496,6 @@ class GraspNode(Node):
 
         return self._gripper_goal_success
 
-    def _get_motor_register(self, reg_name):
-        """Read a register value for the gripper."""
-        if self._robot_config_client is None: return -1
-        try:
-            req = RegisterValues.Request()
-            req.cmd_type = 'group'
-            req.name = 'gripper'
-            req.reg = reg_name
-            future = self._robot_config_client.call_async(req)
-            result = future.result(timeout=1.0)
-            return result.values[0] if result.values else -1
-        except Exception:
-            return -1
-
-    def _control_gripper_pwm(self, pwm_value):
-        """Send direct PWM command to gripper (Mode must be PWM)."""
-        msg = JointSingleCommand()
-        msg.name = 'gripper'
-        msg.cmd = float(pwm_value)
-        self.gripper_pub.publish(msg)
-        self.get_logger().info(f"Published Gripper PWM: {pwm_value}")
-        time.sleep(1.0) # Wait for move
-        
-        # DEBUG: Check Error Status and Current
-        err = self._get_motor_register("Hardware_Error_Status")
-        curr = self._get_motor_register("Present_Current")
-        self.get_logger().info(f"🔎 GRASP MONITOR: ErrorStatus={err}, PresentCurrent={curr}")
-        if err > 0:
-            self.get_logger().error(f"🚨 HARDWARE ERROR DETECTED: {err} (Bit 5=Overload, Bit 2=Overheat)")
-            
-        return True
-
     def _gripper_goal_response_cb(self, future):
         """Callback for gripper controller goal response."""
         goal_handle = future.result()
@@ -1598,100 +1541,55 @@ class GraspNode(Node):
             self._arm_goal_success = False
         self._arm_goal_complete = True
 
-    def _set_gripper_current_limit(self, current_val):
-        """
-        Dynamically sets the Current Limit (Register 38) for the gripper motor.
-        Synchronous call to ensure it is applied BEFORE movement.
-        """
-        # Skip if client not available
-        if self._robot_config_client is None:
-            return
-
-        try:
-            req = RegisterValues.Request()
-            req.cmd_type = 'group' 
-            req.name = 'gripper'
-            req.reg = 'Current_Limit'
-            req.value = int(current_val)
-            
-            future = self._robot_config_client.call_async(req)
-            # BLOCKING WAIT (Safe in MultiThreadedExecutor + ReentrantCallbackGroup)
-            try:
-                # Wait for response (BLOCKING)
-                # Note: rclpy Future.result() might not accept timeout in all versions/contexts
-                # But we need to wait.
-                while not future.done():
-                     time.sleep(0.05)
-                
-                result = future.result()
-                self.get_logger().info(f"✅ Gripper current limit set to {current_val}")
-                
-                # VERIFY: Read it back
-                debug_limit = self._get_motor_register('Current_Limit')
-                self.get_logger().info(f"🔎 VERIFY Current_Limit in Hardware: {debug_limit}")
-                
-            except Exception as e:
-                 self.get_logger().warn(f"❌ Failed to set gripper current limit (Timeout/Error): {e}")
-                 
-        except Exception as e:
-            self.get_logger().error(f"Failed to call register service: {e}") 
-
     def _open_gripper(self):
-        """Open the gripper using MoveIt."""
+        """Preserve the existing stable MoveIt open behavior."""
         self.get_logger().info("Opening Gripper...")
-        # Restore max current for opening
-        if self.gripper_current_limit_max > 0:
-             self._set_gripper_current_limit(self.gripper_current_limit_max)
-             
         result = self._control_gripper_moveit(0.037)  # Open position
         time.sleep(0.5)
         return result
 
     def _close_gripper(self):
-        """Close the gripper with optional two-stage squeeze."""
-        if self.gripper_second_squeeze:
-            return self._close_gripper_with_squeeze()
-        else:
-            self.get_logger().info("Closing Gripper (PWM Mode)...")
-            
-            # Use PWM command directly for "Force Feedback" style grasp
-            # Lower PWM = Lower Force/Torque
-            # Use 'gripper_current_limit_grasp' as a proxy for PWM scalar if needed,
-            # but simpler to just use 'gripper_pwm_close' parameter.
-            # Default pwm_close is -300? I will use -200 for gentler grasp.
-            
-            # Ensure limit is set anyway for safety
-            if self.gripper_current_limit_grasp > 0:
-                 self._set_gripper_current_limit(self.gripper_current_limit_grasp)
-            
-            # Send PWM command instead of MoveIt
-            # PWM range: -limit to +limit. negative usually closes?
-            # Check grasp_params for `gripper_pwm_close` value.
-            pwm_val = self.get_parameter("gripper_pwm_close").value
-            # If default is high (-300), maybe scale it?
-            # User wants feedback/lower force. Let's start with what the param says.
-            return self._control_gripper_pwm(pwm_val)
+        """Delegate physical close-until-contact control exclusively to GripperGuard."""
+        if not self._gripper_guard_client.wait_for_server(timeout_sec=5.0):
+            self.get_logger().error("GripperGuard action server is unavailable")
+            return False
 
-    def _close_gripper_with_squeeze(self):
-        """Two-stage gripper close using direct controller."""
-        # Stage 1: First close to moderate grip
-        self.get_logger().info("Gripper Stage 1: Close to 0.020...")
-        self._control_gripper_moveit(0.020)
-        time.sleep(self.gripper_close_delay)
+        # Section: Preserve the deployed -75 close PWM while keeping hold neutral by default.
+        goal = CloseUntilContact.Goal()
+        goal.close_pwm = float(self.gripper_pwm_close)
+        goal.hold_pwm = self.gripper_guard_hold_pwm
+        goal.timeout_sec = self.gripper_guard_timeout_sec
+        send_future = self._gripper_guard_client.send_goal_async(goal)
+        deadline = time.monotonic() + self.gripper_guard_timeout_sec + 5.0
+        while not send_future.done() and time.monotonic() < deadline:
+            time.sleep(0.02)
+        if not send_future.done():
+            self.get_logger().error("Timed out waiting for GripperGuard goal acceptance")
+            return False
 
-        # Check position
-        current_pos = self._get_gripper_position()
-        if current_pos is not None:
-            self.get_logger().info(f"Gripper position: {current_pos:.4f}")
+        goal_handle = send_future.result()
+        if goal_handle is None or not goal_handle.accepted:
+            self.get_logger().error("GripperGuard rejected close goal")
+            return False
 
-        # Stage 2: Squeeze to minimum (URDF lower limit is 0.015)
-        self.get_logger().info("Gripper Stage 2: Squeeze to 0.015...")
-        self._control_gripper_moveit(0.015)  # Minimum allowed by URDF
-        time.sleep(self.gripper_close_delay)
+        result_future = goal_handle.get_result_async()
+        while not result_future.done() and time.monotonic() < deadline:
+            time.sleep(0.02)
+        if not result_future.done():
+            self.get_logger().error("Timed out waiting for GripperGuard result; cancelling")
+            goal_handle.cancel_goal_async()
+            return False
 
-        final_pos = self._get_gripper_position()
-        self.get_logger().info(f"Gripper final: {final_pos:.4f}" if final_pos else "Gripper final: unknown")
-        return True
+        result = result_future.result().result
+        if result.success and result.contact_detected:
+            self.get_logger().info(
+                "GripperGuard confirmed contact: "
+                f"aperture={result.final_finger_aperture:.5f}, "
+                f"load={result.final_load:.3f}"
+            )
+            return True
+        self.get_logger().warn(f"GripperGuard close failed: {result.reason}")
+        return False
 
     def _get_gripper_position(self) -> float:
         """Get current gripper finger position from joint states."""
@@ -2294,157 +2192,6 @@ class GraspNode(Node):
         msg.header.frame_id = self.arm_base_frame
         # All zeros
         self.servo_pub.publish(msg)
-
-    # ========================================
-    # Contact Detection Approach (NEW)
-    # ========================================
-    def _approach_with_contact_detection(self, target_z: float, timeout: float = 10.0) -> tuple:
-        """
-        Approach target Z position with contact detection.
-
-        Instead of blindly moving to a fixed Z position, this method:
-        1. Moves in small increments toward target_z
-        2. Monitors gripper motor current for contact
-        3. Stops immediately when contact is detected
-        4. Returns the actual contact Z position
-
-        This provides closed-loop depth verification and prevents:
-        - Pressing too hard on objects
-        - Missing objects due to depth estimation errors
-
-        Args:
-            target_z: Target Z position in base frame
-            timeout: Maximum time for approach
-
-        Returns:
-            Tuple (success, contact_z, contact_detected)
-        """
-        if not self.contact_detection_enabled:
-            self.get_logger().info("Contact detection disabled, using standard approach")
-            return (True, target_z, False)
-
-        self.get_logger().info(f"🎯 Contact detection approach to Z={target_z:.3f}m")
-
-        try:
-            # Get current EE position
-            ee_tf = self.tf_buffer.lookup_transform(
-                self.arm_base_frame,
-                self.ee_link,
-                Time(),
-                timeout=Duration(seconds=1.0)
-            )
-
-            current_z = ee_tf.transform.translation.z
-            current_x = ee_tf.transform.translation.x
-            current_y = ee_tf.transform.translation.y
-            current_q = ee_tf.transform.rotation
-
-            self.get_logger().info(f"Starting Z: {current_z:.3f}m, Target Z: {target_z:.3f}m")
-
-            # Calculate total descent distance
-            total_descent = current_z - target_z
-            if total_descent <= 0:
-                self.get_logger().warn("Already at or below target Z")
-                return (True, current_z, False)
-
-            # Maximum extra descent allowed
-            max_z = target_z - self.contact_max_extra_descent
-
-            # Clear current readings buffer
-            self._current_readings.clear()
-
-            start_time = time.time()
-            step_count = 0
-            contact_detected = False
-
-            while current_z > max_z and (time.time() - start_time) < timeout:
-                # Calculate next Z position (small step)
-                next_z = current_z - self.contact_approach_speed
-
-                # Don't go below absolute minimum
-                next_z = max(next_z, max_z)
-
-                # Create target pose
-                step_pose = PoseStamped()
-                step_pose.header.frame_id = self.arm_base_frame
-                step_pose.header.stamp = self.get_clock().now().to_msg()
-                step_pose.pose.position.x = current_x
-                step_pose.pose.position.y = current_y
-                step_pose.pose.position.z = next_z
-                step_pose.pose.orientation = current_q
-
-                # Execute small move
-                if not self._move_to_pose(step_pose, timeout=2.0, use_lift=False, ignore_orientation=True):
-                    self.get_logger().warn(f"Contact approach step {step_count} failed")
-                    break
-
-                # Wait for settle and check current
-                time.sleep(self.contact_check_interval)
-
-                # Read gripper current (if available)
-                gripper_current = self._read_gripper_current()
-                if gripper_current is not None:
-                    self._current_readings.append(gripper_current)
-
-                    # Check for contact (average current over window)
-                    if len(self._current_readings) >= 3:
-                        avg_current = np.mean(list(self._current_readings))
-                        if avg_current > self.contact_current_threshold:
-                            contact_detected = True
-                            self.get_logger().info(
-                                f"⚡ CONTACT DETECTED at Z={next_z:.3f}m "
-                                f"(current={avg_current:.1f}mA > {self.contact_current_threshold}mA)"
-                            )
-                            return (True, next_z, True)
-
-                # Update current Z
-                current_z = next_z
-                step_count += 1
-
-                # Progress log
-                if step_count % 5 == 0:
-                    self.get_logger().info(f"Approach step {step_count}: Z={current_z:.3f}m")
-
-            # Reached target without contact
-            self.get_logger().info(f"Reached Z={current_z:.3f}m without contact detection")
-            return (True, current_z, False)
-
-        except Exception as e:
-            self.get_logger().error(f"Contact detection approach failed: {e}")
-            import traceback
-            self.get_logger().error(traceback.format_exc())
-            return (False, target_z, False)
-
-    def _read_gripper_current(self) -> float:
-        """
-        Read current gripper motor current.
-
-        Returns:
-            Current in mA, or None if not available
-        """
-        try:
-            # Try to get current from motor register
-            current = self._get_motor_register('Present_Current')
-            if current is not None:
-                # Convert register value to mA (approximate)
-                # XM430: ~2.69mA per unit
-                return abs(current) * 2.69
-        except Exception:
-            pass
-
-        # Fallback: estimate from joint effort if available
-        if hasattr(self, '_latest_joint_state') and self._latest_joint_state is not None:
-            try:
-                js = self._latest_joint_state
-                if 'left_finger' in js.name:
-                    idx = js.name.index('left_finger')
-                    if idx < len(js.effort):
-                        # Rough conversion from effort to current estimate
-                        return abs(js.effort[idx]) * 100  # Approximate scaling
-            except Exception:
-                pass
-
-        return None
 
     # ========================================
     # MoveIt Control

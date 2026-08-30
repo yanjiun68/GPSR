@@ -9,6 +9,7 @@ endif()
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(rclpy REQUIRED)
+find_package(diagnostic_updater REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(voice_interfaces REQUIRED)
@@ -17,6 +18,11 @@ find_package(voice_interfaces REQUIRED)
 # Precaution: keep this directory install before running the node from install space.
 install(DIRECTORY models/
   DESTINATION share/${PROJECT_NAME}/models
+)
+
+# Install the standalone launch file that starts both observable voice nodes.
+install(DIRECTORY launch/
+  DESTINATION share/${PROJECT_NAME}/launch
 )
 
 if(BUILD_TESTING)

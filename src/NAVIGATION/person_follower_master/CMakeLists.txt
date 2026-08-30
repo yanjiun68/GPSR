@@ -41,8 +41,18 @@ install(PROGRAMS
   scripts/cmd_vel_mux_node.py
   scripts/return_safety_wrapper_node.py
   scripts/session_manager_node.py
+  scripts/person_follow_action_adapter.py
   DESTINATION lib/${PROJECT_NAME}
 )
+
+# Section: Pure policy tests guard completion arming and stop-gesture geometry.
+if(BUILD_TESTING)
+  find_package(ament_cmake_pytest REQUIRED)
+  ament_add_pytest_test(
+    test_follow_action_policy
+    test/test_follow_action_policy.py
+  )
+endif()
 
 install(DIRECTORY launch config
   DESTINATION share/${PROJECT_NAME}

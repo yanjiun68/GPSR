@@ -21,6 +21,11 @@ from robot_yasmin_tasks.gpsr.outcomes import (
     TIMEOUT,
 )
 from robot_yasmin_tasks.ros_clients.find_person_clients import FindPersonClients
+from robot_yasmin_tasks.ros_clients.nav2_client import Nav2Client
+from robot_yasmin_tasks.skills.person_waypoint_search import (
+    PersonWaypointSearchSM,
+    remaining_person_search_mission_sec,
+)
 
 
 # Section: Private task-local keys prevent partially resolved identities leaking to consumers.
@@ -342,7 +347,7 @@ class VerbalIdentificationState(State):
 
     def __init__(self, client: FindPersonClients) -> None:
         """Special function: Store candidate search and dialogue adapters."""
-        super().__init__([SUCCESS, NOT_FOUND, CANCELED, TIMEOUT])
+        super().__init__([SUCCESS, NOT_FOUND, FAILED, CANCELED, TIMEOUT])
         self.client = client
 
     def execute(self, blackboard: Blackboard) -> str:
@@ -366,8 +371,29 @@ class VerbalIdentificationState(State):
             if candidate_status == "canceled":
                 _store_result(blackboard, action, CANCELED, "FIND_PERSON candidate search canceled.", fatal=True)
                 return CANCELED
+            if candidate_status == "failed":
+                return _store_result(
+                    blackboard,
+                    action,
+                    FAILED,
+                    "FIND_PERSON perception unavailable: "
+                    + str(candidate_response.get("reason", "PERSON_OBSERVATION_STREAM_UNAVAILABLE")),
+                    recoverable=True,
+                )
+            if candidate_status == "timeout":
+                return _store_result(
+                    blackboard,
+                    action,
+                    TIMEOUT,
+                    "FIND_PERSON candidate search exceeded its absolute deadline.",
+                    recoverable=True,
+                )
             if candidate_status != "candidate":
-                outcome = TIMEOUT if _remaining(blackboard) <= 0.0 else NOT_FOUND
+                outcome = (
+                    TIMEOUT
+                    if remaining_person_search_mission_sec(blackboard) <= 0.0
+                    else NOT_FOUND
+                )
                 _store_result(
                     blackboard,
                     action,
@@ -454,7 +480,7 @@ class EnrollAndStoreState(State):
 
     def __init__(self, client: FindPersonClients) -> None:
         """Special function: Store the enrollment adapter."""
-        super().__init__([SUCCESS, CANCELED])
+        super().__init__([SUCCESS, CANCELED, TIMEOUT])
         self.client = client
 
     def execute(self, blackboard: Blackboard) -> str:
@@ -463,6 +489,14 @@ class EnrollAndStoreState(State):
         if _is_canceled(blackboard):
             _store_result(blackboard, action, CANCELED, "FIND_PERSON canceled before result commit.", fatal=True)
             return CANCELED
+        if _remaining(blackboard) <= 0.0:
+            return _store_result(
+                blackboard,
+                action,
+                TIMEOUT,
+                "FIND_PERSON match arrived after the absolute deadline.",
+                recoverable=True,
+            )
         person_ref = dict(bb_get(blackboard, PERSON_REF_PENDING, {}))
         mode = str(bb_get(blackboard, MODE, ""))
         # Section: Both identity adapters expose one mode-independent downstream contract.
@@ -493,6 +527,14 @@ class EnrollAndStoreState(State):
                     "FIND_PERSON canceled during profile enrollment.",
                     fatal=True,
                 )
+        if _remaining(blackboard) <= 0.0:
+            return _store_result(
+                blackboard,
+                action,
+                TIMEOUT,
+                "FIND_PERSON enrollment exceeded the absolute deadline.",
+                recoverable=True,
+            )
         # Section: Commit all compatible and normalized result keys only after identity succeeds.
         blackboard[bb.PERSON_REF] = person_ref
         blackboard[bb.TARGET_PERSON] = str(person_ref.get("person_id", ""))
@@ -521,8 +563,8 @@ class EnrollAndStoreState(State):
         return _store_result(blackboard, action, SUCCESS, "Target person found.", result)
 
 
-class FindPersonSkillSM(StateMachine):
-    """Special function: Resolve a named person by registered or verbal identity."""
+class _FindPersonAtLocationSM(StateMachine):
+    """Special function: Resolve a named person at one already selected waypoint."""
 
     def __init__(
         self,
@@ -530,7 +572,7 @@ class FindPersonSkillSM(StateMachine):
     ) -> None:
         """Special function: Build the explicit two-mode YASMIN state graph."""
         super().__init__(outcomes=SKILL_OUTCOMES)
-        self.set_name("FIND_PERSON_SKILL_SM")
+        self.set_name("FIND_PERSON_AT_LOCATION_SM")
         identity_client = client or FindPersonClients()
         # Section: Validation admits only names before identity mode selection.
         self.add_state(
@@ -573,6 +615,7 @@ class FindPersonSkillSM(StateMachine):
             transitions={
                 SUCCESS: "ENROLL_AND_STORE",
                 NOT_FOUND: NOT_FOUND,
+                FAILED: FAILED,
                 CANCELED: CANCELED,
                 TIMEOUT: TIMEOUT,
             },
@@ -581,5 +624,23 @@ class FindPersonSkillSM(StateMachine):
         self.add_state(
             "ENROLL_AND_STORE",
             EnrollAndStoreState(identity_client),
-            transitions={SUCCESS: SUCCESS, CANCELED: CANCELED},
+            transitions={SUCCESS: SUCCESS, CANCELED: CANCELED, TIMEOUT: TIMEOUT},
+        )
+
+
+class FindPersonSkillSM(PersonWaypointSearchSM):
+    """Special function: Loop through YAML waypoints until a named person is identified."""
+
+    def __init__(
+        self,
+        client: FindPersonClients | None = None,
+        navigation: Nav2Client | None = None,
+        search_config_file: str | None = None,
+    ) -> None:
+        """Special function: Wrap one-location identity resolution in shared search navigation."""
+        super().__init__(
+            "FIND_PERSON_SKILL_SM",
+            _FindPersonAtLocationSM(client),
+            navigation,
+            search_config_file,
         )

@@ -183,6 +183,40 @@ def test_managed_teardown_finishes_before_next_action() -> None:
     assert blackboard[bb.CURRENT_ACTION_INDEX] == 2
 
 
+def test_find_object_dispatch_occurs_only_after_active_verification() -> None:
+    """Special function: Preserve the lifecycle ACTIVE barrier before skill dispatch."""
+    events: list[str] = []
+
+    class ActiveBarrierResources:
+        """Special function: Record manager preparation and final cleanup barriers."""
+
+        def start(self, _blackboard, action_type):
+            """Special function: Model configure/activate and ACTIVE verification success."""
+            events.extend([f"prepare:{action_type}", f"verify-active:{action_type}"])
+            return True, "ACTIVE"
+
+        def stop(self, _blackboard):
+            """Special function: Model teardown and UNCONFIGURED verification success."""
+            events.extend(["cleanup:FIND_OBJECT", "verify-unconfigured:FIND_OBJECT"])
+            return True, "UNCONFIGURED"
+
+    blackboard = Blackboard()
+    blackboard[bb.ACTION_QUEUE] = [{"action_type": "FIND_OBJECT"}]
+    skill = EventSkill("FIND_OBJECT", events, [SUCCESS])
+
+    assert ActionQueueExecutorSM(
+        {"FIND_OBJECT": lambda: skill},
+        ActiveBarrierResources(),
+    )(blackboard) == SUCCESS
+    assert events == [
+        "prepare:FIND_OBJECT",
+        "verify-active:FIND_OBJECT",
+        "execute:FIND_OBJECT",
+        "cleanup:FIND_OBJECT",
+        "verify-unconfigured:FIND_OBJECT",
+    ]
+
+
 def test_teardown_failure_does_not_advance_queue() -> None:
     """Special function: Failed teardown converts success to fatal without index commit."""
     events: list[str] = []

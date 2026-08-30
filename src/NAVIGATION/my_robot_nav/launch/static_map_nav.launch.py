@@ -32,7 +32,11 @@ def generate_launch_description():
     pkg_name = 'my_robot_nav'
     pkg_share = get_package_share_directory(pkg_name)
 
-    default_map = os.path.join(pkg_share, 'maps', 'new_my_map.yaml')
+    # Section: Use the GPSR occupancy map as the default static navigation map.
+    default_map = (
+        '/home/yanjiun68/workspace/WS1/PutrabotUPM-project/'
+        'src/NAVIGATION/my_robot_nav/maps/gpsr_map.yaml'
+    )
     default_waypoints_file = os.path.join(pkg_share, 'config', 'gpsr_waypoint.yaml')
     default_semantic_locations = resolve_default_semantic_locations_file(
         pkg_share,

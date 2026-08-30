@@ -83,6 +83,7 @@ def parse_command(command_id: str, instruction: str, config: SchedulerConfig) ->
         recipient=recipient,
         output_template=_output_template(text, task_type, requested_person_fields),
         return_after_completion=config.return_after_completion,
+        report_after_return=_report_after_return(text),
     ), []
 
 
@@ -414,13 +415,28 @@ def _filters(text: str, config: SchedulerConfig) -> list[dict[str, Any]]:
 
 def _requires_task_location(task_type: str) -> bool:
     """Special function: Declare task families that require physical navigation first."""
-    # Section: FIND_OBJECT owns global or strict-location search navigation internally.
-    return task_type in {"find_person", "count_objects", "count_people", "guide_person"}
+    # Section: FIND_OBJECT and FIND_PERSON own global or strict-location navigation internally.
+    return task_type in {"count_objects", "count_people", "guide_person"}
 
 
 def _requires_report(text: str) -> bool:
     """Special function: Detect whether the command asks for a separate reporting destination."""
     return bool(re.search(r"\b(?:tell|report|say|answer)\b.*\b(?:in|at|to)\b", text) or re.search(r"\b(?:go|navigate|return)\s+to\b.*\b(?:tell|report|say|answer)\b", text))
+
+
+def _report_after_return(text: str) -> bool:
+    """Special function: Detect requests that require returning before speaking."""
+    # Section: Keep the operator-relative phrase explicit instead of guessing from every report verb.
+    return bool(
+        re.search(
+            r"\b(?:report|tell|say|answer)\s+back\s+to\s+(?:me|the\s+operator)\b",
+            text,
+        )
+        or re.search(
+            r"\breturn\s+(?:back\s+)?to\s+(?:me|the\s+operator)\b.*\b(?:report|tell|say|answer)\b",
+            text,
+        )
+    )
 
 
 def _output_template(text: str, task_type: str, requested_person_fields: list[str] | None = None) -> str | None:

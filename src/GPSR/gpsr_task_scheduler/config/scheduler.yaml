@@ -5,6 +5,7 @@ known_locations:
   - bedroom
   - dining_room
   - entrance
+  - exit
   - operator
   - instruction_point
 known_objects:
@@ -56,8 +57,8 @@ default_skill_retries: 0
 skill_timeouts:
   NAVIGATE: 60.0
   FIND_OBJECT: 300.0
-  FIND_PERSON: 20.0
-  FIND_PERSON_BY_ATTRIBUTE: 20.0
+  FIND_PERSON: 300.0
+  FIND_PERSON_BY_ATTRIBUTE: 300.0
   EXTRACT_PERSON_INFO: 10.0
   COUNT_OBJECTS: 10.0
   COUNT_PEOPLE: 10.0

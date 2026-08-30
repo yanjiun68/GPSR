@@ -1,4 +1,6 @@
 """Section: NAVIGATE skill."""
+
+# Section: State-machine composition and skill-specific execution behavior.
 from robot_yasmin_tasks.ros_clients.nav2_client import Nav2Client
 from robot_yasmin_tasks.skills.skill_base import SimpleSkillSM, require_any_field
 

@@ -45,6 +45,16 @@ and the transient person/object/pose detector nodes. The transient nodes start
 `UNCONFIGURED`; the manager activates only the selected state-machine resource group and
 returns it to `UNCONFIGURED` before the queue advances.
 
+Set `enable_depth:=false` when only an RGB camera is available. In that mode FIND_OBJECT
+still performs named-waypoint navigation, scanning, and stable visual verification, but it
+does not wait for aligned depth or CameraInfo, does not publish a localized object map pose,
+and skips the final stand-off approach. The action result reports `approached=false`.
+
+`lifecycle_transition_timeout_sec` defaults to 60 seconds and bounds the entire manager
+operation rather than each individual transition. `lifecycle_operation_timeout_margin_sec`
+adds a 10-second executor response margin. A timed-out prepare is followed by explicit
+cleanup, preventing a late service completion from leaving an unowned ACTIVE group.
+
 Section: Runtime state-machine selection.
 
 ```text
@@ -68,6 +78,41 @@ implemented perception command without a restart. `FIND_OBJECT` and `COUNT_OBJEC
 independent switches but share one `/gpsr_object_detection_node`; the detector process starts
 when either pipeline is enabled. Lifecycle activation still occurs only for the state machine
 selected by the executor.
+
+Section: Per-command return policy.
+
+The default scheduler freezes the newest valid `map`-frame `/amcl_pose` when a command is
+accepted. The pose is normalized and remains unchanged until that command finishes. If no
+fresh valid pose arrives within three seconds, the scheduler freezes the named
+`instruction_point` fallback instead.
+
+For an exhaustive `FIND_OBJECT` `NOT_FOUND` result, the scheduler first returns to this
+frozen command-start pose and then reports `I could not find the <target>.` through the
+normal `SAY` skill. This report is automatic even when the original instruction did not
+explicitly request speech. If return navigation fails, speech remains pending until guarded
+return recovery succeeds.
+
+```text
+WAITING_FOR_COMMAND
+        |
+        v
+CAPTURING_RETURN_POSE -- no valid AMCL pose in 3 s --> named fallback
+        |
+        v
+PLANNING -> EXECUTING -> RETURNING_TO_COMMAND_START
+                              | success
+                              v
+                      REPORTING_RESULT (when requested)
+                              |
+                              v
+                   WAITING_FOR_COMMAND / FINISHED
+```
+
+Raw captured poses use Nav2 `/navigate_to_pose`; ordinary semantic locations and the
+fallback use `/nav/navigate_named_pose`. Startup navigation is disabled by default. Set
+`return_target_mode:=named_location` for the prior named-only policy, or explicitly set
+`navigate_to_instruction_point_on_start:=true` to restore startup motion. Dry-run mode does
+not wait for AMCL and publishes only the configured return policy.
 
 Section: Primitive-only ActionQueue vocabulary.
 
@@ -96,6 +141,11 @@ selector.type=pose|gesture|any_person
       v
 FIND_PERSON_BY_ATTRIBUTE -> FIND_PERSON_BY_ATTRIBUTE_SM
 ```
+
+Both person routes are compound search skills. An explicit task location sets
+`search_scope=STRICT_LOCATION`; a location-free command sets `search_scope=GLOBAL` and the
+executor loops through `find_person_search.yaml`. The planner therefore does not prepend a
+separate `NAVIGATE` step to either person-finding action.
 
 `start_find_person_pipeline` controls face identity and verbal confirmation.
 `start_find_person_attribute_pipeline` independently controls the shared human detector,
@@ -218,4 +268,9 @@ SAY(text='I counted {result.count} people.')
 
 Section: Launch parameters.
 
-The scheduler launch exposes `use_sim_time`, `dry_run`, `command_input_mode`, `command_topic`, `schedule_command_service`, `start_executor`, `start_find_object_pipeline`, `start_count_people_pipeline`, `start_count_objects_pipeline`, `start_find_person_pipeline`, `start_find_person_attribute_pipeline`, `start_voice_tts`, `start_voice_stt`, `rgb_topic`, `depth_topic`, `camera_info_topic`, `show_gui`, `enable_count_report_tts`, `yolo_model_path`, `confirmation_window_sec`, `confirmation_required_ratio`, `confirmation_confidence_threshold`, `confirmation_last_seen_timeout_sec`, `confirmation_min_frames`, `instruction_point`, `return_after_completion`, `return_after_failure`, `navigation_action`, `find_object_action`, `find_person_action`, `tts_action`, `default_skill_timeout_sec`, `default_skill_retries`, `enable_navigation`, `enable_perception`, `enable_manipulation`, `enable_tts`, `enable_scheduler_viewer`, `enable_error_recovery`, `error_recovery_max_attempts`, and `error_recovery_retry_delay_sec`.
+The scheduler launch additionally exposes `return_target_mode`, `amcl_pose_topic`,
+`amcl_pose_max_age_sec`, `amcl_pose_capture_timeout_sec`,
+`return_fallback_named_location`, `navigate_to_pose_action`,
+`navigate_to_named_pose_action`, and `navigate_to_instruction_point_on_start`. See
+`gpsr_scheduler.launch.py --show-args` for the complete perception, voice, executor, and
+recovery parameter list.

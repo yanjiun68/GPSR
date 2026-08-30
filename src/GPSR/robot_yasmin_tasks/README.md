@@ -51,6 +51,16 @@ target-specific status is retained on `/gpsr/find_object/target_status` as JSON 
 `std_msgs/msg/String`; it reports the target, search phase, detection and verification
 state, confidence, final result code, object ID, room, and viewpoint.
 
+Lifecycle `ACTIVE` is only a transition state, not the perception-readiness barrier. Before
+search navigation starts, the mission requires `/perception/object_detector_ready`, one
+complete detection frame, aligned depth, and color `CameraInfo`. Configuration performs one
+non-published YOLO warm-up inference; live readiness is asserted only after the first real
+camera inference. The default readiness allowance is 20 seconds.
+
+The lifecycle manager uses one 60-second absolute deadline for a complete group operation.
+The executor waits an additional 10-second response margin. If prepare remains uncertain,
+it queues explicit cleanup for `FIND_OBJECT` and does not abandon lifecycle ownership.
+
 The competition scheduler publishes its command-cycle state on `/gpsr/state`, listens for
 human transcripts only in `WAITING_FOR_COMMAND`, and uses `/nav/navigate_named_pose` to
 confirm initial arrival at and final return to the configured `instruction_point`.
@@ -66,6 +76,22 @@ FIND_PERSON_BY_ATTRIBUTE
     -> pose, gesture, or any-person selector only
     -> real /perception/human_poses evidence
 ```
+
+Both routes load `config/find_person_search.yaml` and own their Nav2 waypoint loop:
+
+```text
+STRICT_LOCATION -> requested waypoint -> local person search -> result
+
+GLOBAL -> kitchen -> living_room -> dining_room -> bedroom -> entrance -> exit
+             |             |               |
+             +-- NOT_FOUND +---- NOT_FOUND +---- continue until found/exhausted
+```
+
+Edit `person_search.global_waypoints` to change the shared route. Navigation failures skip
+the unreachable waypoint; perception failure, cancellation, and timeout remain terminal.
+
+Open `docs/find_search_visualizer.html` in a browser for a hardware-free interactive model
+of strict/global object and person searches, hidden target positions, and failure branches.
 
 ## GPSR tracked appearance and guest memory
 

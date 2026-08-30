@@ -81,6 +81,8 @@ class MasterTrackerNode(Node):
         self.declare_parameter("enroll_max_dist", 2.0)
         self.declare_parameter("enroll_bearing_deg", 15.0)
         self.declare_parameter("enroll_stable_sec", 3.0)
+        # Section: GPSR can disable autonomous enrollment so motion starts only after an action goal.
+        self.declare_parameter("auto_enroll_enabled", True)
         self.declare_parameter("relock_min_sim", 0.75)
         self.declare_parameter("relock_margin", 0.10)
         self.declare_parameter("keep_min_sim", 0.65)
@@ -130,6 +132,8 @@ class MasterTrackerNode(Node):
         self.enroll_bearing_rad = math.radians(
             float(self.get_parameter("enroll_bearing_deg").value))
         self.enroll_stable_sec = float(self.get_parameter("enroll_stable_sec").value)
+        self.auto_enroll_enabled = bool(
+            self.get_parameter("auto_enroll_enabled").value)
         self.relock_min_sim = float(self.get_parameter("relock_min_sim").value)
         self.relock_margin = float(self.get_parameter("relock_margin").value)
         self.keep_min_sim = float(self.get_parameter("keep_min_sim").value)
@@ -500,7 +504,14 @@ class MasterTrackerNode(Node):
     # Master state machine
     # ========================================================================
     def _step_master_state(self, stamp_sec: float) -> None:
+        """Special function: Advance enrollment or identity tracking for one detection frame."""
         if self.master_state in (STATE_IDLE, STATE_ENROLLING):
+            # Section: Action-controlled deployments remain motionless until /enroll_master is called.
+            if not self.auto_enroll_enabled:
+                self.master_state = STATE_IDLE
+                self._enroll_candidate_id = -1
+                self._enroll_start_sec = 0.0
+                return
             self._step_enrollment(stamp_sec)
         elif self.master_state == STATE_FOLLOWING:
             self._step_following(stamp_sec)

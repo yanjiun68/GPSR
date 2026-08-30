@@ -29,11 +29,11 @@ from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.duration import Duration
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.lifecycle import LifecycleNode, State as LifecycleState, TransitionCallbackReturn
-from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
+from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy, qos_profile_sensor_data
 from rclpy.time import Time
 from receptionist_interfaces.action import NavigateNamedPose
 from sensor_msgs.msg import CameraInfo, Image
-from std_msgs.msg import String
+from std_msgs.msg import Bool, String
 from tf2_ros import Buffer, TransformException, TransformListener
 from yasmin import Blackboard, State, StateMachine
 
@@ -341,6 +341,11 @@ class CandidateStore:
                 self._condition.wait(timeout=min(0.1, max(0.0, deadline - time.monotonic())))
             return self._sequence > 0
 
+    def has_frame(self) -> bool:
+        """Special function: Report whether at least one complete detector frame arrived."""
+        with self._condition:
+            return self._sequence > 0
+
     def latest_match(self, names: set[str], min_confidence: float, since: float = 0.0) -> DetectionSample | None:
         """Special function: Return the best matching target in the latest fresh frame."""
         with self._condition:
@@ -495,12 +500,18 @@ class BuildSearchPlanState(State):
             )
             return NAV_FAILED
         verification = dict(self.server.search_config.get("verification", {}))
-        startup_timeout = float(verification.get("perception_startup_timeout_sec", 3.0))
-        available = self.server.candidates.wait_for_first_frame(
+        startup_timeout = float(verification.get("perception_startup_timeout_sec", 20.0))
+        available, readiness_message = self.server.wait_for_perception_ready(
             startup_timeout,
-            lambda: bool(self.server.guard_outcome(goal_handle, context)),
+            goal_handle,
+            context,
         )
-        return READY if available else PERCEPTION_FAILED
+        if not available:
+            context.terminal_message = readiness_message
+            # Section: Preserve cancellation and mission-timeout semantics during startup waits.
+            interrupted_outcome = self.server.guard_outcome(goal_handle, context)
+            return interrupted_outcome or PERCEPTION_FAILED
+        return READY
 
 
 class SelectViewpointState(State):
@@ -649,6 +660,11 @@ class LocalizeTargetState(State):
         guard = self.server.guard_outcome(goal_handle, context)
         if guard:
             return guard
+        # Section: RGB-only mode terminates successfully after verification without inventing a 3D pose.
+        if not self.server.enable_depth:
+            context.approach_target = False
+            context.terminal_message = "Target found by RGB detection; depth localization and approach were disabled."
+            return READY
         success, message = self.server.localize_confirmed_target(context)
         if not success:
             context.terminal_message = message
@@ -792,6 +808,7 @@ class FindObjectSkillServer(LifecycleNode):
         self.cb_group = ReentrantCallbackGroup()
         self.declare_parameter("action_name", "/gpsr/find_object")
         self.declare_parameter("detections_topic", "/perception/raw_object_detections")
+        self.declare_parameter("enable_depth", True)
         self.declare_parameter("depth_topic", "/camera/camera/aligned_depth_to_color/image_raw")
         self.declare_parameter("camera_info_topic", "/camera/camera/color/camera_info")
         self.declare_parameter("named_navigation_action", "/nav/navigate_named_pose")
@@ -800,12 +817,14 @@ class FindObjectSkillServer(LifecycleNode):
         self.declare_parameter("compute_path_action", "/compute_path_to_pose")
         self.declare_parameter("global_costmap_service", "/global_costmap/get_costmap")
         self.declare_parameter("target_status_topic", "/gpsr/find_object/target_status")
+        self.declare_parameter("detector_ready_topic", "/perception/object_detector_ready")
         self.declare_parameter("search_config_file", self.default_search_config_path())
         self.declare_parameter("default_timeout_sec", 300.0)
 
         # Section: Handles stay empty in UNCONFIGURED.
         self.skill_active = False
         self.search_config: dict[str, Any] = {}
+        self.enable_depth = True
         self.default_timeout_sec = 300.0
         self.default_stand_off = 0.8
         self.candidates = CandidateStore()
@@ -813,6 +832,8 @@ class FindObjectSkillServer(LifecycleNode):
         self.detection_sub = None
         self.depth_sub = None
         self.camera_info_sub = None
+        self.detector_ready_sub = None
+        self.detector_ready_event = threading.Event()
         self.tf_buffer: Buffer | None = None
         self.tf_listener: TransformListener | None = None
         self.named_nav_client = None
@@ -824,9 +845,13 @@ class FindObjectSkillServer(LifecycleNode):
         self.latest_depth: Image | None = None
         self.latest_camera_info: CameraInfo | None = None
         self.sensor_lock = threading.Lock()
+        # Section: Protect single-mission admission independently from Nav2 child goals.
+        self.goal_lock = threading.Lock()
         self.motion_lock = threading.Lock()
-        self.active_motion_goals: set[Any] = set()
-        self.active_goal_handles: set[Any] = set()
+        # Section: ROS client goal handles are unhashable, so immutable UUID bytes own them.
+        self.active_motion_goals: dict[bytes, Any] = {}
+        # Section: FIND_OBJECT admits exactly one parent action goal at a time.
+        self.active_goal_handle: Any | None = None
         self.deactivate_event = threading.Event()
         self.goal_admitted = False
         # Section: Retain the latest target state across transient skill cleanup.
@@ -856,6 +881,7 @@ class FindObjectSkillServer(LifecycleNode):
             # Section: Load policy before exposing the action server.
             config_path = Path(str(self.get_parameter("search_config_file").value))
             self.search_config = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+            self.enable_depth = bool(self.get_parameter("enable_depth").value)
             self.default_timeout_sec = float(self.get_parameter("default_timeout_sec").value)
             self.default_stand_off = float(
                 dict(self.search_config.get("approach", {})).get(
@@ -864,28 +890,44 @@ class FindObjectSkillServer(LifecycleNode):
                 )
             )
             self.candidates = CandidateStore()
-            self.bridge = CvBridge()
+            self.bridge = CvBridge() if self.enable_depth else None
 
             # Section: Subscribe to structured detections and aligned depth only while configured.
             self.detection_sub = self.create_subscription(
                 ObjectDetections,
                 str(self.get_parameter("detections_topic").value),
                 self.detections_callback,
-                10,
+                qos_profile_sensor_data,
                 callback_group=self.cb_group,
             )
-            self.depth_sub = self.create_subscription(
-                Image,
-                str(self.get_parameter("depth_topic").value),
-                self.depth_callback,
-                10,
-                callback_group=self.cb_group,
+            # Section: RGB-only operation must not create or await unavailable depth interfaces.
+            if self.enable_depth:
+                self.depth_sub = self.create_subscription(
+                    Image,
+                    str(self.get_parameter("depth_topic").value),
+                    self.depth_callback,
+                    qos_profile_sensor_data,
+                    callback_group=self.cb_group,
+                )
+                self.camera_info_sub = self.create_subscription(
+                    CameraInfo,
+                    str(self.get_parameter("camera_info_topic").value),
+                    self.camera_info_callback,
+                    qos_profile_sensor_data,
+                    callback_group=self.cb_group,
+                )
+            # Section: Transient detector readiness distinguishes ACTIVE from live inference.
+            ready_qos = QoSProfile(
+                depth=1,
+                durability=DurabilityPolicy.TRANSIENT_LOCAL,
+                reliability=ReliabilityPolicy.RELIABLE,
             )
-            self.camera_info_sub = self.create_subscription(
-                CameraInfo,
-                str(self.get_parameter("camera_info_topic").value),
-                self.camera_info_callback,
-                10,
+            self.detector_ready_event.clear()
+            self.detector_ready_sub = self.create_subscription(
+                Bool,
+                str(self.get_parameter("detector_ready_topic").value),
+                self.detector_ready_callback,
+                ready_qos,
                 callback_group=self.cb_group,
             )
 
@@ -940,31 +982,37 @@ class FindObjectSkillServer(LifecycleNode):
     def on_activate(self, _state: LifecycleState) -> TransitionCallbackReturn:
         """Special function: Accept FIND_OBJECT missions only after activation."""
         self.deactivate_event.clear()
-        self.skill_active = True
+        # Section: Synchronize activation with concurrent action admission checks.
+        with self.goal_lock:
+            self.skill_active = True
         self.get_logger().info("[GPSR_LIFECYCLE] FindObject: ACTIVE")
         return TransitionCallbackReturn.SUCCESS
 
     def on_deactivate(self, _state: LifecycleState) -> TransitionCallbackReturn:
         """Special function: Cancel motion and missions before becoming inactive."""
-        self.skill_active = False
+        # Section: Close admission before signaling the current mission to stop.
+        with self.goal_lock:
+            self.skill_active = False
         self.deactivate_event.set()
         self.cancel_all_motion()
         # Section: Never report INACTIVE while a mission still owns configured resources.
         deadline = time.monotonic() + 2.0
-        while self.active_goal_handles and time.monotonic() < deadline:
+        while self.has_active_goal() and time.monotonic() < deadline:
             time.sleep(0.05)
-        if self.active_goal_handles:
+        if self.has_active_goal():
             self.get_logger().error("FindObject mission did not stop during deactivate.")
             return TransitionCallbackReturn.FAILURE
         return TransitionCallbackReturn.SUCCESS
 
     def on_cleanup(self, _state: LifecycleState) -> TransitionCallbackReturn:
         """Special function: Release every resource allocated during configure."""
-        self.skill_active = False
+        # Section: Close admission before checking whether cleanup is safe.
+        with self.goal_lock:
+            self.skill_active = False
         self.deactivate_event.set()
         self.cancel_all_motion()
         # Section: Cleanup fails closed instead of racing an active mission callback.
-        if self.active_goal_handles:
+        if self.has_active_goal():
             self.get_logger().error("Refusing FindObject cleanup while a mission is active.")
             return TransitionCallbackReturn.FAILURE
         self.release_resources()
@@ -991,7 +1039,12 @@ class FindObjectSkillServer(LifecycleNode):
         if self.action_server is not None:
             self.action_server.destroy()
             self.action_server = None
-        for subscription_name in ("detection_sub", "depth_sub", "camera_info_sub"):
+        for subscription_name in (
+            "detection_sub",
+            "depth_sub",
+            "camera_info_sub",
+            "detector_ready_sub",
+        ):
             subscription = getattr(self, subscription_name)
             if subscription is not None:
                 self.destroy_subscription(subscription)
@@ -1014,12 +1067,17 @@ class FindObjectSkillServer(LifecycleNode):
         self.bridge = None
         self.search_config = {}
         self.candidates = CandidateStore()
+        self.detector_ready_event.clear()
         with self.sensor_lock:
             self.latest_depth = None
             self.latest_camera_info = None
-        self.active_goal_handles.clear()
-        self.active_motion_goals.clear()
-        self.goal_admitted = False
+        # Section: Reset parent mission ownership only after active callbacks have stopped.
+        with self.goal_lock:
+            self.active_goal_handle = None
+            self.goal_admitted = False
+        # Section: Reset UUID-indexed child motion ownership under its dedicated lock.
+        with self.motion_lock:
+            self.active_motion_goals.clear()
 
     def detections_callback(self, message: ObjectDetections) -> None:
         """Special function: Cache detector frames only while ACTIVE."""
@@ -1038,10 +1096,49 @@ class FindObjectSkillServer(LifecycleNode):
             with self.sensor_lock:
                 self.latest_camera_info = message
 
+    def detector_ready_callback(self, message: Bool) -> None:
+        """Special function: Track whether the detector completed live camera inference."""
+        if bool(message.data):
+            self.detector_ready_event.set()
+        else:
+            self.detector_ready_event.clear()
+
+    def wait_for_perception_ready(
+        self,
+        timeout_sec: float,
+        goal_handle: Any,
+        context: SearchContext,
+    ) -> tuple[bool, str]:
+        """Special function: Gate search on live RGB plus optional depth-localization inputs."""
+        deadline = time.monotonic() + max(0.1, float(timeout_sec))
+        missing: list[str] = []
+        while time.monotonic() < deadline:
+            guard = self.guard_outcome(goal_handle, context)
+            if guard:
+                return False, f"Perception readiness interrupted by {guard}."
+            with self.sensor_lock:
+                has_depth = self.latest_depth is not None
+                has_camera_info = self.latest_camera_info is not None
+            has_detector_ready = self.detector_ready_event.is_set()
+            has_detection_frame = self.candidates.has_frame()
+            depth_ready = not self.enable_depth or (has_depth and has_camera_info)
+            if has_detector_ready and has_detection_frame and depth_ready:
+                return True, "Object perception inputs are ready."
+            missing = []
+            if not has_detector_ready:
+                missing.append("detector_ready")
+            if not has_detection_frame:
+                missing.append("detections")
+            if self.enable_depth and not has_depth:
+                missing.append("aligned_depth")
+            if self.enable_depth and not has_camera_info:
+                missing.append("camera_info")
+            time.sleep(min(0.05, max(0.0, deadline - time.monotonic())))
+        return False, f"Object perception readiness timed out; missing: {', '.join(missing)}."
+
     def goal_callback(self, goal: FindObject.Goal) -> GoalResponse:
         """Special function: Reject inactive, concurrent, or malformed missions."""
-        if not self.skill_active or self.goal_admitted:
-            return GoalResponse.REJECT
+        # Section: Validate the request before reserving the single mission slot.
         if not str(goal.object_name).strip() and not str(goal.category).strip():
             return GoalResponse.REJECT
         scope = str(goal.search_scope or ("STRICT_LOCATION" if goal.location else "GLOBAL")).upper()
@@ -1049,21 +1146,32 @@ class FindObjectSkillServer(LifecycleNode):
             return GoalResponse.REJECT
         if scope == "STRICT_LOCATION" and not str(goal.location).strip():
             return GoalResponse.REJECT
-        self.goal_admitted = True
+        # Section: Make lifecycle state and concurrent-goal admission one atomic decision.
+        with self.goal_lock:
+            if not self.skill_active or self.goal_admitted:
+                return GoalResponse.REJECT
+            self.goal_admitted = True
         # Section: Expose the accepted target before mission execution begins.
-        now = time.monotonic()
-        accepted_context = SearchContext(
-            target=clean_symbol(goal.object_name),
-            category=clean_symbol(goal.category),
-            scope=scope,
-            requested_location=clean_symbol(goal.location),
-            approach_target=bool(goal.approach_target),
-            stand_off_distance=float(goal.stand_off_distance or self.default_stand_off),
-            start_time=now,
-            deadline=now + float(goal.timeout_sec or self.default_timeout_sec),
-        )
-        self.publish_target_status("GOAL_ACCEPTED", accepted_context)
-        return GoalResponse.ACCEPT
+        try:
+            now = time.monotonic()
+            accepted_context = SearchContext(
+                target=clean_symbol(goal.object_name),
+                category=clean_symbol(goal.category),
+                scope=scope,
+                requested_location=clean_symbol(goal.location),
+                approach_target=bool(goal.approach_target),
+                stand_off_distance=float(goal.stand_off_distance or self.default_stand_off),
+                start_time=now,
+                deadline=now + float(goal.timeout_sec or self.default_timeout_sec),
+            )
+            self.publish_target_status("GOAL_ACCEPTED", accepted_context)
+            return GoalResponse.ACCEPT
+        except Exception as exc:
+            # Section: Release admission if status preparation fails before execution starts.
+            with self.goal_lock:
+                self.goal_admitted = False
+            self.get_logger().error(f"FindObject goal admission failed: {exc}")
+            return GoalResponse.REJECT
 
     def cancel_callback(self, _goal_handle: Any) -> CancelResponse:
         """Special function: Accept cancellation and forward it to every active Nav2 goal."""
@@ -1072,10 +1180,13 @@ class FindObjectSkillServer(LifecycleNode):
 
     async def execute_callback(self, goal_handle: Any) -> FindObject.Result:
         """Special function: Execute one YASMIN mission and return its semantic result."""
-        self.active_goal_handles.add(goal_handle)
-        blackboard = Blackboard()
-        blackboard["goal_handle"] = goal_handle
         try:
+            # Section: Store the single ROS server handle without requiring hash support.
+            with self.goal_lock:
+                self.active_goal_handle = goal_handle
+            # Section: Allocate mission state only after finally-protected ownership begins.
+            blackboard = Blackboard()
+            blackboard["goal_handle"] = goal_handle
             # Section: Search decisions execute in YASMIN; ROS callbacks progress on other executor threads.
             mission = FindObjectMissionSM(self)
             mission(blackboard)
@@ -1117,8 +1228,17 @@ class FindObjectSkillServer(LifecycleNode):
             return result
         finally:
             self.cancel_all_motion()
-            self.active_goal_handles.discard(goal_handle)
-            self.goal_admitted = False
+            # Section: Release the exact parent goal and permit the next mission on every exit.
+            with self.goal_lock:
+                if self.active_goal_handle is goal_handle:
+                    self.active_goal_handle = None
+                self.goal_admitted = False
+
+    def has_active_goal(self) -> bool:
+        """Special function: Return whether admission or execution owns the mission slot."""
+        # Section: Include the short accepted-before-execute window in lifecycle barriers.
+        with self.goal_lock:
+            return self.goal_admitted or self.active_goal_handle is not None
 
     def build_result(self, context: SearchContext) -> FindObject.Result:
         """Special function: Convert SearchContext into the complete authoritative result."""
@@ -1223,15 +1343,31 @@ class FindObjectSkillServer(LifecycleNode):
                 return None
         return future.result() if future.done() else None
 
+    def motion_goal_key(self, goal_handle: Any) -> bytes:
+        """Special function: Convert one Nav2 goal UUID into an immutable tracking key."""
+        # Section: Both real rclpy ClientGoalHandle and test doubles expose goal_id.uuid.
+        goal_id = getattr(goal_handle, "goal_id", None)
+        goal_uuid = getattr(goal_id, "uuid", None)
+        if goal_uuid is None:
+            raise ValueError("Nav2 goal handle does not contain a goal UUID.")
+        goal_key = bytes(goal_uuid)
+        if not goal_key:
+            raise ValueError("Nav2 goal handle contains an empty goal UUID.")
+        return goal_key
+
     def track_motion(self, goal_handle: Any) -> None:
         """Special function: Register one active Nav2 action goal for lifecycle cancellation."""
+        # Section: Index the unhashable ROS handle by its immutable protocol identifier.
+        goal_key = self.motion_goal_key(goal_handle)
         with self.motion_lock:
-            self.active_motion_goals.add(goal_handle)
+            self.active_motion_goals[goal_key] = goal_handle
 
     def untrack_motion(self, goal_handle: Any) -> None:
         """Special function: Remove one completed Nav2 action goal."""
+        # Section: Remove by goal UUID so the ROS handle itself is never hashed.
+        goal_key = self.motion_goal_key(goal_handle)
         with self.motion_lock:
-            self.active_motion_goals.discard(goal_handle)
+            self.active_motion_goals.pop(goal_key, None)
 
     def cancel_motion(self, goal_handle: Any) -> None:
         """Special function: Request cancellation of one active Nav2 goal."""
@@ -1243,8 +1379,9 @@ class FindObjectSkillServer(LifecycleNode):
 
     def cancel_all_motion(self) -> None:
         """Special function: Cancel named navigation, dynamic navigation, Spin, and planning goals."""
+        # Section: Copy dictionary values so cancellation can safely mutate tracking state.
         with self.motion_lock:
-            goals = list(self.active_motion_goals)
+            goals = list(self.active_motion_goals.values())
         for goal in goals:
             self.cancel_motion(goal)
 

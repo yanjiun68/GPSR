@@ -1,0 +1,8 @@
+gpsr_dialogue_manager:
+  ros__parameters:
+    listen_duration_sec: 5.0
+    fixed_info_timeout_sec: 2.0
+    tts_server_timeout_sec: 2.0
+    stt_server_timeout_sec: 2.0
+    language: en
+    prompt: "What would you like to ask me?"

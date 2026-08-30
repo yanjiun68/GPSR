@@ -12,8 +12,10 @@ find_package(rosidl_default_generators REQUIRED)
 # Precaution: every .action file listed here must exist before running colcon build.
 rosidl_generate_interfaces(${PROJECT_NAME}
   "action/Receptionist.action"
+  "action/SpeakText.action"
   "action/TranscribeSpeech.action"
   "srv/SayText.srv"
+  "srv/TranscribeAudio.srv"
 )
 
 ament_export_dependencies(rosidl_default_runtime)

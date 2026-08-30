@@ -1,0 +1,60 @@
+timezone_label: local
+
+matching:
+  threshold: 0.82
+  ambiguity_margin: 0.05
+
+static_entries:
+  robot_self_description:
+    aliases:
+      - something about yourself
+      - tell me something about yourself
+      - tell me about yourself
+      - who are you
+    answer: "I am Putrabot, a domestic service robot."
+
+  team_name:
+    aliases:
+      - your teams name
+      - your team's name
+      - what is your team name
+      - what is the name of your team
+      - tell me your team name
+    answer: "My team is Putrabot UPM."
+
+  team_country:
+    aliases:
+      - your teams country
+      - your team's country
+      - what country is your team from
+      - tell me your team's country
+    answer: "My team is from Malaysia."
+
+  team_affiliation:
+    aliases:
+      - your teams affiliation
+      - your team's affiliation
+      - what is your team affiliation
+      - tell me your team's affiliation
+    answer: "My team is affiliated with Universiti Putra Malaysia."
+
+runtime_entries:
+  current_time:
+    aliases: [the time, what time is it, tell me the time, what is the current time]
+    handler: time
+
+  today:
+    aliases: [what day is today, what is today's date, tell me today's date, what date is it today]
+    handler: today
+
+  tomorrow:
+    aliases: [what day is tomorrow, what is tomorrow's date, tell me tomorrow's date]
+    handler: tomorrow
+
+  day_of_week:
+    aliases: [the day of the week, what day of the week is it, what is the weekday]
+    handler: day_of_week
+
+  day_of_month:
+    aliases: [the day of the month, what day of the month is it, what is today's day number]
+    handler: day_of_month

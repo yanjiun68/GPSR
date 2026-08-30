@@ -1,5 +1,7 @@
 """Section: Strongly typed scheduler data models."""
 
+# Section: Typed scheduler requests, plans, return targets, and results.
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -30,6 +32,7 @@ class TaskRequest:
     recipient: dict[str, Any] | None = None
     output_template: str | None = None
     return_after_completion: bool = False
+    report_after_return: bool = False
 
 
 @dataclass(slots=True)
@@ -45,6 +48,15 @@ class SkillStep:
     result_variable: str | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class ReturnTarget:
+    """Special function: Freeze one command's raw-pose or named return destination."""
+
+    source: str
+    target_location: str = ""
+    target_pose: dict[str, Any] | None = None
+
+
 @dataclass(slots=True)
 class SchedulerResult:
     """Special function: Return either a complete ordered plan or validation issues."""
@@ -53,6 +65,7 @@ class SchedulerResult:
     task_request: TaskRequest | None
     steps: list[SkillStep] = field(default_factory=list)
     issues: list[ValidationIssue] = field(default_factory=list)
+    post_return_steps: list[SkillStep] = field(default_factory=list)
 
     @property
     def valid(self) -> bool:

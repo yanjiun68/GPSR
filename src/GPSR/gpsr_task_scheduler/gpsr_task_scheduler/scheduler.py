@@ -1,5 +1,7 @@
 """Section: Deterministic GPSR scheduler facade."""
 
+# Section: Public deterministic scheduling facade.
+
 from __future__ import annotations
 
 from gpsr_task_scheduler.config import SchedulerConfig

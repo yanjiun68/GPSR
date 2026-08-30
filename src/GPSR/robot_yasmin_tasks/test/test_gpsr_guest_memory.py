@@ -1,5 +1,7 @@
 """Section: GPSR service-owned YASMIN guest-memory policy tests."""
 
+# Section: Test fixtures, deterministic fakes, and regression scenarios.
+
 import json
 
 from builtin_interfaces.msg import Time

@@ -1,4 +1,6 @@
 """Section: HANDOVER_OBJECT executable primitive skill."""
+
+# Section: State-machine composition and skill-specific execution behavior.
 from yasmin import Blackboard
 from robot_yasmin_tasks.gpsr import blackboard_keys as bb
 from robot_yasmin_tasks.gpsr.blackboard_utils import bb_get

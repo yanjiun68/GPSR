@@ -15,7 +15,10 @@ def generate_launch_description() -> LaunchDescription:
     depth_topic = LaunchConfiguration("depth_topic")
     camera_info_topic = LaunchConfiguration("camera_info_topic")
     show_gui = LaunchConfiguration("show_gui")
-    yolo_model_path = PathJoinSubstitution(
+    # Section: Use the requested workspace YOLOE segmentation weights for GPSR detection.
+    yolo_model_path = "/home/yanjiun68/workspace/WS1/PutrabotUPM-project/yoloe-26s-seg.pt"
+    # Section: Preserve the class-labelled YOLO11 model for human-only perception.
+    human_yolo_model_path = PathJoinSubstitution(
         [FindPackageShare("vision"), "models", "yolo11n.pt"]
     )
     pose_model_path = PathJoinSubstitution(
@@ -37,6 +40,8 @@ def generate_launch_description() -> LaunchDescription:
             "confidence_threshold": 0.35,
             "exclude_classes": ["person"],
             "show_gui": ParameterValue(show_gui, value_type=bool),
+            "ready_topic": "/perception/object_detector_ready",
+            "enable_model_warmup": True,
         }],
     )
 
@@ -53,6 +58,7 @@ def generate_launch_description() -> LaunchDescription:
             "camera_info_topic": camera_info_topic,
             "action_name": "/gpsr/find_object",
             "target_status_topic": "/gpsr/find_object/target_status",
+            "detector_ready_topic": "/perception/object_detector_ready",
         }],
     )
 
@@ -67,7 +73,7 @@ def generate_launch_description() -> LaunchDescription:
             "rgb_topic": rgb_topic,
             "detections_topic": "/perception/raw_human_detections",
             "annotated_image_topic": "/perception/human_detections_image",
-            "yolo_model_path": yolo_model_path,
+            "yolo_model_path": human_yolo_model_path,
             "confidence_threshold": 0.35,
             "include_classes": ["person"],
             "exclude_classes": ["__none__"],

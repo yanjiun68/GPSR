@@ -492,11 +492,13 @@ def main() -> None:
         FIND_OBJECT,
         FIND_PERSON,
         FIND_PERSON_BY_ATTRIBUTE,
+        FOLLOW_PERSON,
         NAVIGATE,
         SAY,
     )
     from robot_yasmin_tasks.ros_clients.dialogue_clients import DialogueClients
     from robot_yasmin_tasks.ros_clients.find_person_clients import FindPersonClients
+    from robot_yasmin_tasks.ros_clients.follow_person_action_client import FollowPersonActionClient
     from robot_yasmin_tasks.ros_clients.person_attribute_action_clients import (
         ExtractGuestInfoActionClient,
         FindPersonByAttributeActionClient,
@@ -512,6 +514,7 @@ def main() -> None:
     from robot_yasmin_tasks.skills.find_person_by_attribute_sm import FindPersonByAttributeSM
     from robot_yasmin_tasks.skills.extract_person_info_skill_sm import ExtractPersonInfoSkillSM
     from robot_yasmin_tasks.skills.find_person_skill_sm import FindPersonSkillSM
+    from robot_yasmin_tasks.skills.follow_person_skill_sm import FollowPersonSkillSM
     from robot_yasmin_tasks.skills.navigation_skill_sm import NavigationSkillSM
     from robot_yasmin_tasks.skills.speech_skill_sm import SpeechSkillSM
 
@@ -520,6 +523,12 @@ def main() -> None:
     node = rclpy.create_node("gpsr_executor")
     node.declare_parameter("skill_registry_file", "")
     node.declare_parameter("allow_simulated_primitives", False)
+    node.declare_parameter("navigate_to_pose_action", "/navigate_to_pose")
+    node.declare_parameter("navigate_to_named_pose_action", "/nav/navigate_named_pose")
+    node.declare_parameter("find_person_search_config_file", "")
+    node.declare_parameter("lifecycle_transition_timeout_sec", 60.0)
+    node.declare_parameter("lifecycle_operation_timeout_margin_sec", 10.0)
+    node.declare_parameter("startup_dependency_poll_sec", 5.0)
     registry_file = str(node.get_parameter("skill_registry_file").value).strip()
     capability_registry = load_primitive_registry(registry_file or None)
     speech = SpeechClients(node=node, simulate=False)
@@ -530,16 +539,40 @@ def main() -> None:
     # Section: Thin clients forward person work to lifecycle servers that own the real state machines.
     find_person_attribute = FindPersonByAttributeActionClient(node=node)
     extract_guest_info = ExtractGuestInfoActionClient(node=node)
-    navigation = Nav2Client(node=node, simulate=False)
-    resources = LifecycleSkillResourceClient(node=node)
+    navigation = Nav2Client(
+        node=node,
+        simulate=False,
+        action_name=str(node.get_parameter("navigate_to_named_pose_action").value),
+        pose_action_name=str(node.get_parameter("navigate_to_pose_action").value),
+    )
+    # Section: Both name and attribute searches consume the same optional YAML override.
+    person_search_config = str(
+        node.get_parameter("find_person_search_config_file").value
+    ).strip() or None
+    follow_person = FollowPersonActionClient(node=node)
+    # Section: Heavy GPU configuration gets one manager deadline plus a client response margin.
+    resources = LifecycleSkillResourceClient(
+        node=node,
+        transition_timeout_sec=float(
+            node.get_parameter("lifecycle_transition_timeout_sec").value
+        ),
+        operation_timeout_margin_sec=float(
+            node.get_parameter("lifecycle_operation_timeout_margin_sec").value
+        ),
+    )
     factories = dict(ACTION_TYPE_TO_SKILL)
     factories[SAY] = lambda: SpeechSkillSM(speech)
     factories[ASK_AND_LISTEN] = lambda: DialogueSkillSM(dialogue)
     factories[NAVIGATE] = lambda: NavigationSkillSM(navigation)
+    factories[FOLLOW_PERSON] = lambda: FollowPersonSkillSM(follow_person)
     factories[FIND_OBJECT] = lambda: FindObjectSkillSM(node=node)
     # Section: Persistent person state machines make mutually exclusive routing visible in YASMIN Viewer.
-    find_person_sm = FindPersonSkillSM(find_person)
-    find_person_attribute_sm = FindPersonByAttributeSM(find_person_attribute)
+    find_person_sm = FindPersonSkillSM(find_person, navigation, person_search_config)
+    find_person_attribute_sm = FindPersonByAttributeSM(
+        find_person_attribute,
+        navigation,
+        person_search_config,
+    )
     factories[FIND_PERSON] = lambda: find_person_sm
     factories[FIND_PERSON_BY_ATTRIBUTE] = lambda: find_person_attribute_sm
     factories[EXTRACT_PERSON_INFO] = lambda: ExtractPersonInfoSkillSM(extract_guest_info)
@@ -555,6 +588,21 @@ def main() -> None:
     YasminViewerPub(sm, "GPSR_ACTION_QUEUE_EXECUTOR", node=node)
     YasminViewerPub(find_person_sm, "GPSR_FIND_PERSON_BY_NAME", node=node)
     YasminViewerPub(find_person_attribute_sm, "GPSR_FIND_PERSON_BY_ATTRIBUTE", node=node)
+
+    # Section: Do not expose ActionQueue intake until all central lifecycle APIs exist.
+    while rclpy.ok():
+        manager_ready, readiness_message = resources.wait_until_ready(
+            float(node.get_parameter("startup_dependency_poll_sec").value)
+        )
+        if manager_ready:
+            node.get_logger().info(readiness_message)
+            break
+        node.get_logger().warn(
+            f"GPSR executor waiting before action-server startup: {readiness_message}"
+        )
+    if not rclpy.ok():
+        node.destroy_node()
+        return
 
     # Section: Goal admission is serialized independently of executor thread count.
     admission = QueueAdmissionGuard()

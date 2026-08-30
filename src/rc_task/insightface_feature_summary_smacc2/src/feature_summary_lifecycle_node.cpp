@@ -15,13 +15,13 @@
 
 namespace insightface_feature_summary_smacc2
 {
-// Section: lifecycle wrapper that supervises the detached SMACC2 process.
+// Section: lifecycle wrapper that supervises the detached YASMIN process.
 class FeatureSummaryLifecycleNode : public nav2_util::LifecycleNode
 {
 public:
   using CallbackReturn = nav2_util::CallbackReturn;
 
-  // Special function: declare all parameters that must be forwarded into the SMACC2 child.
+  // Special function: declare all parameters that must be forwarded into the YASMIN child.
   FeatureSummaryLifecycleNode()
   : nav2_util::LifecycleNode("insightface_feature_summary_lifecycle")
   {
@@ -43,7 +43,7 @@ public:
     reap_timer_ = create_wall_timer(
       std::chrono::seconds(1),
       [this]() {
-        reapFinishedSmaccProcess();
+        reapFinishedYasminProcess();
       });
   }
 
@@ -84,40 +84,40 @@ protected:
     return CallbackReturn::SUCCESS;
   }
 
-  // Special function: start the detached SMACC2 state machine process.
+  // Special function: start the detached YASMIN state machine process.
   CallbackReturn on_activate(const rclcpp_lifecycle::State &) override
   {
-    if (smacc_pgid_ > 0 && process_utils::processGroupRunning(smacc_pgid_)) {
+    if (yasmin_pgid_ > 0 && process_utils::processGroupRunning(yasmin_pgid_)) {
       RCLCPP_WARN(
         get_logger(),
-        "SMACC2 feature summary process group %d is already running.",
-        static_cast<int>(smacc_pgid_));
+        "YASMIN feature summary process group %d is already running.",
+        static_cast<int>(yasmin_pgid_));
       return CallbackReturn::SUCCESS;
     }
 
-    const auto command = buildSmaccCommand();
+    const auto command = buildYasminCommand();
     const auto pid = process_utils::launchDetachedProcess(command);
     if (pid <= 0) {
-      RCLCPP_ERROR(get_logger(), "Failed to launch SMACC2 feature summary process.");
+      RCLCPP_ERROR(get_logger(), "Failed to launch YASMIN feature summary process.");
       return CallbackReturn::FAILURE;
     }
 
-    smacc_pgid_ = pid;
-    smacc_command_ = command;
+    yasmin_pgid_ = pid;
+    yasmin_command_ = command;
     RCLCPP_INFO(
       get_logger(),
-      "Started SMACC2 feature summary with process group %d. Command: %s",
-      static_cast<int>(smacc_pgid_),
-      smacc_command_.c_str());
+      "Started YASMIN feature summary with process group %d. Command: %s",
+      static_cast<int>(yasmin_pgid_),
+      yasmin_command_.c_str());
 
     rclcpp::sleep_for(std::chrono::milliseconds(500));
-    if (!process_utils::processGroupRunning(smacc_pgid_)) {
+    if (!process_utils::processGroupRunning(yasmin_pgid_)) {
       RCLCPP_ERROR(
         get_logger(),
-        "SMACC2 feature summary process group %d exited immediately after launch.",
-        static_cast<int>(smacc_pgid_));
-      reapFinishedSmaccProcess();
-      smacc_pgid_ = -1;
+        "YASMIN feature summary process group %d exited immediately after launch.",
+        static_cast<int>(yasmin_pgid_));
+      reapFinishedYasminProcess();
+      yasmin_pgid_ = -1;
       return CallbackReturn::FAILURE;
     }
 
@@ -195,14 +195,14 @@ private:
     return process_utils::shellQuote(name + ":=" + std::to_string(value));
   }
 
-  // Special helper: resolve and build the full detached SMACC2 child command.
-  std::string buildSmaccCommand() const
+  // Special helper: resolve and build the full detached YASMIN child command.
+  std::string buildYasminCommand() const
   {
     const auto package_prefix =
       ament_index_cpp::get_package_prefix("insightface_feature_summary_smacc2");
     const auto executable =
       package_prefix +
-      "/lib/insightface_feature_summary_smacc2/feature_summary_smacc2_node";
+      "/lib/insightface_feature_summary_smacc2/feature_summary_yasmin_node";
 
     return process_utils::shellQuote(executable) +
            " --ros-args " +
@@ -222,45 +222,45 @@ private:
            "-p " + numericArg("stream_info_period_sec", stream_info_period_sec_);
   }
 
-  // Special helper: reap a finished SMACC2 child and shut the wrapper down.
-  void reapFinishedSmaccProcess()
+  // Special helper: reap a finished YASMIN child and shut the wrapper down.
+  void reapFinishedYasminProcess()
   {
-    if (smacc_pgid_ <= 0) {
+    if (yasmin_pgid_ <= 0) {
       return;
     }
 
     int status = 0;
-    const auto ret = waitpid(smacc_pgid_, &status, WNOHANG);
-    if (ret == smacc_pgid_) {
+    const auto ret = waitpid(yasmin_pgid_, &status, WNOHANG);
+    if (ret == yasmin_pgid_) {
       RCLCPP_INFO(
         get_logger(),
-        "Reaped finished SMACC2 feature summary process pid=%d.",
-        static_cast<int>(smacc_pgid_));
-      smacc_pgid_ = -1;
+        "Reaped finished YASMIN feature summary process pid=%d.",
+        static_cast<int>(yasmin_pgid_));
+      yasmin_pgid_ = -1;
       process_utils::stopRegisteredInsightFace(get_logger());
-      RCLCPP_INFO(get_logger(), "SMACC2 feature summary finished. Shutting down orchestrator.");
+      RCLCPP_INFO(get_logger(), "YASMIN feature summary finished. Shutting down orchestrator.");
       if (rclcpp::ok()) {
         rclcpp::shutdown();
       }
     }
   }
 
-  // Special helper: stop both the InsightFace child tree and SMACC2 child tree.
+  // Special helper: stop both the InsightFace child tree and YASMIN child tree.
   void stopAllTrackedProcesses()
   {
     process_utils::stopRegisteredInsightFace(get_logger());
 
-    if (smacc_pgid_ > 0) {
+    if (yasmin_pgid_ > 0) {
       process_utils::stopProcessGroupWithPkill(
-        smacc_pgid_,
-        "SMACC2 feature summary",
+        yasmin_pgid_,
+        "YASMIN feature summary",
         get_logger());
-      reapFinishedSmaccProcess();
-      smacc_pgid_ = -1;
+      reapFinishedYasminProcess();
+      yasmin_pgid_ = -1;
     }
   }
 
-  // Section: cached parameters forwarded to the SMACC2 child.
+  // Section: cached parameters forwarded to the YASMIN child.
   bool personal_test_mode_{true};
   std::string camera_index_{"0"};
   std::string camera_backend_{"realsense"};
@@ -275,8 +275,8 @@ private:
   int min_stable_samples_{3};
   bool show_appearance_gui_{true};
   double stream_info_period_sec_{1.0};
-  pid_t smacc_pgid_{-1};
-  std::string smacc_command_;
+  pid_t yasmin_pgid_{-1};
+  std::string yasmin_command_;
   rclcpp::TimerBase::SharedPtr reap_timer_;
 };
 }  // namespace insightface_feature_summary_smacc2

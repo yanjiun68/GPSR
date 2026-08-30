@@ -13,10 +13,12 @@ class SchedulerState(str, Enum):
     INITIALIZING = "INITIALIZING"
     GO_TO_INSTRUCTION_POINT = "GO_TO_INSTRUCTION_POINT"
     WAITING_FOR_COMMAND = "WAITING_FOR_COMMAND"
+    CAPTURING_RETURN_POSE = "CAPTURING_RETURN_POSE"
     PLANNING = "PLANNING"
     EXECUTING = "EXECUTING"
-    RETURNING_TO_INSTRUCTION_POINT = "RETURNING_TO_INSTRUCTION_POINT"
-    RECOVERING_TO_INSTRUCTION_POINT = "RECOVERING_TO_INSTRUCTION_POINT"
+    RETURNING_TO_COMMAND_START = "RETURNING_TO_COMMAND_START"
+    REPORTING_RESULT = "REPORTING_RESULT"
+    RECOVERING_TO_COMMAND_START = "RECOVERING_TO_COMMAND_START"
     FINISHED = "FINISHED"
     ERROR = "ERROR"
 
@@ -70,6 +72,14 @@ class GpsrCycleController:
             )
             return True
 
+    def finish_initialization_without_navigation(self) -> bool:
+        """Special function: Open command intake without moving during scheduler startup."""
+        with self._lock:
+            if self._state != SchedulerState.INITIALIZING:
+                return False
+            self._state = SchedulerState.WAITING_FOR_COMMAND
+            return True
+
     def try_accept_command(self, command_id: str) -> bool:
         """Special function: Atomically admit one new command only while waiting."""
         normalized_id = str(command_id).strip()
@@ -80,6 +90,14 @@ class GpsrCycleController:
                 self._state = SchedulerState.FINISHED
                 return False
             self._active_command_id = normalized_id
+            self._state = SchedulerState.CAPTURING_RETURN_POSE
+            return True
+
+    def finish_return_pose_capture(self, command_id: str) -> bool:
+        """Special function: Advance one admitted command after freezing its return target."""
+        with self._lock:
+            if not self._matches(command_id, SchedulerState.CAPTURING_RETURN_POSE):
+                return False
             self._state = SchedulerState.PLANNING
             return True
 
@@ -100,24 +118,34 @@ class GpsrCycleController:
         with self._lock:
             if not self._matches(command_id, SchedulerState.EXECUTING):
                 return False
-            self._state = SchedulerState.RETURNING_TO_INSTRUCTION_POINT
+            self._state = SchedulerState.RETURNING_TO_COMMAND_START
             return True
 
-    def finish_return(self, command_id: str, success: bool) -> bool:
-        """Special function: Complete only the active command and reject stale result callbacks."""
+    def finish_return(
+        self,
+        command_id: str,
+        success: bool,
+        report_pending: bool = False,
+    ) -> bool:
+        """Special function: Route confirmed arrival to reporting or command completion."""
         with self._lock:
-            if not self._matches(command_id, SchedulerState.RETURNING_TO_INSTRUCTION_POINT):
+            if not self._matches(command_id, SchedulerState.RETURNING_TO_COMMAND_START):
                 return False
             if not success:
                 self._state = SchedulerState.ERROR
                 return True
-            self._completed_command_count += 1
-            self._active_command_id = ""
-            self._state = (
-                SchedulerState.FINISHED
-                if self._max_commands and self._completed_command_count >= self._max_commands
-                else SchedulerState.WAITING_FOR_COMMAND
-            )
+            if report_pending:
+                self._state = SchedulerState.REPORTING_RESULT
+            else:
+                self._complete_active_command()
+            return True
+
+    def finish_reporting(self, command_id: str) -> bool:
+        """Special function: Complete a command after its post-return report terminates."""
+        with self._lock:
+            if not self._matches(command_id, SchedulerState.REPORTING_RESULT):
+                return False
+            self._complete_active_command()
             return True
 
     def start_error_recovery(self) -> bool:
@@ -125,28 +153,25 @@ class GpsrCycleController:
         with self._lock:
             if self._state != SchedulerState.ERROR:
                 return False
-            self._state = SchedulerState.RECOVERING_TO_INSTRUCTION_POINT
+            self._state = SchedulerState.RECOVERING_TO_COMMAND_START
             return True
 
-    def finish_error_recovery(self, success: bool) -> bool:
-        """Special function: Return to command intake only after recovery navigation succeeds."""
+    def finish_error_recovery(
+        self,
+        success: bool,
+        report_pending: bool = False,
+    ) -> bool:
+        """Special function: Resume pending reporting or finish after recovery arrival."""
         with self._lock:
-            if self._state != SchedulerState.RECOVERING_TO_INSTRUCTION_POINT:
+            if self._state != SchedulerState.RECOVERING_TO_COMMAND_START:
                 return False
             if not success:
                 self._state = SchedulerState.ERROR
                 return True
-
-            # Section: A post-command recovery completes the same command-count commitment.
-            if self._active_command_id:
-                self._completed_command_count += 1
-            self._active_command_id = ""
-            self._state = (
-                SchedulerState.FINISHED
-                if self._max_commands
-                and self._completed_command_count >= self._max_commands
-                else SchedulerState.WAITING_FOR_COMMAND
-            )
+            if report_pending and self._active_command_id:
+                self._state = SchedulerState.REPORTING_RESULT
+            else:
+                self._complete_active_command()
             return True
 
     def reset_error(self) -> bool:
@@ -164,4 +189,16 @@ class GpsrCycleController:
         return (
             self._state == expected_state
             and self._active_command_id == str(command_id).strip()
+        )
+
+    def _complete_active_command(self) -> None:
+        """Special function: Commit one finished command and select the next intake state."""
+        # Section: Startup recovery has no active command and must not consume the mission limit.
+        if self._active_command_id:
+            self._completed_command_count += 1
+        self._active_command_id = ""
+        self._state = (
+            SchedulerState.FINISHED
+            if self._max_commands and self._completed_command_count >= self._max_commands
+            else SchedulerState.WAITING_FOR_COMMAND
         )

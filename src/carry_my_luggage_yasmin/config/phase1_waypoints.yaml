@@ -1,0 +1,12 @@
+# Section: Waypoints retained from the full phase-one SMACC2 package.
+waypoints:
+  - id: 0
+    frame_id: map
+    pose:
+      position: {x: 5.8354, y: 1.37353, z: 0.0}
+      orientation: {x: 0.0, y: 0.0, z: 0.0313029, w: 0.99951}
+  - id: 1
+    frame_id: map
+    pose:
+      position: {x: 0.0, y: 0.0, z: 0.0}
+      orientation: {x: 0.0, y: 0.0, z: 0.0, w: 1.0}

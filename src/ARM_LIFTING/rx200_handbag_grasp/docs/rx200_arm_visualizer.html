@@ -1,0 +1,1411 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RX200 Arm Pose Lab</title>
+  <style>
+    /* ---------- Visual design tokens ---------- */
+    :root {
+      color-scheme: dark;
+      --bg: #071019;
+      --panel: rgba(14, 29, 41, 0.92);
+      --panel-2: rgba(20, 40, 54, 0.76);
+      --line: rgba(164, 205, 225, 0.16);
+      --text: #e7f2f7;
+      --muted: #8fa8b5;
+      --cyan: #42d8d2;
+      --orange: #ffad55;
+      --purple: #b794f6;
+      --red: #ff6174;
+      --green: #68dfa5;
+    }
+
+    /* ---------- Page layout ---------- */
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      overflow: hidden;
+      color: var(--text);
+      background:
+        radial-gradient(circle at 18% 4%, rgba(36, 123, 142, 0.20), transparent 35%),
+        radial-gradient(circle at 86% 96%, rgba(99, 75, 160, 0.16), transparent 34%),
+        var(--bg);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    button, input, select { font: inherit; }
+    .app { display: grid; grid-template-columns: minmax(0, 1fr) 390px; height: 100vh; }
+    .stage { position: relative; min-width: 0; overflow: hidden; }
+    #scene { width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; }
+    #scene.dragging { cursor: grabbing; }
+    .sidebar {
+      overflow-y: auto;
+      padding: 20px;
+      border-left: 1px solid var(--line);
+      background: rgba(7, 16, 25, 0.82);
+      backdrop-filter: blur(22px);
+    }
+    .brand { position: absolute; top: 22px; left: 26px; z-index: 2; pointer-events: none; }
+    .eyebrow { color: var(--cyan); font: 700 11px/1.2 ui-monospace, monospace; letter-spacing: 0.18em; text-transform: uppercase; }
+    h1 { margin: 5px 0 0; font-size: clamp(24px, 3vw, 42px); letter-spacing: -0.045em; }
+    h2 { margin: 0; font-size: 14px; letter-spacing: 0.01em; }
+    p { margin: 5px 0 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+    .card {
+      margin-bottom: 14px;
+      padding: 15px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: linear-gradient(145deg, var(--panel), var(--panel-2));
+      box-shadow: 0 15px 45px rgba(0, 0, 0, 0.16);
+    }
+    .card-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 13px; }
+    .badge { padding: 4px 8px; border-radius: 999px; background: rgba(66, 216, 210, 0.10); color: var(--cyan); font-size: 10px; font-weight: 800; }
+    .metric-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+    .metric { padding: 10px; border-radius: 10px; background: rgba(0, 0, 0, 0.18); }
+    .metric span { display: block; color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; }
+    .metric strong { display: block; margin-top: 4px; color: var(--cyan); font: 700 16px/1.2 ui-monospace, monospace; }
+    .pose-columns { display: grid; grid-template-columns: minmax(0, 1fr); gap: 9px; }
+    .pose-panel { padding: 11px; border: 1px solid var(--line); border-radius: 11px; background: rgba(0, 0, 0, 0.17); }
+    .pose-panel.saved { border-color: rgba(183, 148, 246, 0.28); }
+    .pose-title { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.07em; }
+    .pose-title span { color: var(--muted); font: 500 8px ui-monospace, monospace; letter-spacing: 0; text-transform: none; }
+    .pose-row { display: grid; grid-template-columns: 27px 1fr; gap: 6px; margin-top: 5px; color: var(--muted); font-size: 9px; }
+    .pose-row code { color: var(--cyan); font: 700 9px/1.35 ui-monospace, monospace; overflow-wrap: anywhere; }
+    .pose-panel.saved .pose-row code { color: var(--purple); }
+    .pose-empty { min-height: 48px; display: grid; place-items: center; color: var(--muted); font-size: 9px; text-align: center; }
+    .slot-list { display: grid; gap: 8px; }
+    .slot { display: grid; grid-template-columns: 82px minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 9px; border: 1px solid var(--line); border-radius: 10px; background: rgba(0, 0, 0, 0.16); }
+    .slot-name { color: var(--purple); font: 800 10px ui-monospace, monospace; text-transform: uppercase; }
+    .slot-value { overflow: hidden; color: var(--muted); font: 9px ui-monospace, monospace; white-space: nowrap; text-overflow: ellipsis; }
+    .slot-actions { display: flex; gap: 5px; }
+    .slot-actions button { min-height: 29px; padding: 5px 7px; font-size: 9px; }
+    /* ---------- Expanded saved-pose joint-angle readout ---------- */
+    .saved-angle-list { display: grid; gap: 9px; }
+    .saved-angle-pose { padding: 10px; border: 1px solid rgba(183, 148, 246, 0.24); border-radius: 10px; background: rgba(0, 0, 0, 0.16); }
+    .saved-angle-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 7px; }
+    .saved-angle-head strong { color: var(--purple); font: 800 10px ui-monospace, monospace; text-transform: uppercase; }
+    .saved-angle-head time { color: var(--muted); font: 8px ui-monospace, monospace; }
+    .saved-angle-row { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 8px; padding: 4px 0; border-top: 1px solid rgba(164, 205, 225, 0.08); font-size: 9px; }
+    .saved-angle-row span { color: var(--muted); }
+    .saved-angle-row code { color: var(--orange); font: 700 9px/1.35 ui-monospace, monospace; text-align: right; }
+    .xyz-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; }
+    .obstacle-list { display: grid; gap: 6px; margin-top: 10px; }
+    .obstacle-item { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center; padding: 7px 9px; border-radius: 8px; background: rgba(255, 173, 85, 0.07); color: var(--muted); font: 9px ui-monospace, monospace; }
+    .obstacle-item button { min-height: 27px; padding: 4px 7px; color: var(--red); }
+    .ik-result { margin-top: 9px; padding: 8px; border-radius: 8px; color: var(--muted); background: rgba(0, 0, 0, 0.16); font: 9px/1.45 ui-monospace, monospace; }
+    .joint { margin-bottom: 12px; }
+    .joint:last-child { margin-bottom: 0; }
+    .joint-row { display: flex; justify-content: space-between; margin-bottom: 6px; font-size: 11px; }
+    .joint-row output { color: var(--orange); font: 700 11px ui-monospace, monospace; }
+    input[type="range"] { width: 100%; accent-color: var(--cyan); }
+    .target input[type="range"] { accent-color: var(--purple); }
+    .actions { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-top: 12px; }
+    button, select, input[type="number"], input[type="text"] {
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      color: var(--text);
+      background: rgba(1, 9, 15, 0.52);
+    }
+    button { min-height: 38px; padding: 8px 11px; cursor: pointer; font-size: 11px; font-weight: 750; }
+    button:hover { border-color: rgba(66, 216, 210, 0.62); transform: translateY(-1px); }
+    button.primary { border-color: rgba(66, 216, 210, 0.6); color: #05201f; background: var(--cyan); }
+    button.purple { border-color: rgba(183, 148, 246, 0.65); color: #170c2d; background: var(--purple); }
+    button:disabled { opacity: 0.42; cursor: not-allowed; transform: none; }
+    select, input[type="number"], input[type="text"] { width: 100%; min-height: 37px; padding: 7px 9px; font-size: 11px; }
+    .form-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 7px; }
+    label.small { display: grid; gap: 4px; color: var(--muted); font-size: 9px; }
+    .status { display: flex; gap: 7px; align-items: center; color: var(--muted); font-size: 11px; }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: #536872; box-shadow: 0 0 0 4px rgba(83, 104, 114, 0.12); }
+    .dot.live { background: var(--green); box-shadow: 0 0 0 4px rgba(104, 223, 165, 0.12); }
+    .dot.error { background: var(--red); box-shadow: 0 0 0 4px rgba(255, 97, 116, 0.12); }
+    .legend { position: absolute; left: 26px; bottom: 22px; display: flex; gap: 15px; color: var(--muted); font-size: 10px; }
+    .legend i { display: inline-block; width: 18px; height: 3px; margin: 0 6px 2px 0; border-radius: 2px; background: var(--cyan); }
+    .legend .plan { background: var(--purple); }
+    .legend .disp { background: var(--orange); }
+    .hint { position: absolute; right: 20px; bottom: 20px; color: rgba(214, 231, 238, 0.46); font-size: 10px; }
+    .progress { height: 4px; margin-top: 10px; overflow: hidden; border-radius: 3px; background: rgba(255,255,255,0.08); }
+    .progress > i { display: block; width: 0; height: 100%; background: var(--purple); transition: width 90ms linear; }
+    .collision { color: var(--red) !important; }
+    .switch { display: flex; gap: 8px; align-items: center; color: var(--muted); font-size: 10px; }
+    .switch input { accent-color: var(--orange); }
+    @media (max-width: 850px) {
+      body { overflow: auto; }
+      .app { grid-template-columns: 1fr; grid-template-rows: 62vh auto; height: auto; min-height: 100vh; }
+      .sidebar { border-left: 0; border-top: 1px solid var(--line); }
+    }
+  </style>
+</head>
+<body>
+  <!-- ---------- 3-D viewport ---------- -->
+  <main class="app">
+    <section class="stage">
+      <div class="brand">
+        <div class="eyebrow">Interbotix kinematics workspace</div>
+        <h1>RX200 Pose Lab</h1>
+      </div>
+      <canvas id="scene" aria-label="Interactive three-dimensional RX200 arm visualization"></canvas>
+      <div class="legend">
+        <span><i></i>current arm</span>
+        <span><i class="plan"></i>planned EE path</span>
+        <span><i class="disp"></i>displacement</span>
+      </div>
+      <div class="hint">drag to orbit · wheel to zoom · double-click to reset view</div>
+    </section>
+
+    <!-- ---------- Instrument and planning controls ---------- -->
+    <aside class="sidebar">
+      <section class="card">
+        <div class="card-head">
+          <h2>End effector telemetry</h2>
+          <span class="badge">metres</span>
+        </div>
+        <div class="metric-grid">
+          <div class="metric"><span>X</span><strong id="eeX">0.000</strong></div>
+          <div class="metric"><span>Y</span><strong id="eeY">0.000</strong></div>
+          <div class="metric"><span>Z</span><strong id="eeZ">0.000</strong></div>
+          <div class="metric"><span>Base distance</span><strong id="baseDistance">0.000</strong></div>
+          <div class="metric"><span>Displacement</span><strong id="displacement">0.000</strong></div>
+          <div class="metric"><span>Path length</span><strong id="pathLength">0.000</strong></div>
+        </div>
+        <div class="actions">
+          <button id="setReference">Set displacement origin</button>
+          <button id="resetPose">Load home pose</button>
+        </div>
+      </section>
+
+      <!-- ---------- Current and persistent goal-pose memory ---------- -->
+      <section class="card">
+        <div class="card-head">
+          <h2>Pose memory</h2>
+          <span class="badge" id="savedGoalState">no saved goal</span>
+        </div>
+        <div class="pose-columns">
+          <article class="pose-panel">
+            <div class="pose-title">Current pose <span>base frame</span></div>
+            <div class="pose-row"><b>XYZ</b><code id="currentPoseXyz">0.000 · 0.000 · 0.000 m</code></div>
+            <div class="pose-row"><b>RPY</b><code id="currentPoseRpy">0.0° · 0.0° · 0.0°</code></div>
+            <div class="pose-row"><b>Q</b><code id="currentPoseQ">0.0 · 0.0 · 0.0 · 0.0 · 0.0°</code></div>
+          </article>
+          <article class="pose-panel saved">
+            <div class="pose-title">Saved goal <span id="savedGoalTime">empty</span></div>
+            <div id="savedGoalValues" class="pose-empty">Save the current arm pose to create a reusable goal.</div>
+          </article>
+        </div>
+        <div class="actions">
+          <button class="purple" id="saveCurrentGoal">Save current as goal</button>
+          <button class="primary" id="loadSavedGoal" disabled>Load into planner</button>
+          <button id="clearSavedGoal" disabled>Clear saved goal</button>
+          <button id="setTargetAsSaved">Save planner target</button>
+        </div>
+        <p>Saved goals include the five joint angles plus the derived Cartesian tool pose.</p>
+      </section>
+
+      <!-- ---------- Named start and transition pose slots ---------- -->
+      <section class="card">
+        <div class="card-head">
+          <h2>Saved route poses</h2>
+          <span class="badge" id="routeSlotCount">0 / 3 saved</span>
+        </div>
+        <div class="slot-list" id="routePoseSlots"></div>
+        <div class="actions">
+          <button class="purple" id="planSavedRoute">Plan through saved poses</button>
+          <button id="clearRoutePoses">Clear all</button>
+        </div>
+        <p>The route follows current → start → transition_1 → transition_2 → planner goal, skipping empty slots.</p>
+      </section>
+
+      <!-- ---------- Complete saved-pose joint-angle listing ---------- -->
+      <section class="card">
+        <div class="card-head">
+          <h2>All saved pose joint angles</h2>
+          <span class="badge" id="savedPoseAngleCount">0 saved</span>
+        </div>
+        <div class="saved-angle-list" id="savedPoseJointAngles">
+          <div class="pose-empty">No saved poses are available.</div>
+        </div>
+        <p>Each stored goal and route pose is shown in degrees and radians in RX200 controller joint order.</p>
+      </section>
+
+      <section class="card">
+        <div class="card-head">
+          <h2>Real-time joint angles</h2>
+          <span class="badge" id="angleSource">simulation</span>
+        </div>
+        <div id="currentJoints"></div>
+      </section>
+
+      <!-- ---------- Cartesian destination and inverse kinematics ---------- -->
+      <section class="card target">
+        <div class="card-head">
+          <h2>End-effector destination</h2>
+          <span class="badge" id="ikState">IK idle</span>
+        </div>
+        <div class="xyz-grid">
+          <label class="small">X (m)<input id="goalX" type="number" step="0.005" value="0.30"></label>
+          <label class="small">Y (m)<input id="goalY" type="number" step="0.005" value="0.08"></label>
+          <label class="small">Z (m)<input id="goalZ" type="number" step="0.005" value="0.22"></label>
+        </div>
+        <div class="actions">
+          <button id="copyCurrentXyz">Use current XYZ</button>
+          <button class="primary" id="solveIk">Solve IK → target</button>
+        </div>
+        <div class="ik-result" id="ikResult">Enter a destination in the RX200 base frame. Position-only IK preserves the target wrist rotation.</div>
+      </section>
+
+      <section class="card target">
+        <div class="card-head">
+          <h2>Target joint angles</h2>
+          <span class="badge">planner goal</span>
+        </div>
+        <div id="targetJoints"></div>
+        <div class="actions">
+          <button id="copyTarget">Copy current</button>
+          <button id="randomTarget">Random valid goal</button>
+        </div>
+      </section>
+
+      <!-- ---------- Multiple axis-aligned box obstacles ---------- -->
+      <section class="card">
+        <div class="card-head">
+          <h2>Rectangular obstacles</h2>
+          <span class="badge" id="boxCount">0 boxes</span>
+        </div>
+        <div class="xyz-grid">
+          <label class="small">Centre X<input id="boxX" type="number" step="0.01" value="0.24"></label>
+          <label class="small">Centre Y<input id="boxY" type="number" step="0.01" value="-0.12"></label>
+          <label class="small">Centre Z<input id="boxZ" type="number" step="0.01" value="0.13"></label>
+          <label class="small">Size X<input id="boxSizeX" type="number" min="0.01" step="0.01" value="0.10"></label>
+          <label class="small">Size Y<input id="boxSizeY" type="number" min="0.01" step="0.01" value="0.10"></label>
+          <label class="small">Size Z<input id="boxSizeZ" type="number" min="0.01" step="0.01" value="0.18"></label>
+        </div>
+        <div class="actions">
+          <button class="primary" id="addBox">Add box</button>
+          <button id="clearBoxes">Clear boxes</button>
+        </div>
+        <div class="obstacle-list" id="boxObstacleList"></div>
+        <p>Boxes are axis-aligned in the RX200 base frame and expanded by the planner's link safety radius.</p>
+      </section>
+
+      <section class="card">
+        <div class="card-head">
+          <h2>Motion planning</h2>
+          <span class="badge" id="plannerState">idle</span>
+        </div>
+        <select id="algorithm" aria-label="Motion planning algorithm">
+          <option value="linear">Joint-space linear interpolation</option>
+          <option value="rrt">Bidirectional RRT-Connect</option>
+        </select>
+        <div class="actions">
+          <button class="purple" id="planMotion">Plan motion</button>
+          <button class="primary" id="executeMotion" disabled>Animate plan</button>
+          <button id="pauseMotion" disabled>Pause</button>
+          <button id="clearPlan">Clear plan</button>
+        </div>
+        <div class="progress"><i id="planProgress"></i></div>
+        <p id="planSummary">Choose a target configuration, then plan a collision-checked path.</p>
+      </section>
+
+      <section class="card">
+        <div class="card-head">
+          <h2>Spherical obstacle</h2>
+          <label class="switch"><input id="obstacleEnabled" type="checkbox" checked> enabled</label>
+        </div>
+        <div class="form-grid">
+          <label class="small">X<input id="obsX" type="number" step="0.01" value="0.28"></label>
+          <label class="small">Y<input id="obsY" type="number" step="0.01" value="0.00"></label>
+          <label class="small">Z<input id="obsZ" type="number" step="0.01" value="0.20"></label>
+          <label class="small">Radius<input id="obsR" type="number" min="0.01" step="0.01" value="0.055"></label>
+        </div>
+        <p>Planner collision model: link capsules against this obstacle and the ground plane.</p>
+      </section>
+
+      <section class="card">
+        <div class="card-head">
+          <h2>ROS bridge input</h2>
+          <div class="status"><i class="dot" id="rosDot"></i><span id="rosStatus">offline</span></div>
+        </div>
+        <input id="rosUrl" type="text" value="ws://localhost:9090" aria-label="Rosbridge WebSocket URL">
+        <div class="actions">
+          <button class="primary" id="connectRos">Connect</button>
+          <button id="disconnectRos" disabled>Disconnect</button>
+        </div>
+        <p>Read-only subscription to <code>/rx200/joint_states</code>. It never sends commands to the robot.</p>
+      </section>
+    </aside>
+  </main>
+
+  <script>
+    "use strict";
+
+    /* ---------- RX200 geometry, joint limits, and application state ---------- */
+    const DEG = Math.PI / 180;
+    const JOINTS = [
+      { name: "waist", label: "Waist", min: -180, max: 180 },
+      { name: "shoulder", label: "Shoulder", min: -108, max: 113 },
+      { name: "elbow", label: "Elbow", min: -108, max: 93 },
+      { name: "wrist_angle", label: "Wrist angle", min: -100, max: 123 },
+      { name: "wrist_rotate", label: "Wrist rotate", min: -180, max: 180 }
+    ];
+    const HOME_DEG = [-5.10, -12.57, -29.62, 71.63, 0.0];
+    const state = {
+      q: HOME_DEG.map(value => value * DEG),
+      target: [18, 18, -42, 48, 20].map(value => value * DEG),
+      reference: null,
+      plan: [],
+      plannedEe: [],
+      animationIndex: 0,
+      animationRunning: false,
+      animationPaused: false,
+      savedGoal: null,
+      poseSlots: { start: null, transition_1: null, transition_2: null },
+      boxObstacles: [],
+      ikGoal: { x: 0.30, y: 0.08, z: 0.22 },
+      rosSocket: null,
+      rosLive: false,
+      camera: { yaw: -0.70, pitch: 0.43, zoom: 840 },
+      drag: { active: false, x: 0, y: 0 }
+    };
+
+    /* ---------- Compact vector and homogeneous-transform helpers ---------- */
+    const vec = (x = 0, y = 0, z = 0) => ({ x, y, z });
+    const add = (a, b) => vec(a.x + b.x, a.y + b.y, a.z + b.z);
+    const sub = (a, b) => vec(a.x - b.x, a.y - b.y, a.z - b.z);
+    const scale = (a, s) => vec(a.x * s, a.y * s, a.z * s);
+    const dot = (a, b) => a.x * b.x + a.y * b.y + a.z * b.z;
+    const norm = a => Math.sqrt(dot(a, a));
+    const distance = (a, b) => norm(sub(a, b));
+    const lerp = (a, b, t) => a.map((value, index) => value + (b[index] - value) * t);
+    const clamp = (value, low, high) => Math.max(low, Math.min(high, value));
+    const identity = () => [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
+
+    /** Multiply two row-major 4×4 matrices used by the forward-kinematics chain. */
+    function multiply(a, b) {
+      const out = new Array(16).fill(0);
+      for (let row = 0; row < 4; row += 1) {
+        for (let col = 0; col < 4; col += 1) {
+          for (let k = 0; k < 4; k += 1) out[row * 4 + col] += a[row * 4 + k] * b[k * 4 + col];
+        }
+      }
+      return out;
+    }
+
+    /** Create a translation transform in metres. */
+    function translate(x, y, z) {
+      return [1, 0, 0, x, 0, 1, 0, y, 0, 0, 1, z, 0, 0, 0, 1];
+    }
+
+    /** Create a rotation around the X axis. */
+    function rotateX(a) {
+      const c = Math.cos(a), s = Math.sin(a);
+      return [1, 0, 0, 0, 0, c, -s, 0, 0, s, c, 0, 0, 0, 0, 1];
+    }
+
+    /** Create a rotation around the Y axis. */
+    function rotateY(a) {
+      const c = Math.cos(a), s = Math.sin(a);
+      return [c, 0, s, 0, 0, 1, 0, 0, -s, 0, c, 0, 0, 0, 0, 1];
+    }
+
+    /** Create a rotation around the Z axis. */
+    function rotateZ(a) {
+      const c = Math.cos(a), s = Math.sin(a);
+      return [c, -s, 0, 0, s, c, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
+    }
+
+    /** Extract a transform origin as a Cartesian point. */
+    function originOf(matrix) {
+      return vec(matrix[3], matrix[7], matrix[11]);
+    }
+
+    /** Transform a local point through a homogeneous matrix. */
+    function transformPoint(matrix, point) {
+      return vec(
+        matrix[0] * point.x + matrix[1] * point.y + matrix[2] * point.z + matrix[3],
+        matrix[4] * point.x + matrix[5] * point.y + matrix[6] * point.z + matrix[7],
+        matrix[8] * point.x + matrix[9] * point.y + matrix[10] * point.z + matrix[11]
+      );
+    }
+
+    /** Convert the end-effector rotation matrix into XYZ fixed-axis roll, pitch, and yaw. */
+    function matrixToRpy(matrix) {
+      const horizontal = Math.sqrt(matrix[0] * matrix[0] + matrix[4] * matrix[4]);
+      if (horizontal > 1e-7) {
+        return vec(Math.atan2(matrix[9], matrix[10]), Math.atan2(-matrix[8], horizontal), Math.atan2(matrix[4], matrix[0]));
+      }
+      return vec(Math.atan2(-matrix[6], matrix[5]), Math.atan2(-matrix[8], horizontal), 0);
+    }
+
+    /* ---------- URDF-accurate forward kinematics ---------- */
+    /** Evaluate joint origins and end-effector orientation from the RX200 URDF chain. */
+    function forwardKinematics(q) {
+      let transform = identity();
+      const points = [originOf(transform)];
+      transform = multiply(transform, translate(0, 0, 0.06566));
+      transform = multiply(transform, rotateZ(q[0]));
+      points.push(originOf(transform));
+      transform = multiply(transform, translate(0, 0, 0.03891));
+      transform = multiply(transform, rotateY(q[1]));
+      points.push(originOf(transform));
+      transform = multiply(transform, translate(0.05, 0, 0.2));
+      transform = multiply(transform, rotateY(q[2]));
+      points.push(originOf(transform));
+      transform = multiply(transform, translate(0.2, 0, 0));
+      transform = multiply(transform, rotateY(q[3]));
+      points.push(originOf(transform));
+      transform = multiply(transform, translate(0.065, 0, 0));
+      transform = multiply(transform, rotateX(q[4]));
+      points.push(originOf(transform));
+      transform = multiply(transform, translate(0.043, 0, 0));
+      points.push(originOf(transform));
+      return { points, ee: points[points.length - 1], transform };
+    }
+
+    /* ---------- Canvas projection and drawing ---------- */
+    const canvas = document.getElementById("scene");
+    const ctx = canvas.getContext("2d");
+
+    /** Convert a world-space point into a perspective screen coordinate. */
+    function project(point) {
+      const center = vec(0.18, 0, 0.18);
+      let p = sub(point, center);
+      const cy = Math.cos(state.camera.yaw), sy = Math.sin(state.camera.yaw);
+      p = vec(cy * p.x - sy * p.y, sy * p.x + cy * p.y, p.z);
+      const cp = Math.cos(state.camera.pitch), sp = Math.sin(state.camera.pitch);
+      p = vec(p.x, cp * p.y - sp * p.z, sp * p.y + cp * p.z);
+      const depth = 1.15 - p.y;
+      const perspective = state.camera.zoom / Math.max(0.35, depth * 900);
+      return {
+        x: canvas.clientWidth * 0.47 + p.x * state.camera.zoom * perspective,
+        y: canvas.clientHeight * 0.56 - p.z * state.camera.zoom * perspective,
+        depth,
+        scale: perspective
+      };
+    }
+
+    /** Draw a depth-aware line between two world-space points. */
+    function drawLine(a, b, color, width = 2, dashed = false) {
+      const pa = project(a), pb = project(b);
+      ctx.save();
+      ctx.strokeStyle = color;
+      ctx.lineWidth = width;
+      ctx.lineCap = "round";
+      ctx.setLineDash(dashed ? [7, 7] : []);
+      ctx.beginPath();
+      ctx.moveTo(pa.x, pa.y);
+      ctx.lineTo(pb.x, pb.y);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    /** Draw a projected world-space node with a soft halo. */
+    function drawNode(point, radius, color) {
+      const p = project(point);
+      ctx.save();
+      ctx.shadowBlur = 17;
+      ctx.shadowColor = color;
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, Math.max(3, radius * p.scale), 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    /** Draw a 40%-transparent grid plane with red above-plane and blue below-plane viewing tints. */
+    function drawGrid() {
+      const viewedFromAbove = state.camera.pitch >= 0;
+      const planeColor = viewedFromAbove ? "rgba(154, 43, 58, .60)" : "rgba(29, 91, 150, .60)";
+      const lineColor = viewedFromAbove ? "rgba(255, 116, 126, .72)" : "rgba(115, 196, 255, .72)";
+      const planeCorners = [vec(-0.5, -0.5, 0), vec(0.5, -0.5, 0), vec(0.5, 0.5, 0), vec(-0.5, 0.5, 0)].map(project);
+      ctx.save();
+      ctx.fillStyle = planeColor;
+      ctx.beginPath();
+      ctx.moveTo(planeCorners[0].x, planeCorners[0].y);
+      for (let index = 1; index < planeCorners.length; index += 1) ctx.lineTo(planeCorners[index].x, planeCorners[index].y);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+      for (let i = -5; i <= 5; i += 1) {
+        const value = i * 0.1;
+        drawLine(vec(-0.5, value, 0), vec(0.5, value, 0), lineColor, 1);
+        drawLine(vec(value, -0.5, 0), vec(value, 0.5, 0), lineColor, 1);
+      }
+      drawLine(vec(0, 0, 0), vec(0.18, 0, 0), "#ff6174", 2);
+      drawLine(vec(0, 0, 0), vec(0, 0.18, 0), "#68dfa5", 2);
+      drawLine(vec(0, 0, 0), vec(0, 0, 0.18), "#5bb9ff", 2);
+    }
+
+    /** Draw the enabled spherical obstacle with perspective-scaled radius. */
+    function drawObstacle() {
+      if (!document.getElementById("obstacleEnabled").checked) return;
+      const obstacle = readObstacle();
+      const p = project(obstacle.center);
+      const edge = project(add(obstacle.center, vec(obstacle.radius, 0, 0)));
+      const radius = Math.max(7, Math.abs(edge.x - p.x));
+      const gradient = ctx.createRadialGradient(p.x - radius * 0.3, p.y - radius * 0.3, 2, p.x, p.y, radius);
+      gradient.addColorStop(0, "rgba(255,173,85,.75)");
+      gradient.addColorStop(1, "rgba(255,97,116,.17)");
+      ctx.save();
+      ctx.fillStyle = gradient;
+      ctx.strokeStyle = "rgba(255,173,85,.9)";
+      ctx.setLineDash([5, 5]);
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, radius, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    /** Draw all axis-aligned rectangular obstacles as translucent projected wireframes. */
+    function drawBoxObstacles() {
+      const edgePairs = [[0,1], [0,2], [0,4], [1,3], [1,5], [2,3], [2,6], [3,7], [4,5], [4,6], [5,7], [6,7]];
+      state.boxObstacles.forEach(box => {
+        const half = scale(box.size, 0.5);
+        const corners = [
+          vec(-half.x,-half.y,-half.z), vec(half.x,-half.y,-half.z), vec(-half.x,half.y,-half.z), vec(half.x,half.y,-half.z),
+          vec(-half.x,-half.y,half.z), vec(half.x,-half.y,half.z), vec(-half.x,half.y,half.z), vec(half.x,half.y,half.z)
+        ].map(offset => add(box.center, offset));
+        edgePairs.forEach(pair => drawLine(corners[pair[0]], corners[pair[1]], "rgba(255,97,116,.82)", 2));
+      });
+    }
+
+    /** Draw the requested Cartesian IK destination as a three-axis crosshair. */
+    function drawIkGoal() {
+      const goal = state.ikGoal;
+      const arm = 0.025;
+      drawLine(add(goal, vec(-arm, 0, 0)), add(goal, vec(arm, 0, 0)), "#b794f6", 3);
+      drawLine(add(goal, vec(0, -arm, 0)), add(goal, vec(0, arm, 0)), "#b794f6", 3);
+      drawLine(add(goal, vec(0, 0, -arm)), add(goal, vec(0, 0, arm)), "#b794f6", 3);
+      drawNode(goal, 5, "#b794f6");
+    }
+
+    /** Draw current links, joints, wrist orientation, and displacement vector. */
+    function drawRobot() {
+      const fk = forwardKinematics(state.q);
+      const collision = configurationInCollision(state.q);
+      const linkColor = collision ? "#ff6174" : "#42d8d2";
+      for (let i = 0; i < fk.points.length - 1; i += 1) drawLine(fk.points[i], fk.points[i + 1], linkColor, i === 0 ? 8 : 12);
+      fk.points.forEach((point, index) => drawNode(point, index === fk.points.length - 1 ? 9 : 6, index === fk.points.length - 1 ? "#ffad55" : "#d7fbf8"));
+      const fingerY = transformPoint(fk.transform, vec(0, 0.035, 0));
+      const fingerYN = transformPoint(fk.transform, vec(0, -0.035, 0));
+      drawLine(fingerYN, fingerY, "#ffad55", 8);
+      if (state.reference) drawLine(state.reference, fk.ee, "#ffad55", 3, true);
+    }
+
+    /** Draw the planned end-effector path as a purple polyline. */
+    function drawPlan() {
+      for (let i = 1; i < state.plannedEe.length; i += 1) drawLine(state.plannedEe[i - 1], state.plannedEe[i], "rgba(183,148,246,.86)", 3);
+      if (state.plannedEe.length) drawNode(state.plannedEe[state.plannedEe.length - 1], 7, "#b794f6");
+    }
+
+    /** Resize and redraw the entire interactive scene. */
+    function render() {
+      const ratio = window.devicePixelRatio || 1;
+      const width = canvas.clientWidth, height = canvas.clientHeight;
+      if (canvas.width !== Math.round(width * ratio) || canvas.height !== Math.round(height * ratio)) {
+        canvas.width = Math.round(width * ratio);
+        canvas.height = Math.round(height * ratio);
+      }
+      ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+      ctx.clearRect(0, 0, width, height);
+      drawGrid();
+      drawObstacle();
+      drawBoxObstacles();
+      drawIkGoal();
+      drawPlan();
+      drawRobot();
+      updateTelemetry();
+      requestAnimationFrame(render);
+    }
+
+    /* ---------- Telemetry and slider controls ---------- */
+    /** Create angle sliders for either the current pose or planner target. */
+    function buildJointControls(containerId, values, isTarget) {
+      const container = document.getElementById(containerId);
+      container.innerHTML = "";
+      JOINTS.forEach((joint, index) => {
+        const wrapper = document.createElement("div");
+        wrapper.className = "joint";
+        wrapper.innerHTML = `<div class="joint-row"><span>${joint.label}</span><output id="${containerId}Out${index}">0.0°</output></div><input id="${containerId}Range${index}" type="range" min="${joint.min}" max="${joint.max}" step="0.1">`;
+        container.appendChild(wrapper);
+        const slider = wrapper.querySelector("input");
+        slider.value = (values[index] / DEG).toFixed(1);
+        slider.addEventListener("input", () => {
+          if (!isTarget && state.rosLive) return;
+          if (isTarget) state.target[index] = Number(slider.value) * DEG;
+          else state.q[index] = Number(slider.value) * DEG;
+          if (!isTarget) state.animationRunning = false;
+          clearPlan(false);
+          updateJointOutputs();
+        });
+      });
+    }
+
+    /** Synchronize displayed angle values and current sliders with application state. */
+    function updateJointOutputs() {
+      JOINTS.forEach((joint, index) => {
+        const currentDegrees = state.q[index] / DEG;
+        const targetDegrees = state.target[index] / DEG;
+        document.getElementById(`currentJointsOut${index}`).value = `${currentDegrees.toFixed(1)}°  ·  ${state.q[index].toFixed(3)} rad`;
+        document.getElementById(`targetJointsOut${index}`).value = `${targetDegrees.toFixed(1)}°`;
+        const currentSlider = document.getElementById(`currentJointsRange${index}`);
+        currentSlider.value = currentDegrees.toFixed(1);
+        currentSlider.disabled = state.rosLive;
+        document.getElementById(`targetJointsRange${index}`).value = targetDegrees.toFixed(1);
+      });
+    }
+
+    /** Update Cartesian coordinates, distance, displacement, and collision presentation. */
+    function updateTelemetry() {
+      const fk = forwardKinematics(state.q);
+      const rpy = matrixToRpy(fk.transform);
+      if (!state.reference) state.reference = { ...fk.ee };
+      document.getElementById("eeX").textContent = fk.ee.x.toFixed(3);
+      document.getElementById("eeY").textContent = fk.ee.y.toFixed(3);
+      document.getElementById("eeZ").textContent = fk.ee.z.toFixed(3);
+      document.getElementById("baseDistance").textContent = norm(fk.ee).toFixed(3);
+      document.getElementById("displacement").textContent = distance(fk.ee, state.reference).toFixed(3);
+      document.getElementById("displacement").classList.toggle("collision", configurationInCollision(state.q));
+      document.getElementById("currentPoseXyz").textContent = `${fk.ee.x.toFixed(3)} · ${fk.ee.y.toFixed(3)} · ${fk.ee.z.toFixed(3)} m`;
+      document.getElementById("currentPoseRpy").textContent = `${(rpy.x / DEG).toFixed(1)}° · ${(rpy.y / DEG).toFixed(1)}° · ${(rpy.z / DEG).toFixed(1)}°`;
+      document.getElementById("currentPoseQ").textContent = `${state.q.map(value => (value / DEG).toFixed(1)).join(" · ")}°`;
+    }
+
+    /* ---------- Persistent Cartesian and joint-space goal memory ---------- */
+    /** Validate a pose-memory record before exposing it to the planner. */
+    function validSavedGoal(candidate) {
+      return Boolean(candidate && Array.isArray(candidate.q) && candidate.q.length === JOINTS.length && candidate.q.every((value, index) => Number.isFinite(value) && value >= JOINTS[index].min * DEG && value <= JOINTS[index].max * DEG));
+    }
+
+    /** Persist a joint configuration and its derived Cartesian pose as the single saved goal. */
+    function saveGoalPose(configuration, sourceLabel) {
+      state.savedGoal = { q: [...configuration], source: sourceLabel, savedAt: new Date().toISOString() };
+      try { window.localStorage.setItem("rx200PoseLab.savedGoal", JSON.stringify(state.savedGoal)); } catch (_error) { /* File-mode storage can be unavailable in hardened browsers. */ }
+      updateSavedGoalDisplay();
+    }
+
+    /** Load a previously saved goal from browser storage when one is available. */
+    function restoreSavedGoal() {
+      try {
+        const candidate = JSON.parse(window.localStorage.getItem("rx200PoseLab.savedGoal"));
+        if (validSavedGoal(candidate)) state.savedGoal = candidate;
+      } catch (_error) { state.savedGoal = null; }
+      updateSavedGoalDisplay();
+    }
+
+    /** Render the saved goal's Cartesian coordinates, RPY orientation, and joint configuration. */
+    function updateSavedGoalDisplay() {
+      const values = document.getElementById("savedGoalValues");
+      const badge = document.getElementById("savedGoalState");
+      const savedTime = document.getElementById("savedGoalTime");
+      const loadButton = document.getElementById("loadSavedGoal");
+      const clearButton = document.getElementById("clearSavedGoal");
+      if (!validSavedGoal(state.savedGoal)) {
+        values.className = "pose-empty";
+        values.textContent = "Save the current arm pose to create a reusable goal.";
+        badge.textContent = "no saved goal";
+        savedTime.textContent = "empty";
+        loadButton.disabled = true;
+        clearButton.disabled = true;
+        renderSavedPoseJointAngles();
+        return;
+      }
+      const fk = forwardKinematics(state.savedGoal.q);
+      const rpy = matrixToRpy(fk.transform);
+      values.className = "";
+      values.innerHTML = `<div class="pose-row"><b>XYZ</b><code>${fk.ee.x.toFixed(3)} · ${fk.ee.y.toFixed(3)} · ${fk.ee.z.toFixed(3)} m</code></div><div class="pose-row"><b>RPY</b><code>${(rpy.x / DEG).toFixed(1)}° · ${(rpy.y / DEG).toFixed(1)}° · ${(rpy.z / DEG).toFixed(1)}°</code></div><div class="pose-row"><b>Q</b><code>${state.savedGoal.q.map(value => (value / DEG).toFixed(1)).join(" · ")}°</code></div>`;
+      badge.textContent = state.savedGoal.source;
+      savedTime.textContent = new Date(state.savedGoal.savedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+      loadButton.disabled = false;
+      clearButton.disabled = false;
+      renderSavedPoseJointAngles();
+    }
+
+    /** Copy the saved joint configuration into the planner target controls. */
+    function loadSavedGoalIntoPlanner() {
+      if (!validSavedGoal(state.savedGoal)) return;
+      state.target = [...state.savedGoal.q];
+      clearPlan();
+      updateJointOutputs();
+      document.getElementById("plannerState").textContent = "goal loaded";
+      document.getElementById("planSummary").textContent = "Saved pose loaded as the planner goal. Select an algorithm and plan motion.";
+    }
+
+    /** Remove the saved goal from runtime state and browser storage. */
+    function clearSavedGoalPose() {
+      state.savedGoal = null;
+      try { window.localStorage.removeItem("rx200PoseLab.savedGoal"); } catch (_error) { /* Clearing remains best-effort. */ }
+      updateSavedGoalDisplay();
+    }
+
+    /* ---------- Named route-pose storage ---------- */
+    const ROUTE_SLOTS = [
+      { key: "start", label: "start" },
+      { key: "transition_1", label: "transition_1" },
+      { key: "transition_2", label: "transition_2" }
+    ];
+
+    /* ---------- Combined goal and route-pose angle presentation ---------- */
+    /** Render every valid stored pose with one labelled row for each RX200 joint. */
+    function renderSavedPoseJointAngles() {
+      const container = document.getElementById("savedPoseJointAngles");
+      const countBadge = document.getElementById("savedPoseAngleCount");
+      const poseRecords = [
+        { label: "saved_goal", record: state.savedGoal },
+        ...ROUTE_SLOTS.map(slot => ({ label: slot.label, record: state.poseSlots[slot.key] }))
+      ].filter(item => validSavedGoal(item.record));
+      container.innerHTML = "";
+      countBadge.textContent = `${poseRecords.length} saved`;
+      if (poseRecords.length === 0) {
+        const emptyMessage = document.createElement("div");
+        emptyMessage.className = "pose-empty";
+        emptyMessage.textContent = "No saved poses are available.";
+        container.appendChild(emptyMessage);
+        return;
+      }
+      poseRecords.forEach(item => {
+        const posePanel = document.createElement("article");
+        posePanel.className = "saved-angle-pose";
+        const savedTime = Number.isNaN(Date.parse(item.record.savedAt))
+          ? "saved"
+          : new Date(item.record.savedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+        const angleRows = JOINTS.map((joint, index) => {
+          const radians = item.record.q[index];
+          const degrees = radians / DEG;
+          return `<div class="saved-angle-row"><span>${joint.label}</span><code>${degrees.toFixed(1)}° · ${radians.toFixed(3)} rad</code></div>`;
+        }).join("");
+        posePanel.innerHTML = `<div class="saved-angle-head"><strong>${item.label}</strong><time>${savedTime}</time></div>${angleRows}`;
+        container.appendChild(posePanel);
+      });
+    }
+
+    /** Persist all three named route slots in browser-local storage. */
+    function persistRoutePoses() {
+      try { window.localStorage.setItem("rx200PoseLab.routePoses", JSON.stringify(state.poseSlots)); } catch (_error) { /* Persistence is optional in restricted file mode. */ }
+    }
+
+    /** Restore valid named route configurations from browser-local storage. */
+    function restoreRoutePoses() {
+      try {
+        const saved = JSON.parse(window.localStorage.getItem("rx200PoseLab.routePoses"));
+        ROUTE_SLOTS.forEach(slot => {
+          if (saved && validSavedGoal(saved[slot.key])) state.poseSlots[slot.key] = saved[slot.key];
+        });
+      } catch (_error) { state.poseSlots = { start: null, transition_1: null, transition_2: null }; }
+      renderRoutePoseSlots();
+    }
+
+    /** Save the live arm configuration into a named route slot. */
+    function saveRoutePose(slotKey) {
+      state.poseSlots[slotKey] = { q: [...state.q], source: slotKey, savedAt: new Date().toISOString() };
+      persistRoutePoses();
+      renderRoutePoseSlots();
+    }
+
+    /** Load a named route slot into the ordinary joint-space planner target. */
+    function loadRoutePose(slotKey) {
+      const slot = state.poseSlots[slotKey];
+      if (!validSavedGoal(slot)) return;
+      state.target = [...slot.q];
+      clearPlan();
+      updateJointOutputs();
+      document.getElementById("plannerState").textContent = slotKey;
+      document.getElementById("planSummary").textContent = `${slotKey} loaded into the planner target.`;
+    }
+
+    /** Render the three named route slots and attach their save/load controls. */
+    function renderRoutePoseSlots() {
+      const container = document.getElementById("routePoseSlots");
+      container.innerHTML = "";
+      let savedCount = 0;
+      ROUTE_SLOTS.forEach(slotDefinition => {
+        const record = state.poseSlots[slotDefinition.key];
+        const valid = validSavedGoal(record);
+        if (valid) savedCount += 1;
+        const row = document.createElement("div");
+        row.className = "slot";
+        const value = valid ? record.q.map(angle => `${(angle / DEG).toFixed(0)}°`).join(" · ") : "not saved";
+        row.innerHTML = `<span class="slot-name">${slotDefinition.label}</span><span class="slot-value" title="${value}">${value}</span><span class="slot-actions"><button data-save="${slotDefinition.key}">Save</button><button data-load="${slotDefinition.key}" ${valid ? "" : "disabled"}>Load</button></span>`;
+        container.appendChild(row);
+      });
+      container.querySelectorAll("button[data-save]").forEach(button => button.addEventListener("click", () => saveRoutePose(button.dataset.save)));
+      container.querySelectorAll("button[data-load]").forEach(button => button.addEventListener("click", () => loadRoutePose(button.dataset.load)));
+      document.getElementById("routeSlotCount").textContent = `${savedCount} / 3 saved`;
+      renderSavedPoseJointAngles();
+    }
+
+    /** Clear every named route pose from memory and local storage. */
+    function clearRoutePoses() {
+      state.poseSlots = { start: null, transition_1: null, transition_2: null };
+      try { window.localStorage.removeItem("rx200PoseLab.routePoses"); } catch (_error) { /* Clearing remains best-effort. */ }
+      renderRoutePoseSlots();
+      clearPlan();
+    }
+
+    /* ---------- Rectangular obstacle collection ---------- */
+    /** Read a finite number from a form field or return a safe fallback. */
+    function formNumber(id, fallback) {
+      const value = Number(document.getElementById(id).value);
+      return Number.isFinite(value) ? value : fallback;
+    }
+
+    /** Add one axis-aligned rectangular collision object from the obstacle form. */
+    function addBoxObstacle() {
+      const box = {
+        id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+        center: vec(formNumber("boxX", 0.24), formNumber("boxY", -0.12), formNumber("boxZ", 0.13)),
+        size: vec(Math.max(0.01, formNumber("boxSizeX", 0.10)), Math.max(0.01, formNumber("boxSizeY", 0.10)), Math.max(0.01, formNumber("boxSizeZ", 0.18)))
+      };
+      state.boxObstacles.push(box);
+      persistBoxObstacles();
+      renderBoxObstacleList();
+      clearPlan();
+    }
+
+    /** Persist rectangular obstacles so the modeled scene survives a reload. */
+    function persistBoxObstacles() {
+      try { window.localStorage.setItem("rx200PoseLab.boxObstacles", JSON.stringify(state.boxObstacles)); } catch (_error) { /* Persistence is optional. */ }
+    }
+
+    /** Restore well-formed rectangular obstacles from browser-local storage. */
+    function restoreBoxObstacles() {
+      try {
+        const saved = JSON.parse(window.localStorage.getItem("rx200PoseLab.boxObstacles"));
+        if (Array.isArray(saved)) state.boxObstacles = saved.filter(box => box && box.center && box.size && [box.center.x, box.center.y, box.center.z, box.size.x, box.size.y, box.size.z].every(Number.isFinite));
+      } catch (_error) { state.boxObstacles = []; }
+      renderBoxObstacleList();
+    }
+
+    /** Remove one box obstacle by its stable UI identifier. */
+    function removeBoxObstacle(id) {
+      state.boxObstacles = state.boxObstacles.filter(box => box.id !== id);
+      persistBoxObstacles();
+      renderBoxObstacleList();
+      clearPlan();
+    }
+
+    /** Render the box-obstacle summary list and removal controls. */
+    function renderBoxObstacleList() {
+      const container = document.getElementById("boxObstacleList");
+      container.innerHTML = "";
+      state.boxObstacles.forEach((box, index) => {
+        const item = document.createElement("div");
+        item.className = "obstacle-item";
+        item.innerHTML = `<span>Box ${index + 1}: C(${box.center.x.toFixed(2)}, ${box.center.y.toFixed(2)}, ${box.center.z.toFixed(2)}) · S(${box.size.x.toFixed(2)}, ${box.size.y.toFixed(2)}, ${box.size.z.toFixed(2)}) m</span><button data-remove-box="${box.id}">Remove</button>`;
+        container.appendChild(item);
+      });
+      container.querySelectorAll("button[data-remove-box]").forEach(button => button.addEventListener("click", () => removeBoxObstacle(button.dataset.removeBox)));
+      document.getElementById("boxCount").textContent = `${state.boxObstacles.length} ${state.boxObstacles.length === 1 ? "box" : "boxes"}`;
+    }
+
+    /** Clear every rectangular obstacle from the scene and persistent storage. */
+    function clearBoxObstacles() {
+      state.boxObstacles = [];
+      persistBoxObstacles();
+      renderBoxObstacleList();
+      clearPlan();
+    }
+
+    /* ---------- Collision model ---------- */
+    /** Read and sanitize the obstacle fields from the UI. */
+    function readObstacle() {
+      const number = (id, fallback) => Number.isFinite(Number(document.getElementById(id).value)) ? Number(document.getElementById(id).value) : fallback;
+      return { center: vec(number("obsX", 0.28), number("obsY", 0), number("obsZ", 0.2)), radius: Math.max(0.01, number("obsR", 0.055)) };
+    }
+
+    /** Return the shortest distance between a point and a finite line segment. */
+    function pointSegmentDistance(point, a, b) {
+      const segment = sub(b, a);
+      const lengthSquared = dot(segment, segment);
+      const t = lengthSquared > 1e-12 ? clamp(dot(sub(point, a), segment) / lengthSquared, 0, 1) : 0;
+      return distance(point, add(a, scale(segment, t)));
+    }
+
+    /** Test a link segment against an axis-aligned box expanded by the link safety radius. */
+    function segmentIntersectsBox(a, b, box, margin) {
+      const half = add(scale(box.size, 0.5), vec(margin, margin, margin));
+      const minimum = sub(box.center, half), maximum = add(box.center, half), direction = sub(b, a);
+      let entry = 0, exit = 1;
+      for (const axis of ["x", "y", "z"]) {
+        if (Math.abs(direction[axis]) < 1e-10) {
+          if (a[axis] < minimum[axis] || a[axis] > maximum[axis]) return false;
+          continue;
+        }
+        let first = (minimum[axis] - a[axis]) / direction[axis];
+        let second = (maximum[axis] - a[axis]) / direction[axis];
+        if (first > second) [first, second] = [second, first];
+        entry = Math.max(entry, first);
+        exit = Math.min(exit, second);
+        if (entry > exit) return false;
+      }
+      return true;
+    }
+
+    /** Check a configuration against joint limits, ground, and the enabled obstacle. */
+    function configurationInCollision(q) {
+      if (q.some((angle, index) => angle < JOINTS[index].min * DEG || angle > JOINTS[index].max * DEG)) return true;
+      const points = forwardKinematics(q).points;
+      if (points.slice(1).some(point => point.z < 0.012)) return true;
+      const linkRadius = 0.025;
+      if (document.getElementById("obstacleEnabled").checked) {
+        const obstacle = readObstacle();
+        for (let index = 1; index < points.length - 1; index += 1) {
+          if (pointSegmentDistance(obstacle.center, points[index], points[index + 1]) <= obstacle.radius + linkRadius) return true;
+        }
+      }
+      for (const box of state.boxObstacles) {
+        for (let index = 1; index < points.length - 1; index += 1) {
+          if (segmentIntersectsBox(points[index], points[index + 1], box, linkRadius)) return true;
+        }
+      }
+      return false;
+    }
+
+    /** Check every interpolated configuration along a local joint-space edge. */
+    function edgeInCollision(a, b, step = 0.045) {
+      const maximumDelta = Math.max(...a.map((value, index) => Math.abs(b[index] - value)));
+      const count = Math.max(2, Math.ceil(maximumDelta / step));
+      for (let index = 0; index <= count; index += 1) if (configurationInCollision(lerp(a, b, index / count))) return true;
+      return false;
+    }
+
+    /* ---------- Numerical inverse kinematics ---------- */
+    /** Solve a dense 3×3 linear system using pivoted Gaussian elimination. */
+    function solveLinearSystem3(matrix, vectorValue) {
+      const augmented = matrix.map((row, index) => [...row, vectorValue[index]]);
+      for (let column = 0; column < 3; column += 1) {
+        let pivot = column;
+        for (let row = column + 1; row < 3; row += 1) if (Math.abs(augmented[row][column]) > Math.abs(augmented[pivot][column])) pivot = row;
+        if (Math.abs(augmented[pivot][column]) < 1e-12) return null;
+        [augmented[column], augmented[pivot]] = [augmented[pivot], augmented[column]];
+        const divisor = augmented[column][column];
+        for (let item = column; item < 4; item += 1) augmented[column][item] /= divisor;
+        for (let row = 0; row < 3; row += 1) {
+          if (row === column) continue;
+          const factor = augmented[row][column];
+          for (let item = column; item < 4; item += 1) augmented[row][item] -= factor * augmented[column][item];
+        }
+      }
+      return augmented.map(row => row[3]);
+    }
+
+    /** Solve position-only RX200 IK with damped least squares and randomized restarts. */
+    function inverseKinematicsPosition(goal) {
+      const seeds = [[...state.target], [...state.q]];
+      for (let restart = 0; restart < 28; restart += 1) seeds.push(randomConfiguration());
+      let best = null;
+      for (const seed of seeds) {
+        const q = [...seed];
+        q[4] = state.target[4];
+        for (let iteration = 0; iteration < 320; iteration += 1) {
+          const current = forwardKinematics(q).ee;
+          const error = sub(goal, current);
+          const errorNorm = norm(error);
+          if ((!best || errorNorm < best.error) && !configurationInCollision(q)) best = { q: [...q], error: errorNorm };
+          if (errorNorm < 0.0015 && !configurationInCollision(q)) return { q: [...q], error: errorNorm };
+          const epsilon = 0.00015;
+          const jacobian = [[], [], []];
+          for (let joint = 0; joint < 4; joint += 1) {
+            const perturbed = [...q];
+            perturbed[joint] += epsilon;
+            const moved = forwardKinematics(perturbed).ee;
+            jacobian[0][joint] = (moved.x - current.x) / epsilon;
+            jacobian[1][joint] = (moved.y - current.y) / epsilon;
+            jacobian[2][joint] = (moved.z - current.z) / epsilon;
+          }
+          const dampingSquared = 0.0016;
+          const normal = Array.from({ length: 3 }, (_, row) => Array.from({ length: 3 }, (_, column) => jacobian[row].reduce((sum, value, joint) => sum + value * jacobian[column][joint], row === column ? dampingSquared : 0)));
+          const correction = solveLinearSystem3(normal, [error.x, error.y, error.z]);
+          if (!correction) break;
+          const delta = Array.from({ length: 4 }, (_, joint) => jacobian.reduce((sum, row, axis) => sum + row[joint] * correction[axis], 0));
+          const maximumDelta = Math.max(...delta.map(Math.abs), 1e-9);
+          const gain = Math.min(0.17 / maximumDelta, 0.82);
+          for (let joint = 0; joint < 4; joint += 1) q[joint] = clamp(q[joint] + delta[joint] * gain, JOINTS[joint].min * DEG, JOINTS[joint].max * DEG);
+        }
+      }
+      return best && best.error < 0.008 ? best : null;
+    }
+
+    /** Read the Cartesian destination form and update the 3-D goal marker. */
+    function readIkGoal() {
+      state.ikGoal = vec(formNumber("goalX", 0.30), formNumber("goalY", 0.08), formNumber("goalZ", 0.22));
+      return state.ikGoal;
+    }
+
+    /** Solve the requested Cartesian destination and load its joint solution as planner target. */
+    function solveIkDestination() {
+      const goal = readIkGoal();
+      const badge = document.getElementById("ikState");
+      const resultText = document.getElementById("ikResult");
+      badge.textContent = "solving";
+      resultText.textContent = "Searching RX200 joint space for a collision-free position solution…";
+      window.setTimeout(() => {
+        const started = performance.now();
+        const solution = inverseKinematicsPosition(goal);
+        if (!solution) {
+          badge.textContent = "IK failed";
+          resultText.textContent = "No collision-free solution within 8 mm. Check reachability, boxes, sphere, and ground clearance.";
+          return;
+        }
+        state.target = [...solution.q];
+        clearPlan();
+        updateJointOutputs();
+        const achieved = forwardKinematics(solution.q).ee;
+        badge.textContent = "IK solved";
+        resultText.textContent = `Error ${(solution.error * 1000).toFixed(2)} mm · achieved (${achieved.x.toFixed(3)}, ${achieved.y.toFixed(3)}, ${achieved.z.toFixed(3)}) m · ${(performance.now() - started).toFixed(1)} ms.`;
+      }, 30);
+    }
+
+    /** Copy the live end-effector position into the Cartesian destination fields. */
+    function copyCurrentPositionToIkGoal() {
+      const current = forwardKinematics(state.q).ee;
+      document.getElementById("goalX").value = current.x.toFixed(3);
+      document.getElementById("goalY").value = current.y.toFixed(3);
+      document.getElementById("goalZ").value = current.z.toFixed(3);
+      readIkGoal();
+      document.getElementById("ikState").textContent = "current XYZ";
+      document.getElementById("ikResult").textContent = "Current end-effector position copied. Adjust XYZ or solve directly.";
+    }
+
+    /* ---------- Motion planning algorithms ---------- */
+    /** Generate a uniformly sampled, joint-limit-valid RX200 configuration. */
+    function randomConfiguration() {
+      return JOINTS.map(joint => (joint.min + Math.random() * (joint.max - joint.min)) * DEG);
+    }
+
+    /** Measure normalized Euclidean distance in five-dimensional joint space. */
+    function jointDistance(a, b) {
+      return Math.sqrt(a.reduce((sum, value, index) => sum + Math.pow((value - b[index]) / ((JOINTS[index].max - JOINTS[index].min) * DEG), 2), 0));
+    }
+
+    /** Produce a dense linear interpolation if its complete edge is collision-free. */
+    function linearPlan(start, goal) {
+      if (edgeInCollision(start, goal)) return null;
+      const maximumDelta = Math.max(...start.map((value, index) => Math.abs(goal[index] - value)));
+      const count = Math.max(2, Math.ceil(maximumDelta / (2 * DEG)));
+      return Array.from({ length: count + 1 }, (_, index) => lerp(start, goal, index / count));
+    }
+
+    /** Return the closest node index in an RRT tree. */
+    function nearestNode(tree, sample) {
+      let bestIndex = 0, bestDistance = Infinity;
+      tree.forEach((node, index) => {
+        const candidateDistance = jointDistance(node.q, sample);
+        if (candidateDistance < bestDistance) { bestDistance = candidateDistance; bestIndex = index; }
+      });
+      return bestIndex;
+    }
+
+    /** Steer from one joint configuration toward another by a bounded angular step. */
+    function steer(from, to, maxStep = 10 * DEG) {
+      const maximumDelta = Math.max(...from.map((value, index) => Math.abs(to[index] - value)));
+      return maximumDelta <= maxStep ? [...to] : lerp(from, to, maxStep / maximumDelta);
+    }
+
+    /** Add one collision-free extension to a tree and return its new node index. */
+    function extendTree(tree, sample) {
+      const parent = nearestNode(tree, sample);
+      const candidate = steer(tree[parent].q, sample);
+      if (edgeInCollision(tree[parent].q, candidate)) return -1;
+      tree.push({ q: candidate, parent });
+      return tree.length - 1;
+    }
+
+    /** Reconstruct a configuration path from an RRT node back to its root. */
+    function traceTree(tree, index) {
+      const path = [];
+      while (index >= 0) { path.push(tree[index].q); index = tree[index].parent; }
+      return path.reverse();
+    }
+
+    /** Run a bidirectional RRT-Connect search in RX200 joint space. */
+    function rrtConnect(start, goal, maximumIterations = 7000) {
+      if (configurationInCollision(start) || configurationInCollision(goal)) return null;
+      const direct = linearPlan(start, goal);
+      if (direct) return direct;
+      let treeA = [{ q: [...start], parent: -1 }];
+      let treeB = [{ q: [...goal], parent: -1 }];
+      let aStartsAtStart = true;
+      for (let iteration = 0; iteration < maximumIterations; iteration += 1) {
+        const sample = Math.random() < 0.18 ? treeB[0].q : randomConfiguration();
+        const newA = extendTree(treeA, sample);
+        if (newA >= 0) {
+          let newB = extendTree(treeB, treeA[newA].q);
+          while (newB >= 0) {
+            if (jointDistance(treeB[newB].q, treeA[newA].q) < 0.018 && !edgeInCollision(treeB[newB].q, treeA[newA].q)) {
+              const pathA = traceTree(treeA, newA);
+              const pathB = traceTree(treeB, newB).reverse();
+              const joined = aStartsAtStart ? pathA.concat(pathB) : pathB.reverse().concat(pathA.reverse());
+              return densifyAndShortcut(joined);
+            }
+            const nextB = extendTree(treeB, treeA[newA].q);
+            if (nextB < 0 || nextB === newB) break;
+            newB = nextB;
+          }
+        }
+        [treeA, treeB] = [treeB, treeA];
+        aStartsAtStart = !aStartsAtStart;
+      }
+      return null;
+    }
+
+    /** Shortcut a raw planner path and densify it for smooth animation. */
+    function densifyAndShortcut(rawPath) {
+      const shortcut = [rawPath[0]];
+      let index = 0;
+      while (index < rawPath.length - 1) {
+        let next = rawPath.length - 1;
+        while (next > index + 1 && edgeInCollision(rawPath[index], rawPath[next])) next -= 1;
+        shortcut.push(rawPath[next]);
+        index = next;
+      }
+      const dense = [];
+      for (let segment = 0; segment < shortcut.length - 1; segment += 1) {
+        const a = shortcut[segment], b = shortcut[segment + 1];
+        const maximumDelta = Math.max(...a.map((value, joint) => Math.abs(b[joint] - value)));
+        const steps = Math.max(2, Math.ceil(maximumDelta / (2 * DEG)));
+        for (let step = 0; step < steps; step += 1) dense.push(lerp(a, b, step / steps));
+      }
+      dense.push(shortcut[shortcut.length - 1]);
+      return dense;
+    }
+
+    /** Calculate Cartesian path length across a planned configuration sequence. */
+    function calculatePathMetrics(plan) {
+      state.plannedEe = plan.map(configuration => forwardKinematics(configuration).ee);
+      let length = 0;
+      for (let index = 1; index < state.plannedEe.length; index += 1) length += distance(state.plannedEe[index - 1], state.plannedEe[index]);
+      document.getElementById("pathLength").textContent = length.toFixed(3);
+      return length;
+    }
+
+    /** Execute the selected planning algorithm and expose the resulting trajectory. */
+    function planMotion() {
+      state.animationRunning = false;
+      const planner = document.getElementById("algorithm").value;
+      const label = document.getElementById("plannerState");
+      const summary = document.getElementById("planSummary");
+      label.textContent = "planning";
+      summary.textContent = "Searching configuration space…";
+      window.setTimeout(() => {
+        const startTime = performance.now();
+        const result = planner === "rrt" ? rrtConnect(state.q, state.target) : linearPlan(state.q, state.target);
+        const elapsed = performance.now() - startTime;
+        if (!result) {
+          clearPlan(false);
+          label.textContent = "failed";
+          summary.textContent = planner === "linear" ? "Direct path is obstructed. Try RRT-Connect." : "No valid path found; move the obstacle or target.";
+          return;
+        }
+        state.plan = result;
+        state.animationIndex = 0;
+        const length = calculatePathMetrics(result);
+        label.textContent = "ready";
+        summary.textContent = `${planner === "rrt" ? "RRT-Connect" : "Linear"}: ${result.length} samples, ${length.toFixed(3)} m EE travel, ${elapsed.toFixed(1)} ms.`;
+        document.getElementById("executeMotion").disabled = state.rosLive;
+        document.getElementById("pauseMotion").disabled = true;
+        document.getElementById("planProgress").style.width = "0%";
+      }, 30);
+    }
+
+    /** Plan a continuous route through start and transition slots before the ordinary target. */
+    function planSavedRoute() {
+      state.animationRunning = false;
+      const algorithm = document.getElementById("algorithm").value;
+      const checkpoints = [[...state.q]];
+      const checkpointNames = ["current"];
+      ROUTE_SLOTS.forEach(slot => {
+        const record = state.poseSlots[slot.key];
+        if (validSavedGoal(record)) { checkpoints.push([...record.q]); checkpointNames.push(slot.key); }
+      });
+      checkpoints.push([...state.target]);
+      checkpointNames.push("goal");
+      document.getElementById("plannerState").textContent = "route planning";
+      document.getElementById("planSummary").textContent = `Planning ${checkpointNames.join(" → ")}…`;
+      window.setTimeout(() => {
+        const started = performance.now();
+        const combined = [];
+        for (let index = 0; index < checkpoints.length - 1; index += 1) {
+          const segment = algorithm === "rrt" ? rrtConnect(checkpoints[index], checkpoints[index + 1]) : linearPlan(checkpoints[index], checkpoints[index + 1]);
+          if (!segment) {
+            clearPlan(false);
+            document.getElementById("plannerState").textContent = "route failed";
+            document.getElementById("planSummary").textContent = `No collision-free ${algorithm === "rrt" ? "RRT" : "linear"} segment from ${checkpointNames[index]} to ${checkpointNames[index + 1]}.`;
+            return;
+          }
+          combined.push(...(index === 0 ? segment : segment.slice(1)));
+        }
+        state.plan = combined;
+        state.animationIndex = 0;
+        const pathLength = calculatePathMetrics(combined);
+        document.getElementById("plannerState").textContent = "route ready";
+        document.getElementById("planSummary").textContent = `${checkpointNames.join(" → ")}: ${combined.length} samples, ${pathLength.toFixed(3)} m, ${(performance.now() - started).toFixed(1)} ms.`;
+        document.getElementById("executeMotion").disabled = state.rosLive;
+        document.getElementById("pauseMotion").disabled = true;
+        document.getElementById("planProgress").style.width = "0%";
+      }, 30);
+    }
+
+    /** Animate a planned configuration path locally without commanding ROS. */
+    function animatePlan() {
+      if (!state.plan.length || state.rosLive) return;
+      state.animationRunning = true;
+      state.animationPaused = false;
+      document.getElementById("pauseMotion").disabled = false;
+      document.getElementById("pauseMotion").textContent = "Pause";
+      let previousTime = 0;
+      const tick = timestamp => {
+        if (!state.animationRunning) return;
+        if (!state.animationPaused && timestamp - previousTime > 26) {
+          state.q = [...state.plan[state.animationIndex]];
+          state.animationIndex += 1;
+          previousTime = timestamp;
+          updateJointOutputs();
+          document.getElementById("planProgress").style.width = `${100 * state.animationIndex / state.plan.length}%`;
+          if (state.animationIndex >= state.plan.length) {
+            state.animationRunning = false;
+            document.getElementById("pauseMotion").disabled = true;
+            document.getElementById("plannerState").textContent = "complete";
+            return;
+          }
+        }
+        requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    }
+
+    /** Remove planner artifacts and reset planning controls. */
+    function clearPlan(resetSummary = true) {
+      state.plan = [];
+      state.plannedEe = [];
+      state.animationRunning = false;
+      state.animationIndex = 0;
+      document.getElementById("executeMotion").disabled = true;
+      document.getElementById("pauseMotion").disabled = true;
+      document.getElementById("planProgress").style.width = "0%";
+      document.getElementById("pathLength").textContent = "0.000";
+      if (resetSummary) {
+        document.getElementById("plannerState").textContent = "idle";
+        document.getElementById("planSummary").textContent = "Choose a target configuration, then plan a collision-checked path.";
+      }
+    }
+
+    /* ---------- Native rosbridge WebSocket input ---------- */
+    /** Connect directly to rosbridge and subscribe read-only to RX200 JointState messages. */
+    function connectRos() {
+      disconnectRos();
+      const dot = document.getElementById("rosDot");
+      const status = document.getElementById("rosStatus");
+      status.textContent = "connecting";
+      dot.className = "dot";
+      try {
+        const socket = new WebSocket(document.getElementById("rosUrl").value.trim());
+        state.rosSocket = socket;
+        socket.addEventListener("open", () => {
+          socket.send(JSON.stringify({ op: "subscribe", id: "rx200-pose-lab", topic: "/rx200/joint_states", type: "sensor_msgs/JointState", throttle_rate: 30, queue_length: 1 }));
+          state.rosLive = true;
+          status.textContent = "live";
+          dot.className = "dot live";
+          document.getElementById("angleSource").textContent = "ROS live";
+          document.getElementById("connectRos").disabled = true;
+          document.getElementById("disconnectRos").disabled = false;
+          clearPlan();
+          updateJointOutputs();
+        });
+        socket.addEventListener("message", event => handleRosMessage(event.data));
+        socket.addEventListener("error", () => { status.textContent = "connection error"; dot.className = "dot error"; });
+        socket.addEventListener("close", () => finishRosDisconnect("offline"));
+      } catch (error) {
+        status.textContent = error.message;
+        dot.className = "dot error";
+      }
+    }
+
+    /** Parse rosbridge JointState messages and update matching RX200 joints. */
+    function handleRosMessage(rawMessage) {
+      let packet;
+      try { packet = JSON.parse(rawMessage); } catch (_error) { return; }
+      if (packet.op !== "publish" || packet.topic !== "/rx200/joint_states" || !packet.msg) return;
+      const names = packet.msg.name || [], positions = packet.msg.position || [];
+      JOINTS.forEach((joint, index) => {
+        const messageIndex = names.indexOf(joint.name);
+        if (messageIndex >= 0 && Number.isFinite(Number(positions[messageIndex]))) state.q[index] = Number(positions[messageIndex]);
+      });
+      updateJointOutputs();
+    }
+
+    /** Disconnect from rosbridge and restore local simulation controls. */
+    function disconnectRos() {
+      if (state.rosSocket) {
+        try { state.rosSocket.send(JSON.stringify({ op: "unsubscribe", id: "rx200-pose-lab", topic: "/rx200/joint_states" })); } catch (_error) { /* Socket can already be closed. */ }
+        try { state.rosSocket.close(); } catch (_error) { /* Closing is best-effort. */ }
+      }
+      finishRosDisconnect("offline");
+    }
+
+    /** Normalize controls and status after a WebSocket closes. */
+    function finishRosDisconnect(label) {
+      state.rosSocket = null;
+      state.rosLive = false;
+      document.getElementById("rosStatus").textContent = label;
+      document.getElementById("rosDot").className = "dot";
+      document.getElementById("angleSource").textContent = "simulation";
+      document.getElementById("connectRos").disabled = false;
+      document.getElementById("disconnectRos").disabled = true;
+      updateJointOutputs();
+    }
+
+    /* ---------- User interactions and initialization ---------- */
+    buildJointControls("currentJoints", state.q, false);
+    buildJointControls("targetJoints", state.target, true);
+    document.getElementById("setReference").addEventListener("click", () => { state.reference = { ...forwardKinematics(state.q).ee }; });
+    document.getElementById("resetPose").addEventListener("click", () => { if (!state.rosLive) { state.q = HOME_DEG.map(value => value * DEG); state.reference = { ...forwardKinematics(state.q).ee }; clearPlan(); updateJointOutputs(); } });
+    document.getElementById("saveCurrentGoal").addEventListener("click", () => saveGoalPose(state.q, "saved current"));
+    document.getElementById("setTargetAsSaved").addEventListener("click", () => saveGoalPose(state.target, "saved target"));
+    document.getElementById("loadSavedGoal").addEventListener("click", loadSavedGoalIntoPlanner);
+    document.getElementById("clearSavedGoal").addEventListener("click", clearSavedGoalPose);
+    document.getElementById("planSavedRoute").addEventListener("click", planSavedRoute);
+    document.getElementById("clearRoutePoses").addEventListener("click", clearRoutePoses);
+    document.getElementById("copyCurrentXyz").addEventListener("click", copyCurrentPositionToIkGoal);
+    document.getElementById("solveIk").addEventListener("click", solveIkDestination);
+    document.getElementById("addBox").addEventListener("click", addBoxObstacle);
+    document.getElementById("clearBoxes").addEventListener("click", clearBoxObstacles);
+    document.getElementById("copyTarget").addEventListener("click", () => { state.target = [...state.q]; clearPlan(); updateJointOutputs(); });
+    document.getElementById("randomTarget").addEventListener("click", () => {
+      for (let attempt = 0; attempt < 300; attempt += 1) {
+        const candidate = randomConfiguration();
+        if (!configurationInCollision(candidate)) { state.target = candidate; break; }
+      }
+      clearPlan();
+      updateJointOutputs();
+    });
+    document.getElementById("planMotion").addEventListener("click", planMotion);
+    document.getElementById("executeMotion").addEventListener("click", animatePlan);
+    document.getElementById("pauseMotion").addEventListener("click", event => { state.animationPaused = !state.animationPaused; event.currentTarget.textContent = state.animationPaused ? "Resume" : "Pause"; });
+    document.getElementById("clearPlan").addEventListener("click", () => clearPlan());
+    document.getElementById("connectRos").addEventListener("click", connectRos);
+    document.getElementById("disconnectRos").addEventListener("click", disconnectRos);
+    ["obstacleEnabled", "obsX", "obsY", "obsZ", "obsR"].forEach(id => document.getElementById(id).addEventListener("input", () => clearPlan()));
+    ["goalX", "goalY", "goalZ"].forEach(id => document.getElementById(id).addEventListener("input", () => { readIkGoal(); document.getElementById("ikState").textContent = "IK idle"; }));
+    canvas.addEventListener("pointerdown", event => { state.drag = { active: true, x: event.clientX, y: event.clientY }; canvas.classList.add("dragging"); canvas.setPointerCapture(event.pointerId); });
+    canvas.addEventListener("pointermove", event => {
+      if (!state.drag.active) return;
+      state.camera.yaw += (event.clientX - state.drag.x) * 0.007;
+      state.camera.pitch = clamp(state.camera.pitch + (event.clientY - state.drag.y) * 0.006, -1.1, 1.1);
+      state.drag.x = event.clientX;
+      state.drag.y = event.clientY;
+    });
+    canvas.addEventListener("pointerup", () => { state.drag.active = false; canvas.classList.remove("dragging"); });
+    canvas.addEventListener("wheel", event => { event.preventDefault(); state.camera.zoom = clamp(state.camera.zoom * Math.exp(-event.deltaY * 0.001), 420, 1450); }, { passive: false });
+    canvas.addEventListener("dblclick", () => { state.camera = { yaw: -0.70, pitch: 0.43, zoom: 840 }; });
+    window.addEventListener("resize", () => { canvas.width = 0; });
+    state.reference = { ...forwardKinematics(state.q).ee };
+    restoreSavedGoal();
+    restoreRoutePoses();
+    restoreBoxObstacles();
+    readIkGoal();
+    updateJointOutputs();
+    requestAnimationFrame(render);
+  </script>
+</body>
+</html>

@@ -1,0 +1,53 @@
+# Section: Neutral contact thresholds require calibration before hardware deployment.
+rx200_gripper_guard:
+  ros__parameters:
+    robot_name: "rx200"
+
+    topics:
+      joint_states: "/rx200/sdk_joint_states"
+      gripper_command: "/rx200/commands/joint_single"
+      diagnostics: "/rx200/gripper_guard/diagnostics"
+      contact: "/rx200/gripper_guard/contact"
+
+    services:
+      get_motor_registers: "/rx200/get_motor_registers"
+
+    actions:
+      close_until_contact: "/rx200/gripper_guard/close_until_contact"
+
+    joints:
+      motor_joint: "gripper"
+      finger_joint: "left_finger"
+      right_finger_joint: "right_finger"
+
+    control:
+      # Preserve the deployed grasp_params.yaml close strength and direction.
+      default_close_pwm: -75.0
+      default_hold_pwm: 0.0
+      command_period_sec: 0.05
+      min_pwm: -200.0
+      max_pwm: 200.0
+      max_close_pwm_magnitude: 75.0
+
+    contact:
+      required_samples: 5
+      # Calibration required: zero thresholds intentionally reject noisy motion as contact.
+      velocity_threshold: 0.0
+      position_span_threshold: 0.0
+      load_delta_threshold: 0.0
+      require_load_confirmation: false
+      aperture_margin: 0.0
+      history_length: 5
+
+    calibration:
+      # Calibration required: record a repeatable empty mechanical close before deployment.
+      empty_closed_aperture: 0.0
+
+    safety:
+      feedback_timeout_sec: 0.5
+      action_timeout_sec: 5.0
+      stop_pwm: 0.0
+
+    health:
+      enabled: true
+      update_rate_hz: 1.0

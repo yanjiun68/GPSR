@@ -1,4 +1,6 @@
 """Section: COUNT_OBJECTS skill."""
+
+# Section: State-machine composition and skill-specific execution behavior.
 from robot_yasmin_tasks.ros_clients.perception_clients import PerceptionClients
 from robot_yasmin_tasks.skills.skill_base import SimpleSkillSM
 

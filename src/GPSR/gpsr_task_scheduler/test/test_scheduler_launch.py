@@ -60,7 +60,6 @@ def test_all_selectable_perception_pipelines_are_enabled_by_default(tmp_path: Pa
         "find_object_skill_server",
         "count_objects_skill_server",
         "count_people_skill_server",
-        "find_person_identity_resource",
         "gpsr_human_identity_node",
         "gpsr_tracked_appearance_node",
         "find_person_by_attribute_skill_server",
@@ -85,21 +84,18 @@ def test_find_object_is_independent_from_count_objects_switch(tmp_path: Path) ->
     assert count_server.condition is not None and not count_server.condition.evaluate(context)
 
 
-def test_person_name_and_attribute_pipeline_switches_are_independent(tmp_path: Path) -> None:
-    """Special function: Name and attribute capability markers follow different switches."""
-    # Section: Disable identity while retaining real pose-attribute search.
+def test_person_attribute_pipeline_switch_is_independent(tmp_path: Path) -> None:
+    """Special function: Attribute lifecycle resources follow only their own launch switch."""
+    # Section: Disable the persistent identity include while retaining pose-attribute search.
     entities, context = launch_entities(tmp_path)
     context.launch_configurations["start_find_person_pipeline"] = "false"
     context.launch_configurations["start_find_person_attribute_pipeline"] = "true"
-    identity = lifecycle_node(entities, "find_person_identity_resource")
     attribute = lifecycle_node(entities, "find_person_by_attribute_skill_server")
-    assert identity.condition is not None and not identity.condition.evaluate(context)
     assert attribute.condition is not None and attribute.condition.evaluate(context)
 
-    # Section: Reverse the switches without coupling identity to pose resources.
+    # Section: Reverse the switches without coupling the attribute lifecycle server.
     context.launch_configurations["start_find_person_pipeline"] = "true"
     context.launch_configurations["start_find_person_attribute_pipeline"] = "false"
-    assert identity.condition.evaluate(context)
     assert not attribute.condition.evaluate(context)
 
 
@@ -147,3 +143,40 @@ def test_shared_object_detector_stops_only_when_both_consumers_are_disabled(tmp_
     object_detector = lifecycle_node(entities, "gpsr_object_detection_node")
     assert object_detector.condition is not None
     assert not object_detector.condition.evaluate(context)
+
+
+def test_command_start_amcl_return_defaults_disable_startup_motion(tmp_path: Path) -> None:
+    """Special function: Verify safe default return and navigation action parameters."""
+    _entities, context = launch_entities(tmp_path)
+    assert context.launch_configurations["return_target_mode"] == "command_start_amcl"
+    assert context.launch_configurations["navigate_to_instruction_point_on_start"] == "false"
+    assert context.launch_configurations["amcl_pose_topic"] == "/amcl_pose"
+    assert context.launch_configurations["amcl_pose_max_age_sec"] == "1.0"
+    assert context.launch_configurations["amcl_pose_capture_timeout_sec"] == "3.0"
+    assert context.launch_configurations["return_fallback_named_location"] == "instruction_point"
+    assert context.launch_configurations["navigate_to_pose_action"] == "/navigate_to_pose"
+    assert context.launch_configurations["navigate_to_named_pose_action"] == "/nav/navigate_named_pose"
+
+
+def test_depth_localization_is_selectable_and_enabled_by_default(tmp_path: Path) -> None:
+    """Special function: Preserve 3D FIND_OBJECT behavior while permitting RGB-only launch."""
+    # Section: The launch-level switch must be explicit and retain the existing depth default.
+    _entities, context = launch_entities(tmp_path)
+    assert context.launch_configurations["enable_depth"] == "true"
+
+
+def test_person_search_policy_has_an_installed_yaml_default(tmp_path: Path) -> None:
+    """Special function: Expose one shared policy override for both person find routes."""
+    _entities, context = launch_entities(tmp_path)
+    configured = context.launch_configurations["find_person_search_config_file"]
+    assert str(configured).endswith("/config/find_person_search.yaml")
+
+
+def test_lifecycle_deadline_defaults_allow_heavy_gpu_configuration(tmp_path: Path) -> None:
+    """Special function: Executor response wait must exceed the manager's absolute deadline."""
+    _entities, context = launch_entities(tmp_path)
+    manager_timeout = float(context.launch_configurations["lifecycle_transition_timeout_sec"])
+    client_margin = float(context.launch_configurations["lifecycle_operation_timeout_margin_sec"])
+    assert manager_timeout == 60.0
+    assert client_margin == 10.0
+    assert manager_timeout + client_margin > manager_timeout

@@ -3,10 +3,9 @@
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.conditions import IfCondition
-from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
-from launch_ros.substitutions import FindPackageShare
 
 
 def generate_launch_description():
@@ -29,8 +28,8 @@ def generate_launch_description():
     confidence_threshold = LaunchConfiguration("confidence_threshold")
     yolo_device = LaunchConfiguration("yolo_device")
 
-    # Section: Default installed YOLO model path for the optional OpenCV detector.
-    default_yolo_model_path = PathJoinSubstitution([FindPackageShare("vision"), "models", "yolo11n.pt"])
+    # Section: Use the requested workspace YOLOE segmentation weights for FIND_OBJECT.
+    default_yolo_model_path = "/home/yanjiun68/workspace/WS1/PutrabotUPM-project/yoloe-26s-seg.pt"
 
     # Section: Optional local TTS service for found-object announcements.
     voice_tts_node = Node(

@@ -22,6 +22,7 @@ import sys
 from typing import Optional
 
 import rclpy
+from rcl_interfaces.msg import SetParametersResult
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPolicy
 
@@ -109,6 +110,10 @@ class FollowControllerNode(Node):
         self.scan_pause_sec = float(self.get_parameter("scan_pause_sec").value)
         self.master_watchdog_sec = float(self.get_parameter("master_watchdog_sec").value)
 
+        # Section: Keep the runtime control law synchronized with GPSR goal distance updates.
+        self._parameter_callback_handle = self.add_on_set_parameters_callback(
+            self._on_set_parameters)
+
         cmd_topic = str(self.get_parameter("cmd_vel_topic").value)
         scan_topic = str(self.get_parameter("scan_topic").value)
         master_topic = str(self.get_parameter("master_topic").value)
@@ -156,7 +161,22 @@ class FollowControllerNode(Node):
     # ------------------------------------------------------------
     # Callbacks
     # ------------------------------------------------------------
+    def _on_set_parameters(self, parameters: list) -> SetParametersResult:
+        """Special function: Validate and apply dynamically updated follow-controller parameters."""
+        for parameter in parameters:
+            # Section: The GPSR PersonFollow adapter changes only the target follow distance.
+            if parameter.name == "d_target":
+                value = float(parameter.value)
+                if value <= 0.0:
+                    return SetParametersResult(
+                        successful=False,
+                        reason="d_target must be greater than zero",
+                    )
+                self.d_target = value
+        return SetParametersResult(successful=True)
+
     def _now_sec(self) -> float:
+        """Special function: Return current ROS time in fractional seconds."""
         return self.get_clock().now().nanoseconds * 1e-9
 
     def _on_master(self, msg: MasterTarget) -> None:

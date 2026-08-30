@@ -9,7 +9,7 @@ from launch_ros.parameter_descriptions import ParameterValue
 
 
 def generate_launch_description():
-    # Section: launch arguments passed into both the lifecycle and child SMACC2 node.
+    # Section: launch arguments passed into both the lifecycle and child YASMIN node.
     personal_test_mode = LaunchConfiguration('personal_test_mode')
     camera_index = LaunchConfiguration('camera_index')
     camera_backend = LaunchConfiguration('camera_backend')
@@ -43,7 +43,7 @@ def generate_launch_description():
         ],
     )
 
-    # Section: lifecycle wrapper that supervises the detached SMACC2 child process.
+    # Section: lifecycle wrapper that supervises the detached YASMIN child process.
     lifecycle_node = LifecycleNode(
         package='insightface_feature_summary_smacc2',
         executable='feature_summary_lifecycle_node',

@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import copy
 import json
+import math
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -10,6 +13,7 @@ from typing import Any
 
 import rclpy
 from ament_index_python.packages import get_package_share_directory
+from geometry_msgs.msg import PoseWithCovarianceStamped
 from rclpy.action import ActionClient, ActionServer, CancelResponse, GoalResponse
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
@@ -19,6 +23,7 @@ from std_srvs.srv import Trigger
 
 from gpsr_task_scheduler.config import SchedulerConfig, load_config
 from gpsr_task_scheduler.cycle import GpsrCycleController, SchedulerState
+from gpsr_task_scheduler.models import ReturnTarget
 from gpsr_task_scheduler.planner import plan_to_dict, step_to_action_step_dict
 from gpsr_task_scheduler.scheduler import schedule_command
 from gpsr_task_scheduler.scheduler_viewer_sm import SchedulerViewerSM
@@ -57,13 +62,19 @@ class GpsrTaskSchedulerNode(Node):
         self.declare_parameter("enable_manipulation", True)
         self.declare_parameter("enable_tts", True)
         self.declare_parameter("max_commands", 3)
-        self.declare_parameter("navigate_to_instruction_point_on_start", True)
+        self.declare_parameter("navigate_to_instruction_point_on_start", False)
+        self.declare_parameter("return_target_mode", "command_start_amcl")
+        self.declare_parameter("amcl_pose_topic", "/amcl_pose")
+        self.declare_parameter("amcl_pose_max_age_sec", 1.0)
+        self.declare_parameter("amcl_pose_capture_timeout_sec", 3.0)
+        self.declare_parameter("return_fallback_named_location", "instruction_point")
         self.declare_parameter("enable_error_recovery", True)
         self.declare_parameter("error_recovery_max_attempts", 3)
         self.declare_parameter("error_recovery_retry_delay_sec", 5.0)
         self.declare_parameter("state_topic", "/gpsr/state")
         self.declare_parameter("command_result_topic", "/gpsr/command_result")
         self.declare_parameter("enable_scheduler_viewer", True)
+        self.declare_parameter("require_executor_ready", True)
 
         # Section: Load deterministic vocabulary and mission policy.
         self.config = self.load_runtime_config()
@@ -74,6 +85,13 @@ class GpsrTaskSchedulerNode(Node):
         self.error_recovery_attempts = 0
         self.error_recovery_next_attempt_time = 0.0
         self.error_recovery_exhaustion_logged = False
+        # Section: Synchronize live localization callbacks with bounded command-start capture.
+        self.amcl_pose_condition = threading.Condition()
+        self.latest_amcl_pose: PoseWithCovarianceStamped | None = None
+        self.latest_amcl_pose_receipt_time = 0.0
+        # Section: Freeze return and deferred-report context independently for every admitted command.
+        self.command_return_targets: dict[str, ReturnTarget] = {}
+        self.pending_post_return: dict[str, dict[str, Any]] = {}
 
         # Section: Publish the complete scheduler lifecycle, including ERROR, to YASMIN Viewer.
         self.scheduler_viewer = (
@@ -93,9 +111,15 @@ class GpsrTaskSchedulerNode(Node):
             10,
         )
 
-        # Section: Subscribe to plain text commands when topic input mode is selected.
-        if str(self.get_parameter("command_input_mode").value) == "topic":
-            self.create_subscription(String, str(self.get_parameter("command_topic").value), self.command_callback, 10)
+        # Section: A reentrant localization callback remains runnable while command capture waits.
+        self.pose_callback_group = ReentrantCallbackGroup()
+        self.amcl_pose_sub = self.create_subscription(
+            PoseWithCovarianceStamped,
+            str(self.get_parameter("amcl_pose_topic").value),
+            self.amcl_pose_callback,
+            10,
+            callback_group=self.pose_callback_group,
+        )
 
         # Section: Keep action responses runnable while scheduler callbacks await their futures.
         self.executor_callback_group = ReentrantCallbackGroup()
@@ -105,6 +129,8 @@ class GpsrTaskSchedulerNode(Node):
             str(self.get_parameter("execute_action_queue_action").value),
             callback_group=self.executor_callback_group,
         )
+        # Section: Command-topic intake is created only after runtime dependencies are ready.
+        self.command_subscription = None
 
         # Section: Expose service input for command schedulers that cannot use ROS actions directly.
         self.schedule_service = self.create_service(
@@ -136,9 +162,9 @@ class GpsrTaskSchedulerNode(Node):
         self.state_timer = self.create_timer(1.0, self.publish_cycle_state)
         self.publish_cycle_state()
 
-        # Section: Log startup without claiming hardware integration.
+        # Section: Log initialization without claiming that command intake is available yet.
         self.get_logger().info(
-            "GPSR task scheduler ready: "
+            "GPSR task scheduler initializing: "
             f"dry_run={self.get_parameter('dry_run').value}, "
             f"command_topic={self.get_parameter('command_topic').value}, "
             f"schedule_service={self.get_parameter('schedule_command_service').value}, "
@@ -171,6 +197,134 @@ class GpsrTaskSchedulerNode(Node):
             self.get_parameter("allow_simulated_primitives").value
         )
         return config
+
+    def amcl_pose_callback(self, msg: PoseWithCovarianceStamped) -> None:
+        """Special function: Cache the newest AMCL observation for command-start capture."""
+        # Section: Deep-copy middleware-owned data before releasing the callback.
+        with self.amcl_pose_condition:
+            self.latest_amcl_pose = copy.deepcopy(msg)
+            self.latest_amcl_pose_receipt_time = time.monotonic()
+            self.amcl_pose_condition.notify_all()
+
+    def capture_return_target(self, command_id: str, dry_run: bool) -> ReturnTarget:
+        """Special function: Freeze a raw AMCL pose or deterministic named fallback."""
+        mode = str(self.get_parameter("return_target_mode").value).strip().lower()
+        fallback = self.named_fallback_target()
+        if dry_run:
+            # Section: Dry-run exposes policy without waiting for localization or claiming capture.
+            return ReturnTarget(
+                source=f"dry_run_{mode}",
+                target_location=fallback.target_location if mode == "named_location" else "",
+            )
+        if mode == "named_location":
+            return ReturnTarget(
+                source="named_location",
+                target_location=fallback.target_location,
+            )
+        if mode != "command_start_amcl":
+            self.get_logger().warn(
+                f"Unknown return_target_mode '{mode}'; using named fallback."
+            )
+            return fallback
+
+        timeout_sec = max(
+            0.0,
+            float(self.get_parameter("amcl_pose_capture_timeout_sec").value),
+        )
+        deadline = time.monotonic() + timeout_sec
+        while True:
+            with self.amcl_pose_condition:
+                pose = copy.deepcopy(self.latest_amcl_pose)
+                receipt_time = float(self.latest_amcl_pose_receipt_time)
+                target_pose = self.validated_amcl_target_pose(pose, receipt_time)
+                if target_pose is not None:
+                    target = ReturnTarget(
+                        source="command_start_amcl",
+                        target_pose=target_pose,
+                    )
+                    self.get_logger().info(
+                        f"Captured frozen AMCL return pose for {command_id}."
+                    )
+                    return target
+                remaining = deadline - time.monotonic()
+                if remaining <= 0.0:
+                    break
+                self.amcl_pose_condition.wait(timeout=min(0.1, remaining))
+
+        self.get_logger().warn(
+            f"No fresh valid AMCL pose captured for {command_id}; "
+            f"using named fallback '{fallback.target_location}'."
+        )
+        return fallback
+
+    def named_fallback_target(self) -> ReturnTarget:
+        """Special function: Resolve the configured named return fallback."""
+        location = str(
+            self.get_parameter("return_fallback_named_location").value
+            or self.config.instruction_point
+        ).strip()
+        return ReturnTarget(
+            source="instruction_point_fallback",
+            target_location=location or self.config.instruction_point,
+        )
+
+    def validated_amcl_target_pose(
+        self,
+        msg: PoseWithCovarianceStamped | None,
+        receipt_time: float,
+    ) -> dict[str, Any] | None:
+        """Special function: Validate and normalize one fresh map-frame AMCL pose."""
+        if msg is None:
+            return None
+        max_age = max(0.0, float(self.get_parameter("amcl_pose_max_age_sec").value))
+        if receipt_time <= 0.0 or time.monotonic() - receipt_time > max_age:
+            return None
+        frame_id = str(msg.header.frame_id).strip().lstrip("/")
+        if frame_id != "map":
+            return None
+        pose = msg.pose.pose
+        values = [
+            pose.position.x,
+            pose.position.y,
+            pose.position.z,
+            pose.orientation.x,
+            pose.orientation.y,
+            pose.orientation.z,
+            pose.orientation.w,
+        ]
+        if not all(math.isfinite(float(value)) for value in values):
+            return None
+        quaternion_norm = math.sqrt(
+            float(pose.orientation.x) ** 2
+            + float(pose.orientation.y) ** 2
+            + float(pose.orientation.z) ** 2
+            + float(pose.orientation.w) ** 2
+        )
+        if quaternion_norm <= 1e-9:
+            return None
+        return {
+            "frame_id": "map",
+            "position": {
+                "x": float(pose.position.x),
+                "y": float(pose.position.y),
+                "z": float(pose.position.z),
+            },
+            "orientation": {
+                "x": float(pose.orientation.x) / quaternion_norm,
+                "y": float(pose.orientation.y) / quaternion_norm,
+                "z": float(pose.orientation.z) / quaternion_norm,
+                "w": float(pose.orientation.w) / quaternion_norm,
+            },
+        }
+
+    @staticmethod
+    def return_target_to_dict(target: ReturnTarget) -> dict[str, Any]:
+        """Special function: Serialize frozen return policy for plans and diagnostics."""
+        return {
+            "source": target.source,
+            "target_location": target.target_location,
+            "target_pose": copy.deepcopy(target.target_pose),
+        }
 
     def command_callback(self, msg: String) -> None:
         """Special function: Admit and execute one topic command through the guarded cycle."""
@@ -229,6 +383,9 @@ class GpsrTaskSchedulerNode(Node):
         self.error_recovery_attempts = 0
         self.error_recovery_next_attempt_time = 0.0
         self.error_recovery_exhaustion_logged = False
+        # Section: Abandon frozen motion/report context together with stale command ownership.
+        self.command_return_targets.clear()
+        self.pending_post_return.clear()
         response.success = bool(self.cycle.reset_error())
         response.message = "GPSR ERROR reset; scheduler is WAITING_FOR_COMMAND."
         self.get_logger().warn(response.message)
@@ -280,37 +437,70 @@ class GpsrTaskSchedulerNode(Node):
         return result
 
     def initialize_competition_cycle(self) -> None:
-        """Special function: Navigate once to the Instruction Point before accepting commands."""
+        """Special function: Wait for internal runtime before opening command intake."""
         if self.initialization_started:
+            return
+        # Section: The executor action appears only after its lifecycle clients are ready.
+        require_executor = bool(self.get_parameter("require_executor_ready").value)
+        if require_executor and not self.executor_client.server_is_ready():
+            self.get_logger().info(
+                "GPSR scheduler waiting for the ActionQueue executor and lifecycle manager.",
+                throttle_duration_sec=10.0,
+            )
             return
         self.initialization_started = True
         self.initialization_timer.cancel()
-        self.cycle.start_initial_return()
-        self.publish_cycle_state()
-        # Section: Dry-run mode must never issue the otherwise-enabled physical return goal.
+        # Section: Default AMCL-return mode must not move before the first command begins.
         dry_run = bool(self.get_parameter("dry_run").value)
         navigate_on_start = (
             bool(self.get_parameter("navigate_to_instruction_point_on_start").value)
             and not dry_run
         )
-        return_result = (
-            self.submit_return_to_instruction_point("gpsr_initialization")
-            if navigate_on_start
-            else {
-                "success": True,
-                "message": (
-                    "Initial return skipped in dry-run mode."
-                    if dry_run
-                    else "Initial return disabled."
-                ),
-            }
-        )
-        self.cycle.finish_initial_return(bool(return_result["success"]))
+        if not navigate_on_start:
+            self.cycle.finish_initialization_without_navigation()
+            self.enable_command_topic_intake()
+            self.publish_cycle_state()
+            self.log_command_ready()
+            return
+
+        # Section: Backward-compatible named startup navigation remains explicit opt-in behavior.
+        self.cycle.start_initial_return()
         self.publish_cycle_state()
+        return_result = self.submit_return_to_instruction_point("gpsr_initialization")
+        self.cycle.finish_initial_return(bool(return_result["success"]))
+        if bool(return_result["success"]):
+            self.enable_command_topic_intake()
+        self.publish_cycle_state()
+        if bool(return_result["success"]):
+            self.log_command_ready()
+
+    def enable_command_topic_intake(self) -> None:
+        """Special function: Subscribe only after the scheduler reaches its readiness barrier."""
+        # Section: Action/service input remains state-gated; topic input must not lose early commands.
+        if self.command_subscription is not None:
+            return
+        if str(self.get_parameter("command_input_mode").value) != "topic":
+            return
+        self.command_subscription = self.create_subscription(
+            String,
+            str(self.get_parameter("command_topic").value),
+            self.command_callback,
+            10,
+        )
+
+    def log_command_ready(self) -> None:
+        """Special function: Announce readiness only after every internal startup barrier passes."""
+        self.get_logger().info(
+            "GPSR task scheduler ready to receive commands: "
+            f"topic={self.get_parameter('command_topic').value}, "
+            f"service={self.get_parameter('schedule_command_service').value}, "
+            f"executor={self.get_parameter('execute_action_queue_action').value}"
+        )
 
     def recover_from_error(self) -> None:
-        """Special function: Retry a guarded return and reopen intake only after success."""
-        if self.cycle.snapshot().state != SchedulerState.ERROR:
+        """Special function: Retry the frozen return target and resume pending reporting."""
+        snapshot = self.cycle.snapshot()
+        if snapshot.state != SchedulerState.ERROR:
             return
         if not bool(self.get_parameter("enable_error_recovery").value):
             return
@@ -337,17 +527,43 @@ class GpsrTaskSchedulerNode(Node):
         attempt = self.error_recovery_attempts
         self.publish_cycle_state()
         self.get_logger().warn(
-            f"GPSR recovery attempt {attempt}: returning to Instruction Point."
+            f"GPSR recovery attempt {attempt}: returning to the frozen command start."
         )
-        return_result = self.submit_return_to_instruction_point(
-            f"gpsr_error_recovery_{attempt}"
+        command_id = str(snapshot.active_command_id)
+        return_result = (
+            self.submit_return_to_command_start(
+                command_id,
+                queue_id=f"{command_id}_recovery_{attempt}",
+            )
+            if command_id
+            else self.submit_return_to_instruction_point(
+                f"gpsr_error_recovery_{attempt}"
+            )
         )
         success = bool(return_result.get("success", False))
-        self.cycle.finish_error_recovery(success)
+        pending = self.pending_post_return.get(command_id)
+        # Section: Any stored report context includes explicit speech or a mandatory miss report.
+        report_pending = pending is not None
+        self.cycle.finish_error_recovery(success, report_pending=report_pending)
         if success:
-            self.get_logger().info(
-                "GPSR recovery succeeded; command intake is available again."
-            )
+            # Section: A delayed report remains gated on confirmed recovery arrival.
+            if report_pending and pending is not None:
+                report_result = self.execute_post_return_report(
+                    command_id,
+                    pending["planned"],
+                    pending["task_result"],
+                    float(pending["timeout_sec"]),
+                )
+                self.cycle.finish_reporting(command_id)
+                self.get_logger().info(
+                    "GPSR recovery reached the saved pose; pending report finished "
+                    f"with {report_result.get('outcome', 'unknown')}."
+                )
+            else:
+                self.get_logger().info(
+                    "GPSR recovery succeeded; command intake is available again."
+                )
+            self.clear_command_context(command_id)
             self.error_recovery_attempts = 0
             self.error_recovery_next_attempt_time = 0.0
             self.error_recovery_exhaustion_logged = False
@@ -383,10 +599,17 @@ class GpsrTaskSchedulerNode(Node):
             }
         self.publish_cycle_state()
 
+        # Section: Freeze exactly one return destination before planning or robot execution.
+        return_target = self.capture_return_target(command_id, dry_run)
+        self.command_return_targets[command_id] = return_target
+        self.cycle.finish_return_pose_capture(command_id)
+        self.publish_cycle_state()
+
         # Section: Generate exactly one task plan from the admitted command.
         planned = self.schedule(command_id, instruction, dry_run)
         if not planned.get("valid"):
             self.cycle.finish_planning(command_id, False)
+            self.clear_command_context(command_id)
             self.publish_cycle_state()
             return {
                 "accepted": False,
@@ -398,6 +621,7 @@ class GpsrTaskSchedulerNode(Node):
             }
         if dry_run:
             self.cycle.finish_planning(command_id, False)
+            self.clear_command_context(command_id)
             self.publish_cycle_state()
             return {
                 "accepted": True,
@@ -416,33 +640,76 @@ class GpsrTaskSchedulerNode(Node):
         self.cycle.finish_execution(command_id)
         self.publish_cycle_state()
 
-        # Section: Return after either success or terminal task failure, then release admission.
-        return_result = self.submit_return_to_instruction_point(command_id)
-        self.cycle.finish_return(command_id, bool(return_result["success"]))
+        # Section: Preserve requested reports and always announce an exhaustive FIND_OBJECT miss.
+        report_pending = bool(planned.get("post_return_steps")) or GpsrTaskSchedulerNode.requires_not_found_report(
+            planned,
+            queue_result,
+        )
+        if report_pending:
+            self.pending_post_return[command_id] = {
+                "planned": copy.deepcopy(planned),
+                "task_result": copy.deepcopy(queue_result),
+                "timeout_sec": float(timeout_sec),
+            }
+        return_result = self.submit_return_to_command_start(command_id)
+        return_success = bool(return_result.get("success", False))
+        self.cycle.finish_return(
+            command_id,
+            return_success,
+            report_pending=report_pending,
+        )
         self.publish_cycle_state()
-        success = bool(queue_result["success"] and return_result["success"])
-        message = (
-            "Execution succeeded and robot returned to Instruction Point."
-            if success
-            else f"task={queue_result['message']}; return={return_result['message']}"
+
+        # Section: Submit speech only after confirmed return; return failure leaves it pending.
+        report_result: dict[str, Any] | None = None
+        if return_success and report_pending:
+            report_result = self.execute_post_return_report(
+                command_id,
+                planned,
+                queue_result,
+                timeout_sec,
+            )
+            self.cycle.finish_reporting(command_id)
+            self.publish_cycle_state()
+
+        task_success = bool(queue_result.get("success", False))
+        report_success = bool(report_result is None or report_result.get("success", False))
+        success = bool(task_success and return_success and report_success)
+        message = self.command_completion_message(
+            task_result=queue_result,
+            return_result=return_result,
+            report_result=report_result,
         )
         processed = {
             "accepted": True,
             "success": success,
             "command_id": command_id,
             "message": message,
-            "completed_steps": int(queue_result.get("completed_steps", 0)),
+            "completed_steps": (
+                int(queue_result.get("completed_steps", 0))
+                + int(return_result.get("completed_steps", 0))
+                + int((report_result or {}).get("completed_steps", 0))
+            ),
             "failed_step": "" if success else (
-                "execute_action_queue" if not queue_result["success"] else "return_instruction_point"
+                "execute_action_queue"
+                if not task_success
+                else (
+                    "return_to_command_start"
+                    if not return_success
+                    else "post_return_report"
+                )
             ),
             "plan": planned,
             "execution": queue_result,
             "return": return_result,
+            "post_return_report": report_result,
             "state": self.cycle.snapshot().state.value,
         }
         result_msg = String()
         result_msg.data = json.dumps(processed, sort_keys=True)
         self.command_result_pub.publish(result_msg)
+        if return_success:
+            self.clear_command_context(command_id)
         return processed
 
     def without_embedded_return(self, planned: dict[str, Any]) -> dict[str, Any]:
@@ -457,22 +724,179 @@ class GpsrTaskSchedulerNode(Node):
 
     def submit_return_to_instruction_point(self, command_id: str) -> dict[str, Any]:
         """Special function: Request return navigation through the existing queue executor."""
-        return_plan = {
+        target = ReturnTarget(
+            source="startup_instruction_point",
+            target_location=self.config.instruction_point,
+        )
+        return_plan = self.build_return_plan(target)
+        return self.submit_action_queue(
+            f"{command_id}_return",
+            return_plan,
+            max(1.0, float(self.config.timeout_for("NAVIGATE"))),
+        )
+
+    def submit_return_to_command_start(
+        self,
+        command_id: str,
+        queue_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Special function: Navigate to the immutable return target captured for one command."""
+        target = self.command_return_targets.get(command_id, self.named_fallback_target())
+        return_plan = self.build_return_plan(target)
+        return self.submit_action_queue(
+            queue_id or f"{command_id}_return",
+            return_plan,
+            max(1.0, float(self.config.timeout_for("NAVIGATE"))),
+        )
+
+    def build_return_plan(self, target: ReturnTarget) -> dict[str, Any]:
+        """Special function: Build one raw-pose or named NAVIGATE return queue."""
+        arguments: dict[str, Any] = {"target_source": target.source}
+        if target.target_pose is not None:
+            arguments["target_pose"] = copy.deepcopy(target.target_pose)
+        else:
+            arguments["target_location"] = target.target_location
+        return {
             "steps": [{
-                "step_id": "return_to_instruction_point",
+                "step_id": "return_to_command_start",
                 "skill_name": "NAVIGATE",
-                "arguments": {"target_location": self.config.instruction_point},
+                "arguments": arguments,
                 "dependencies": [],
                 "timeout": float(self.config.timeout_for("NAVIGATE")),
                 "retry_count": int(self.config.retries_for("NAVIGATE")),
                 "result_variable": None,
             }]
         }
+
+    def execute_post_return_report(
+        self,
+        command_id: str,
+        planned: dict[str, Any],
+        task_result: dict[str, Any],
+        timeout_sec: float,
+    ) -> dict[str, Any]:
+        """Special function: Submit deferred speech after confirmed return arrival."""
+        report_plan = self.build_post_return_plan(planned, task_result)
+        if not report_plan["steps"]:
+            return {
+                "success": True,
+                "completed_steps": 0,
+                "message": "No post-return report requested.",
+                "outcome": "success",
+                "results": [],
+            }
         return self.submit_action_queue(
-            f"{command_id}_return",
-            return_plan,
-            max(1.0, float(self.config.timeout_for("NAVIGATE"))),
+            f"{command_id}_report",
+            report_plan,
+            max(1.0, float(timeout_sec)),
         )
+
+    def build_post_return_plan(
+        self,
+        planned: dict[str, Any],
+        task_result: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Special function: Rebase report dependencies and inject cross-queue result data."""
+        steps = copy.deepcopy(list(planned.get("post_return_steps", [])))
+        # Section: Synthesize mandatory target-specific speech when FIND_OBJECT exhausts its scope.
+        if not steps and GpsrTaskSchedulerNode.requires_not_found_report(planned, task_result):
+            steps = [{
+                "step_id": "report_find_object_not_found",
+                "skill_name": "SAY",
+                "arguments": {"text": GpsrTaskSchedulerNode.failure_report_text(planned, task_result)},
+                "dependencies": [],
+                "timeout": float(self.config.timeout_for("SAY")),
+                "retry_count": int(self.config.retries_for("SAY")),
+                "result_variable": None,
+            }]
+        task_success = bool(task_result.get("success", False))
+        result_variables = GpsrTaskSchedulerNode.extract_result_variables(planned, task_result)
+        for step in steps:
+            # Section: Scheduler success/failure gates replace dependencies from the prior queue.
+            step["dependencies"] = []
+            arguments = dict(step.get("arguments", {}))
+            substitution = str(arguments.get("substitution", "")).strip()
+            if task_success:
+                if substitution and substitution in result_variables:
+                    arguments["substitution_data"] = result_variables[substitution]
+            else:
+                arguments["text"] = GpsrTaskSchedulerNode.failure_report_text(planned, task_result)
+                arguments.pop("substitution", None)
+                arguments.pop("substitution_data", None)
+            step["arguments"] = arguments
+        return {"steps": steps}
+
+    @staticmethod
+    def requires_not_found_report(
+        planned: dict[str, Any],
+        task_result: dict[str, Any],
+    ) -> bool:
+        """Special function: Require speech for an exhaustive FIND_OBJECT miss."""
+        request = dict(planned.get("task_request") or {})
+        outcomes = {
+            str(item.get("outcome", "")).strip().lower()
+            for item in task_result.get("results", [])
+        }
+        return request.get("task_type") == "find_object" and "not_found" in outcomes
+
+    @staticmethod
+    def extract_result_variables(
+        planned: dict[str, Any],
+        task_result: dict[str, Any],
+    ) -> dict[str, dict[str, Any]]:
+        """Special function: Match successful executor results to declared result variables."""
+        available = list(task_result.get("results", []))
+        variables: dict[str, dict[str, Any]] = {}
+        cursor = 0
+        for step in planned.get("steps", []):
+            variable = str(step.get("result_variable") or "").strip()
+            if not variable:
+                continue
+            action_type = str(step.get("skill_name", ""))
+            for index in range(cursor, len(available)):
+                candidate = dict(available[index])
+                if (
+                    str(candidate.get("action_type", "")) == action_type
+                    and str(candidate.get("outcome", "")) == "success"
+                ):
+                    variables[variable] = dict(candidate.get("result", {}))
+                    cursor = index + 1
+                    break
+        return variables
+
+    @staticmethod
+    def failure_report_text(
+        planned: dict[str, Any],
+        task_result: dict[str, Any],
+    ) -> str:
+        """Special function: Produce deterministic post-return failure speech."""
+        request = dict(planned.get("task_request") or {})
+        target = dict(request.get("target") or {})
+        outcomes = {str(item.get("outcome", "")) for item in task_result.get("results", [])}
+        if request.get("task_type") == "find_object" and "not_found" in outcomes:
+            object_name = str(
+                target.get("object_name") or target.get("category") or "object"
+            ).strip() or "object"
+            return f"I could not find the {object_name}."
+        return "I could not complete the requested task."
+
+    @staticmethod
+    def command_completion_message(
+        task_result: dict[str, Any],
+        return_result: dict[str, Any],
+        report_result: dict[str, Any] | None,
+    ) -> str:
+        """Special function: Summarize task, return, and deferred-report outcomes."""
+        return (
+            f"task={task_result.get('message', 'unknown')}; "
+            f"return={return_result.get('message', 'unknown')}; "
+            f"report={(report_result or {}).get('message', 'not_requested_or_pending')}"
+        )
+
+    def clear_command_context(self, command_id: str) -> None:
+        """Special function: Release frozen pose and deferred report after terminal handling."""
+        self.command_return_targets.pop(str(command_id), None)
+        self.pending_post_return.pop(str(command_id), None)
 
     def publish_cycle_state(self) -> None:
         """Special function: Publish current readiness, identity, and competition count."""
@@ -507,6 +931,13 @@ class GpsrTaskSchedulerNode(Node):
         result = schedule_command(command_id, instruction, self.config)
         payload = plan_to_dict(result)
         payload["dry_run"] = bool(dry_run)
+        # Section: Expose the frozen target or dry-run policy beside the generated task plan.
+        target = self.command_return_targets.get(command_id)
+        payload["return_policy"] = (
+            self.return_target_to_dict(target)
+            if target is not None
+            else {"source": "not_captured", "target_location": "", "target_pose": None}
+        )
         msg = String()
         msg.data = json.dumps(payload, sort_keys=True)
         self.plan_pub.publish(msg)
@@ -573,11 +1004,30 @@ class GpsrTaskSchedulerNode(Node):
         queue_result = wrapped.result
         outcome = str(queue_result.outcome)
         success = bool(queue_result.success)
+        # Section: Preserve structured skill payloads for post-return result reporting.
+        results = [self.skill_result_to_dict(item) for item in list(queue_result.results)]
         return {
             "success": success,
-            "completed_steps": len(list(queue_result.results)),
+            "completed_steps": len(results),
             "message": "Execution succeeded." if success else outcome,
             "outcome": outcome,
+            "results": results,
+        }
+
+    @staticmethod
+    def skill_result_to_dict(result: Any) -> dict[str, Any]:
+        """Special function: Convert one executor SkillResult into JSON-safe diagnostics."""
+        try:
+            payload = json.loads(str(getattr(result, "result_json", "") or "{}"))
+        except json.JSONDecodeError:
+            payload = {"raw": str(getattr(result, "result_json", ""))}
+        return {
+            "action_type": str(getattr(result, "action_type", "")),
+            "outcome": str(getattr(result, "outcome", "")),
+            "message": str(getattr(result, "message", "")),
+            "result": payload if isinstance(payload, dict) else {"value": payload},
+            "recoverable": bool(getattr(result, "recoverable", False)),
+            "fatal": bool(getattr(result, "fatal", False)),
         }
 
     def build_action_queue(self, command_id: str, planned: dict[str, Any]) -> ActionQueue:
@@ -642,7 +1092,9 @@ def main(args: list[str] | None = None) -> None:
     finally:
         executor.remove_node(node)
         node.destroy_node()
-        rclpy.shutdown()
+        # Section: SIGINT may already have shut down the default ROS context.
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == "__main__":

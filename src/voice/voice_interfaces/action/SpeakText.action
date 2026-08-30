@@ -1,0 +1,12 @@
+# Goal section: text that Piper must synthesize and play.
+string text
+---
+# Result section: true only when synthesis and playback complete successfully.
+bool success
+# Result section: operator-facing completion or failure description.
+string message
+---
+# Feedback section: current synthesis or playback stage.
+string stage
+# Feedback section: human-readable progress information.
+string message

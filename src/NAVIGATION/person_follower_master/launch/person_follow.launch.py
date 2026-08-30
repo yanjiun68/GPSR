@@ -40,6 +40,8 @@ def generate_launch_description() -> LaunchDescription:
     yolo_device = LaunchConfiguration("yolo_device", default="cuda")
     yolo_stride = LaunchConfiguration("yolo_stride", default="1")
     use_external_drivers = LaunchConfiguration("use_external_drivers", default="false")
+    auto_enroll = LaunchConfiguration("auto_enroll", default="true")
+    cmd_vel_topic = LaunchConfiguration("cmd_vel_topic", default="/cmd_vel")
 
 
     # --- Drivers (lidar + base + odom + TF) ---
@@ -118,14 +120,14 @@ def generate_launch_description() -> LaunchDescription:
         executable="master_tracker_node.py",
         name="master_tracker_node",
         output="screen",
-        parameters=[follow_params],
+        parameters=[follow_params, {"auto_enroll_enabled": auto_enroll}],
     )
     follow_controller = Node(
         package="person_follower_master",
         executable="follow_controller_node.py",
         name="follow_controller_node",
         output="screen",
-        parameters=[follow_params],
+        parameters=[follow_params, {"cmd_vel_topic": cmd_vel_topic}],
     )
 
     rviz_node = Node(
@@ -144,6 +146,17 @@ def generate_launch_description() -> LaunchDescription:
         DeclareLaunchArgument("camera", default_value="true"),
         DeclareLaunchArgument("yolo_device", default_value="cuda"),
         DeclareLaunchArgument("yolo_stride", default_value="1"),
+        DeclareLaunchArgument("use_external_drivers", default_value="false"),
+        DeclareLaunchArgument(
+            "auto_enroll",
+            default_value="true",
+            description="Allow tracker enrollment without an explicit /enroll_master request.",
+        ),
+        DeclareLaunchArgument(
+            "cmd_vel_topic",
+            default_value="/cmd_vel",
+            description="Velocity output used by the direct follow controller.",
+        ),
 
         drivers,
         realsense,

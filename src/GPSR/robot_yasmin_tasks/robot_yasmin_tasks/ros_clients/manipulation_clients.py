@@ -1,5 +1,7 @@
 """Section: Manipulation and human-motion client wrappers."""
 
+# Section: ROS client adapters, transport boundaries, and result translation.
+
 from typing import Any
 
 from robot_yasmin_tasks.gpsr import blackboard_keys as bb

@@ -1,0 +1,21 @@
+# Goal section: bounded command strengths and operation timeout.
+float64 close_pwm
+float64 hold_pwm
+float64 timeout_sec
+---
+# Result section: stable outcome and final measured gripper state.
+bool success
+bool contact_detected
+string reason
+float64 final_motor_position
+float64 final_finger_aperture
+float64 final_velocity
+float64 final_load
+---
+# Feedback section: visible guarded-close phase and live contact evidence.
+string phase
+float64 motor_position
+float64 finger_aperture
+float64 velocity
+float64 load
+uint32 stable_samples

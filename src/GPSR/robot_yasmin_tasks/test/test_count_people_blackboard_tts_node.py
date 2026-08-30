@@ -1,5 +1,7 @@
 """Section: Count people blackboard TTS node tests."""
 
+# Section: Test fixtures, deterministic fakes, and regression scenarios.
+
 from __future__ import annotations
 
 import importlib

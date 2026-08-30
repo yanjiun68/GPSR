@@ -1,5 +1,7 @@
 """Section: Dispatcher mapping tests."""
 
+# Section: Test fixtures, deterministic fakes, and regression scenarios.
+
 from yasmin import Blackboard
 
 from robot_yasmin_tasks.gpsr import blackboard_keys as bb

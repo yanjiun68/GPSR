@@ -43,6 +43,14 @@ def test_error_state_is_visible_and_can_reset_to_waiting() -> None:
         # Section: Verify ERROR exists as a native child state with a waiting transition.
         states = viewer.state_machine.get_states()
         assert SchedulerState.ERROR.value in states
+        # Section: Expose every command-start return and deferred-report transition.
+        for state in (
+            SchedulerState.CAPTURING_RETURN_POSE,
+            SchedulerState.RETURNING_TO_COMMAND_START,
+            SchedulerState.RECOVERING_TO_COMMAND_START,
+            SchedulerState.REPORTING_RESULT,
+        ):
+            assert state.value in states
         error_transitions = states[SchedulerState.ERROR.value]["transitions"]
         assert (
             error_transitions[SchedulerState.WAITING_FOR_COMMAND.value]
