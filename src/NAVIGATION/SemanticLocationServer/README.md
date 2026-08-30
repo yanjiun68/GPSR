@@ -118,7 +118,7 @@ Start the existing localization stack first. Then launch this package separately
 
 ```bash
 source /opt/ros/humble/setup.bash
-source /home/yanjiun68/workspace/WS1/PutrabotUPM-project/install/setup.bash
+source "$PUTRABOT_WORKSPACE_ROOT/install/setup.bash"
 ros2 launch semantic_location_server semantic_location_server.launch.py \
   semantic_map_file:=/absolute/path/to/verified_semantic_locations.yaml \
   pose_source:=tf \

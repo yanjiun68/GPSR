@@ -1,6 +1,6 @@
 # Pre-Competition Arena Setup Guide
 
-This is the operator procedure for preparing a new RoboCup arena for the workspace at `/home/yanjiun68/workspace/WS1/PutrabotUPM-project`. Complete it before running GPSR tasks in a new arena.
+This is the operator procedure for preparing a new RoboCup arena in the workspace selected by `PUTRABOT_WORKSPACE_ROOT`. Complete it before running GPSR tasks in a new arena.
 
 The required preparation flow is:
 
@@ -21,7 +21,7 @@ Required components:
 - The existing `my_robot_nav` Nav2, SLAM, and AMCL stack.
 - A completed occupancy map for the current arena.
 - RViz2.
-- The existing `my_robot_nav/config/gpsr_waypoint.yaml` waypoint workflow.
+- The existing `waypoints/gpsr_waypoint.yaml` waypoint workflow.
 - A built `semantic_location_server` package.
 
 The semantic server does **not** create the SLAM map, replace AMCL, replace Nav2, drive the robot, or execute room searches. It consumes the localization already produced by the navigation stack.
@@ -29,7 +29,7 @@ The semantic server does **not** create the SLAM map, replace AMCL, replace Nav2
 Build the relevant packages before setup:
 
 ```bash
-cd /home/yanjiun68/workspace/WS1/PutrabotUPM-project
+cd "$PUTRABOT_WORKSPACE_ROOT"
 source /opt/ros/humble/setup.bash
 colcon build --packages-select my_robot_nav semantic_location_server --symlink-install
 source install/setup.bash
@@ -38,7 +38,7 @@ source install/setup.bash
 Use a separate terminal for each long-running launch. In every new terminal run:
 
 ```bash
-cd /home/yanjiun68/workspace/WS1/PutrabotUPM-project
+cd "$PUTRABOT_WORKSPACE_ROOT"
 source /opt/ros/humble/setup.bash
 source install/setup.bash
 ```
@@ -88,22 +88,22 @@ The workspace has the `nav2_map_server` `map_saver_cli` executable. While SLAM i
 
 ```bash
 ros2 run nav2_map_server map_saver_cli \
-  -f /home/yanjiun68/workspace/WS1/PutrabotUPM-project/src/NAVIGATION/my_robot_nav/maps/competition_arena
+  -f "$PUTRABOT_WORKSPACE_ROOT/maps/competition_arena"
 ```
 
 This should create:
 
 ```text
-src/NAVIGATION/my_robot_nav/maps/competition_arena.yaml
-src/NAVIGATION/my_robot_nav/maps/competition_arena.pgm
+maps/competition_arena.yaml
+maps/competition_arena.pgm
 ```
 
 Confirm both files before stopping mapping:
 
 ```bash
 ls -lh \
-  /home/yanjiun68/workspace/WS1/PutrabotUPM-project/src/NAVIGATION/my_robot_nav/maps/competition_arena.yaml \
-  /home/yanjiun68/workspace/WS1/PutrabotUPM-project/src/NAVIGATION/my_robot_nav/maps/competition_arena.pgm
+  "$PUTRABOT_WORKSPACE_ROOT/maps/competition_arena.yaml" \
+  "$PUTRABOT_WORKSPACE_ROOT/maps/competition_arena.pgm"
 ```
 
 Record `competition_arena.yaml` as the map used for all later steps. Stop the mapping launch only after the files are verified.
@@ -114,7 +114,7 @@ The repository's static-map localization entry point includes the robot, map ser
 
 ```bash
 ros2 launch my_robot_nav static_map_nav.launch.py \
-  map:=/home/yanjiun68/workspace/WS1/PutrabotUPM-project/src/NAVIGATION/my_robot_nav/maps/competition_arena.yaml \
+  map:="$PUTRABOT_WORKSPACE_ROOT/maps/competition_arena.yaml" \
   use_semantic_nav:=false \
   use_rviz:=true
 ```
@@ -194,7 +194,7 @@ kitchen:
 Edit the standalone package configuration:
 
 ```bash
-nano /home/yanjiun68/workspace/WS1/PutrabotUPM-project/src/NAVIGATION/SemanticLocationServer/config/semantic_locations.yaml
+nano "$PUTRABOT_WORKSPACE_ROOT/src/NAVIGATION/SemanticLocationServer/config/semantic_locations.yaml"
 ```
 
 Define rooms in this practical order:
@@ -240,7 +240,7 @@ A table or sofa is often better represented by an observation waypoint than by a
 The existing named-pose server reads this file once at startup:
 
 ```text
-/home/yanjiun68/workspace/WS1/PutrabotUPM-project/src/NAVIGATION/my_robot_nav/config/gpsr_waypoint.yaml
+$PUTRABOT_WORKSPACE_ROOT/waypoints/gpsr_waypoint.yaml
 ```
 
 There is no repository tool that safely appends the GPSR list format. Record poses with TF and edit the YAML explicitly.
@@ -361,7 +361,7 @@ search_locations:
 
 For every listed name:
 
-1. add the actual pose to `my_robot_nav/config/gpsr_waypoint.yaml`;
+1. add the actual pose to `waypoints/gpsr_waypoint.yaml`;
 2. navigate to it with `/nav/navigate_named_pose`;
 3. run the real object and person perception pipelines;
 4. verify the expected search surfaces or people area are visible;
@@ -434,7 +434,7 @@ Keep localization running. In another terminal launch the actual package using A
 
 ```bash
 ros2 launch semantic_location_server semantic_location_server.launch.py \
-  semantic_map_file:=/home/yanjiun68/workspace/WS1/PutrabotUPM-project/src/NAVIGATION/SemanticLocationServer/config/semantic_locations.yaml \
+  semantic_map_file:="$PUTRABOT_WORKSPACE_ROOT/src/NAVIGATION/SemanticLocationServer/config/semantic_locations.yaml" \
   pose_source:=amcl \
   amcl_topic:=/amcl_pose \
   map_frame:=map \
@@ -493,7 +493,7 @@ If the value is too low, the room may flicker at doorways. If it is too high, le
 
 ```bash
 ros2 launch semantic_location_server semantic_location_server.launch.py \
-  semantic_map_file:=/home/yanjiun68/workspace/WS1/PutrabotUPM-project/src/NAVIGATION/SemanticLocationServer/config/semantic_locations.yaml \
+  semantic_map_file:="$PUTRABOT_WORKSPACE_ROOT/src/NAVIGATION/SemanticLocationServer/config/semantic_locations.yaml" \
   pose_source:=amcl \
   stable_duration_sec:=1.5
 ```
@@ -554,11 +554,11 @@ Consumer integration is not yet automatic: `FIND_OBJECT`, `FIND_PERSON`, and `Se
 ### Terminal 1: robot, map, AMCL, Nav2, RViz, and named poses
 
 ```bash
-cd /home/yanjiun68/workspace/WS1/PutrabotUPM-project
+cd "$PUTRABOT_WORKSPACE_ROOT"
 source /opt/ros/humble/setup.bash
 source install/setup.bash
 ros2 launch my_robot_nav static_map_nav.launch.py \
-  map:=/home/yanjiun68/workspace/WS1/PutrabotUPM-project/src/NAVIGATION/my_robot_nav/maps/competition_arena.yaml \
+  map:="$PUTRABOT_WORKSPACE_ROOT/maps/competition_arena.yaml" \
   use_semantic_nav:=false \
   use_rviz:=true
 ```
@@ -573,11 +573,11 @@ ros2 run tf2_ros tf2_echo map base_footprint
 ### Terminal 2: polygon semantic server
 
 ```bash
-cd /home/yanjiun68/workspace/WS1/PutrabotUPM-project
+cd "$PUTRABOT_WORKSPACE_ROOT"
 source /opt/ros/humble/setup.bash
 source install/setup.bash
 ros2 launch semantic_location_server semantic_location_server.launch.py \
-  semantic_map_file:=/home/yanjiun68/workspace/WS1/PutrabotUPM-project/src/NAVIGATION/SemanticLocationServer/config/semantic_locations.yaml \
+  semantic_map_file:="$PUTRABOT_WORKSPACE_ROOT/src/NAVIGATION/SemanticLocationServer/config/semantic_locations.yaml" \
   pose_source:=amcl \
   stable_duration_sec:=1.0
 ```
@@ -605,7 +605,7 @@ ros2 action send_goal \
 ### Terminal 3: GPSR stack, after the checks above
 
 ```bash
-cd /home/yanjiun68/workspace/WS1/PutrabotUPM-project
+cd "$PUTRABOT_WORKSPACE_ROOT"
 source /opt/ros/humble/setup.bash
 source install/setup.bash
 ros2 launch gpsr_task_scheduler gpsr_scheduler.launch.py
@@ -632,11 +632,11 @@ Always re-run AMCL, Nav2, semantic-transition, and perception-view checks for af
 Before competition, inspect all pending workspace changes:
 
 ```bash
-cd /home/yanjiun68/workspace/WS1/PutrabotUPM-project
+cd "$PUTRABOT_WORKSPACE_ROOT"
 git status --short
 git diff -- \
-  src/NAVIGATION/my_robot_nav/maps \
-  src/NAVIGATION/my_robot_nav/config/gpsr_waypoint.yaml \
+  maps \
+  waypoints/gpsr_waypoint.yaml \
   src/NAVIGATION/SemanticLocationServer/config/semantic_locations.yaml
 ```
 

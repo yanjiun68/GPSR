@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
@@ -9,14 +10,49 @@ from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
 
-def resolve_default_semantic_locations_file(pkg_share, pkg_name):
-    install_file = os.path.join(pkg_share, 'config', 'semantic_locations.yaml')
-    workspace_root = os.path.dirname(
-        os.path.dirname(os.path.dirname(os.path.dirname(pkg_share)))
+def resolve_workspace_root(pkg_share, environment=None):
+    """Special function: Resolve workspace runtime data with an environment override."""
+    # Section: Prefer an explicit absolute root for nonstandard installations.
+    active_environment = os.environ if environment is None else environment
+    override = str(active_environment.get('PUTRABOT_WORKSPACE_ROOT', '')).strip()
+    if override:
+        override_path = Path(override).expanduser()
+        if not override_path.is_absolute():
+            raise ValueError('PUTRABOT_WORKSPACE_ROOT must be an absolute path')
+        return override_path.resolve(strict=False)
+
+    # Section: Derive the root only from install/<package>/share/<package>.
+    share_path = Path(pkg_share).expanduser().resolve(strict=False)
+    if (
+        share_path.parent.name != 'share'
+        or share_path.parent.parent.name != share_path.name
+        or share_path.parent.parent.parent.name != 'install'
+    ):
+        raise ValueError(
+            'Cannot derive workspace root from package share path; '
+            'set PUTRABOT_WORKSPACE_ROOT'
+        )
+    return share_path.parent.parent.parent.parent
+
+
+def resolve_runtime_data_paths(pkg_share, environment=None):
+    """Special function: Build workspace-level map and waypoint defaults."""
+    # Section: Keep mutable arena data outside package source and install space.
+    workspace_root = resolve_workspace_root(pkg_share, environment)
+    return (
+        workspace_root / 'maps' / 'gpsr_map.yaml',
+        workspace_root / 'waypoints' / 'gpsr_waypoint.yaml',
     )
+
+
+def resolve_default_semantic_locations_file(pkg_share, pkg_name, workspace_root):
+    """Special function: Prefer editable source semantic locations when present."""
+    # Section: Retain install-space fallback for immutable package configuration.
+    install_file = os.path.join(pkg_share, 'config', 'semantic_locations.yaml')
     source_file = os.path.join(
-        workspace_root,
+        str(workspace_root),
         'src',
+        'NAVIGATION',
         pkg_name,
         'config',
         'semantic_locations.yaml',
@@ -29,21 +65,36 @@ def resolve_default_semantic_locations_file(pkg_share, pkg_name):
 
 
 def generate_launch_description():
+    """Special function: Build static-map navigation with workspace-level runtime data."""
+    # Section: Resolve package assets separately from mutable maps and waypoints.
     pkg_name = 'my_robot_nav'
     pkg_share = get_package_share_directory(pkg_name)
+    workspace_root = resolve_workspace_root(pkg_share)
 
-    # Section: Use the GPSR occupancy map as the default static navigation map.
-    default_map = (
-        '/home/yanjiun68/workspace/WS1/PutrabotUPM-project/'
-        'src/NAVIGATION/my_robot_nav/maps/gpsr_map.yaml'
-    )
-    default_waypoints_file = os.path.join(pkg_share, 'config', 'gpsr_waypoint.yaml')
+    # Section: Use workspace-root maps and waypoints as the mutable runtime defaults.
+    default_map_path, default_waypoints_path = resolve_runtime_data_paths(pkg_share)
+    default_map = str(default_map_path)
+    default_waypoints_file = str(default_waypoints_path)
     default_semantic_locations = resolve_default_semantic_locations_file(
         pkg_share,
         pkg_name,
+        workspace_root,
     )
 
     use_sim_time = LaunchConfiguration('use_sim_time', default='false')
+    start_waypoint_saver = LaunchConfiguration('start_waypoint_saver', default='true')
+    waypoint_saver_service_name = LaunchConfiguration(
+        'waypoint_saver_service_name',
+        default='/waypoint_saver/save_current',
+    )
+    waypoint_saver_transform_timeout_sec = LaunchConfiguration(
+        'waypoint_saver_transform_timeout_sec',
+        default='2.0',
+    )
+    waypoint_saver_max_transform_age_sec = LaunchConfiguration(
+        'waypoint_saver_max_transform_age_sec',
+        default='1.0',
+    )
     use_external_drivers = LaunchConfiguration('use_external_drivers', default='false')
     map_yaml_file = LaunchConfiguration('map', default=default_map)
     waypoints_file = LaunchConfiguration('waypoints_file', default=default_waypoints_file)
@@ -134,6 +185,10 @@ def generate_launch_description():
         ),
         launch_arguments={
             'use_sim_time': use_sim_time,
+            'start_waypoint_saver': start_waypoint_saver,
+            'waypoint_saver_service_name': waypoint_saver_service_name,
+            'waypoint_saver_transform_timeout_sec': waypoint_saver_transform_timeout_sec,
+            'waypoint_saver_max_transform_age_sec': waypoint_saver_max_transform_age_sec,
             'map': map_yaml_file,
             # Section: Forward the requested waypoint file to the named-pose server.
             'waypoints_file': waypoints_file,
@@ -191,6 +246,26 @@ def generate_launch_description():
             'use_sim_time',
             default_value='false',
             description='Use simulation clock if true',
+        ),
+        DeclareLaunchArgument(
+            'start_waypoint_saver',
+            default_value='true',
+            description='Start the read-only TF waypoint saver service',
+        ),
+        DeclareLaunchArgument(
+            'waypoint_saver_service_name',
+            default_value='/waypoint_saver/save_current',
+            description='SaveWaypoint service name',
+        ),
+        DeclareLaunchArgument(
+            'waypoint_saver_transform_timeout_sec',
+            default_value='2.0',
+            description='Maximum waypoint saver TF lookup wait in seconds',
+        ),
+        DeclareLaunchArgument(
+            'waypoint_saver_max_transform_age_sec',
+            default_value='1.0',
+            description='Maximum accepted waypoint saver TF age in seconds',
         ),
         DeclareLaunchArgument(
             'use_external_drivers',
