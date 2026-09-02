@@ -46,11 +46,15 @@ def test_brief_pause_does_not_report_contact() -> None:
 
 
 def test_persistent_object_contact_is_confirmed() -> None:
-    """Confirm a persistent stall while an object holds the fingers open."""
+    """Confirm a persistent non-zero noisy stall while an object holds fingers open."""
     detector = make_detector()
     observation = None
-    for index in range(5):
-        observation = update(detector, 0.100, 0.0, 0.020, stamp=index * 0.1)
+    positions = [0.1000, 0.1005, 0.1002, 0.1004]
+    velocities = [0.008, 0.006, -0.005, 0.004]
+    for index, (position, velocity) in enumerate(zip(positions, velocities)):
+        observation = update(
+            detector, position, velocity, 0.020, stamp=index * 0.05
+        )
     assert observation is not None
     assert observation.contact_candidate
     assert observation.contact_confirmed
@@ -78,3 +82,30 @@ def test_required_load_confirmation_rejects_unsupported_stall() -> None:
     assert observation.motion_stalled
     assert not observation.contact_candidate
     assert not observation.contact_confirmed
+
+
+def test_possible_contact_resets_when_motion_recovers() -> None:
+    """Clear persistent evidence when position and velocity resume progressing."""
+    detector = make_detector()
+    update(detector, 0.100, 0.006, 0.020)
+    possible = update(detector, 0.1005, 0.005, 0.020)
+    assert possible.contact_candidate
+    assert possible.stable_samples == 1
+
+    recovered = update(detector, 0.090, -0.2, 0.019)
+    assert not recovered.contact_candidate
+    assert not recovered.contact_confirmed
+    assert recovered.stable_samples == 0
+
+
+def test_confirmation_uses_three_consecutive_low_motion_intervals() -> None:
+    """Expose the configured 100-150 ms persistence contract at 20 Hz."""
+    detector = make_detector()
+    update(detector, 0.1000, 0.004, 0.020, stamp=0.00)
+    first = update(detector, 0.1005, 0.004, 0.020, stamp=0.05)
+    second = update(detector, 0.1002, -0.004, 0.020, stamp=0.10)
+    third = update(detector, 0.1004, 0.003, 0.020, stamp=0.15)
+    assert first.stable_samples == 1
+    assert second.stable_samples == 2
+    assert not second.contact_confirmed
+    assert third.contact_confirmed

@@ -54,6 +54,7 @@ class ContactDetector:
         self.baseline_load = 0.0
         self.stable_samples = 0
         self.empty_stable_samples = 0
+        self._previous_motor_position: float | None = None
 
     def reset(self, baseline_samples: Iterable[float] = ()) -> None:
         """Start a new close operation using a median initial load baseline."""
@@ -66,6 +67,7 @@ class ContactDetector:
         self.load_history.clear()
         self.stable_samples = 0
         self.empty_stable_samples = 0
+        self._previous_motor_position = None
 
     def update(
         self,
@@ -78,66 +80,60 @@ class ContactDetector:
     ) -> ContactObservation:
         """Evaluate one feedback sample and update persistent evidence counters."""
         del timestamp  # Section: Accepted for deterministic callers and future rate validation.
-        self.position_history.append(float(motor_position))
-        self.velocity_history.append(float(motor_velocity))
-        self.aperture_history.append(float(finger_aperture))
-        self.load_history.append(float(load_value))
+        motor_position = float(motor_position)
+        motor_velocity = float(motor_velocity)
+        finger_aperture = float(finger_aperture)
+        load_value = float(load_value)
+        previous_position = self._previous_motor_position
+        self._previous_motor_position = motor_position
+        self.position_history.append(motor_position)
+        self.velocity_history.append(motor_velocity)
+        self.aperture_history.append(finger_aperture)
+        self.load_history.append(load_value)
 
-        # Section: A full history prevents startup samples from masquerading as a stable stall.
-        history_ready = len(self.position_history) >= self.history_length
+        # Section: Compare consecutive real samples so small non-zero sensor noise is tolerated.
+        sample_progress = (
+            abs(motor_position - previous_position)
+            if previous_position is not None
+            else float("inf")
+        )
         position_span = (
             max(self.position_history) - min(self.position_history)
             if self.position_history
             else float("inf")
         )
-        velocity_low = all(
-            abs(value) <= self.velocity_threshold for value in self.velocity_history
-        )
-        motion_stalled = (
+        low_motion_sample = (
             bool(closing_active)
-            and history_ready
-            and velocity_low
-            and position_span <= self.position_span_threshold
+            and abs(motor_velocity) <= self.velocity_threshold
+            and sample_progress <= self.position_span_threshold
         )
 
         # Section: Aperture separates an object-blocked close from mechanical empty closure.
         aperture_boundary = self.empty_closed_aperture + self.aperture_margin
-        object_aperture = history_ready and all(
-            value > aperture_boundary for value in self.aperture_history
-        )
-        empty_aperture = history_ready and all(
-            value <= aperture_boundary for value in self.aperture_history
-        )
-        load_delta = abs(float(load_value) - self.baseline_load)
-        load_confirmed = history_ready and all(
-            abs(value - self.baseline_load) >= self.load_delta_threshold
-            for value in self.load_history
-        )
-        probable_contact = motion_stalled and object_aperture
+        object_aperture = finger_aperture > aperture_boundary
+        empty_aperture = finger_aperture <= aperture_boundary
+        load_delta = abs(load_value - self.baseline_load)
+        load_confirmed = load_delta >= self.load_delta_threshold
+        probable_contact = low_motion_sample and object_aperture
         candidate = probable_contact and (
             load_confirmed or not self.require_load_confirmation
         )
 
         # Section: Every required condition must remain true for consecutive samples.
         if candidate:
-            self.stable_samples = (
-                min(self.required_samples, len(self.position_history))
-                if self.stable_samples == 0
-                else self.stable_samples + 1
-            )
+            self.stable_samples = min(self.required_samples, self.stable_samples + 1)
         else:
             self.stable_samples = 0
-        empty_candidate = motion_stalled and empty_aperture
+        empty_candidate = low_motion_sample and empty_aperture
         if empty_candidate:
-            self.empty_stable_samples = (
-                min(self.required_samples, len(self.position_history))
-                if self.empty_stable_samples == 0
-                else self.empty_stable_samples + 1
+            self.empty_stable_samples = min(
+                self.required_samples, self.empty_stable_samples + 1
             )
         else:
             self.empty_stable_samples = 0
         contact_confirmed = self.stable_samples >= self.required_samples
         empty_close_detected = self.empty_stable_samples >= self.required_samples
+        motion_stalled = low_motion_sample
 
         return ContactObservation(
             motion_stalled=motion_stalled,

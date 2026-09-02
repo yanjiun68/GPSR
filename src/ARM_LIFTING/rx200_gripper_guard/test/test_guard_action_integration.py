@@ -15,6 +15,7 @@ from sensor_msgs.msg import JointState
 
 from rx200_gripper_guard import constants as phase
 from rx200_gripper_guard.gripper_guard_node import GripperGuardNode
+from rx200_gripper_guard.health_monitor import HealthSnapshot
 
 
 # Section: Keep test waits bounded so a callback regression cannot hang CI.
@@ -36,6 +37,15 @@ def _joint_state(motor_position, motor_velocity, aperture, load=0.0):
     message.velocity = [0.0, motor_velocity, 0.0]
     message.effort = [0.0, load, 0.0]
     return message
+
+
+# Section: A terminal output must contain one stop and no later negative close PWM.
+def _assert_terminal_stop(commands):
+    """Verify the close-output latch remains disabled after its first PWM-zero stop."""
+    assert commands, "expected at least one observed gripper command"
+    stop_index = commands.index(0.0)
+    assert commands.count(0.0) == 1
+    assert not any(value < 0.0 for value in commands[stop_index + 1 :])
 
 
 # Section: Exercise the real publisher, action server, and action client without hardware.
@@ -90,6 +100,7 @@ def test_contact_timeout_and_cancellation_issue_safe_results_and_stops():
             time.sleep(0.03)
 
         # Section: Persistent stalled feedback above empty aperture confirms contact.
+        contact_command_start = len(observed_commands)
         contact_goal = CloseUntilContact.Goal()
         contact_goal.close_pwm = -75.0
         contact_goal.hold_pwm = 0.0
@@ -104,6 +115,7 @@ def test_contact_timeout_and_cancellation_issue_safe_results_and_stops():
         assert contact_result.contact_detected
         assert contact_result.reason == phase.REASON_CONTACT_CONFIRMED
         assert observed_commands[-1] == 0.0
+        _assert_terminal_stop(observed_commands[contact_command_start:])
 
         # Section: Continued free motion cannot confirm contact and must timeout safely.
         timeout_goal = CloseUntilContact.Goal()
@@ -126,6 +138,7 @@ def test_contact_timeout_and_cancellation_issue_safe_results_and_stops():
         # Section: A stall at calibrated empty aperture reports empty closure, not contact.
         feedback_publisher.publish(_joint_state(position - 0.001, -0.04, 0.004))
         time.sleep(0.03)
+        empty_command_start = len(observed_commands)
         empty_goal = CloseUntilContact.Goal()
         empty_goal.close_pwm = -75.0
         empty_goal.hold_pwm = 0.0
@@ -140,6 +153,7 @@ def test_contact_timeout_and_cancellation_issue_safe_results_and_stops():
         assert not empty_result.contact_detected
         assert empty_result.reason == phase.REASON_EMPTY_CLOSE
         assert observed_commands[-1] == 0.0
+        _assert_terminal_stop(observed_commands[empty_command_start:])
 
         # Section: Cancellation is accepted while fresh moving feedback remains available.
         cancel_goal = CloseUntilContact.Goal()
@@ -169,6 +183,66 @@ def test_contact_timeout_and_cancellation_issue_safe_results_and_stops():
         assert not stale_result.success
         assert stale_result.reason == phase.REASON_FEEDBACK_TIMEOUT
         assert observed_commands[-1] == 0.0
+
+        # Section: Inject a Servo 7 overload bit and require immediate command suppression.
+        feedback_publisher.publish(_joint_state(position - 0.003, -0.04, 0.02))
+        time.sleep(0.03)
+        mocked_health = {"status": 0, "mode": phase.PWM_OPERATING_MODE}
+
+        def health_snapshot():
+            """Return a fresh, mode-verified register snapshot with injectable faults."""
+            status = mocked_health["status"]
+            return HealthSnapshot(
+                register_service_available=True,
+                hardware_fault=status != 0,
+                hardware_error_status=status,
+                hardware_error_timestamp=guard._now_seconds(),
+                operating_mode=mocked_health["mode"],
+                operating_mode_timestamp=guard._now_seconds(),
+                present_load=25,
+                present_pwm=-75,
+            )
+
+        guard.health_monitor.snapshot = health_snapshot
+        guard.health_enabled = True
+        fault_command_start = len(observed_commands)
+        fault_goal = CloseUntilContact.Goal()
+        fault_goal.close_pwm = -75.0
+        fault_goal.hold_pwm = 0.0
+        fault_goal.timeout_sec = 0.8
+        fault_handle = _wait_for_future(action_client.send_goal_async(fault_goal))
+        assert fault_handle.accepted
+        feedback_publisher.publish(_joint_state(position - 0.004, -0.04, 0.02))
+        time.sleep(0.04)
+        mocked_health["status"] = 32
+        fault_result = _wait_for_future(fault_handle.get_result_async()).result
+        assert not fault_result.success
+        assert fault_result.reason == phase.REASON_HARDWARE_FAULT
+        assert observed_commands[-1] == 0.0
+        _assert_terminal_stop(observed_commands[fault_command_start:])
+
+        # Section: A runtime mode mismatch suppresses output without unsafe position zero.
+        mocked_health["status"] = 0
+        mocked_health["mode"] = phase.PWM_OPERATING_MODE
+        feedback_publisher.publish(_joint_state(position - 0.005, -0.04, 0.02))
+        time.sleep(0.03)
+        mode_command_start = len(observed_commands)
+        mode_goal = CloseUntilContact.Goal()
+        mode_goal.close_pwm = -75.0
+        mode_goal.hold_pwm = 0.0
+        mode_goal.timeout_sec = 0.8
+        mode_handle = _wait_for_future(action_client.send_goal_async(mode_goal))
+        assert mode_handle.accepted
+        feedback_publisher.publish(_joint_state(position - 0.006, -0.04, 0.02))
+        time.sleep(0.04)
+        mocked_health["mode"] = 3
+        mode_result = _wait_for_future(mode_handle.get_result_async()).result
+        assert not mode_result.success
+        assert mode_result.reason == phase.REASON_MODE_MISMATCH
+        time.sleep(0.04)
+        mode_commands = observed_commands[mode_command_start:]
+        assert any(value < 0.0 for value in mode_commands)
+        assert 0.0 not in mode_commands
     finally:
         # Section: Tear down all in-process ROS entities even when an assertion fails.
         executor.shutdown(timeout_sec=2.0)

@@ -122,7 +122,9 @@ class ProfileIdentificationNode(Node):
         self.last_face_stamp = None
         self.last_face_received_monotonic = 0.0
         self.last_selected_track_id = None
+        self.last_tracking_session_id = ""
         self.last_selected_roi = None
+        self.latest_face_candidates = []
         self.observation_sequence = 0
         self.observation_history = deque(maxlen=max(20, self.identity_window_size * 4))
         self.observation_condition = threading.Condition()
@@ -225,11 +227,15 @@ class ProfileIdentificationNode(Node):
         """Special function: Clear voting when track identity or selected ROI changes substantially."""
         has_track_id = bool(face_data.get('has_track_id', False))
         track_id = int(face_data.get('track_id', 0)) if has_track_id else None
+        tracking_session_id = str(face_data.get('tracking_session_id', '')).strip()
         selected_roi = list(face_data.get('selected_roi', []))
         track_changed = (
-            track_id is not None
-            and self.last_selected_track_id is not None
-            and track_id != self.last_selected_track_id
+            (tracking_session_id and tracking_session_id != self.last_tracking_session_id)
+            or (
+                track_id is not None
+                and self.last_selected_track_id is not None
+                and track_id != self.last_selected_track_id
+            )
         )
         roi_changed = bool(
             selected_roi
@@ -242,6 +248,7 @@ class ProfileIdentificationNode(Node):
             self.latest_match = unknown_match()
             self.latest_match_stable = False
         self.last_selected_track_id = track_id
+        self.last_tracking_session_id = tracking_session_id
         self.last_selected_roi = selected_roi or None
 
     def appearance_callback(self, msg):
@@ -266,6 +273,23 @@ class ProfileIdentificationNode(Node):
             return
         self.last_face_stamp = stamp
         self.last_face_received_monotonic = time.monotonic()
+        # Section: Preserve every unambiguous tracked face for name-candidate iteration.
+        self.latest_face_candidates = []
+        for raw_face in list(face_data.get('faces', [])):
+            if not isinstance(raw_face, dict) or not raw_face.get('has_track_id', False):
+                continue
+            session_id = str(raw_face.get('tracking_session_id', '')).strip()
+            if not session_id:
+                continue
+            candidate = copy.deepcopy(raw_face)
+            candidate.update({
+                'face_detected': True,
+                'detected': True,
+                'stamp_sec': int(face_data.get('stamp_sec', 0)),
+                'stamp_nanosec': int(face_data.get('stamp_nanosec', 0)),
+                'selected_roi': list(raw_face.get('person_bbox', [])),
+            })
+            self.latest_face_candidates.append(candidate)
         self._reset_for_target_change(face_data)
         self.latest_face_detected = bool(face_data.get('detected', False))
         raw_match = unknown_match()
@@ -295,6 +319,41 @@ class ProfileIdentificationNode(Node):
                 except ValueError as exc:
                     self.get_logger().error(f'Rejected face embedding metadata: {exc}')
         self.latest_candidate = copy.deepcopy(raw_match)
+        # Section: Score every associated face independently for track-based name search.
+        if self.identity_store is not None:
+            for candidate in self.latest_face_candidates:
+                embedding = candidate.get('embedding', [])
+                incoming_dimension = int(
+                    candidate.get('embedding_dimension', len(embedding))
+                )
+                metadata_matches = (
+                    str(candidate.get('embedding_backend', '')).strip()
+                    == self.embedding_backend
+                    and str(candidate.get('embedding_model', '')).strip()
+                    == self.embedding_model
+                    and len(embedding) == incoming_dimension
+                    and incoming_dimension > 0
+                )
+                candidate_match = (
+                    self.identity_store.recognize_profile(
+                        embedding,
+                        threshold=self.recognition_threshold,
+                        margin=self.recognition_margin,
+                    )
+                    if metadata_matches else unknown_match()
+                )
+                candidate['candidate_profile_id'] = str(
+                    candidate_match.get('profile_id', '')
+                )
+                candidate['candidate_is_known'] = bool(
+                    candidate_match.get('is_known', False)
+                )
+                candidate['candidate_match_score'] = float(
+                    candidate_match.get('match_score', -1.0)
+                )
+                candidate['person_uuid'] = str(
+                    candidate_match.get('person_uuid', '')
+                )
         stable_match, is_stable = self.identity_voter.add(raw_match)
         self._publish_match(stable_match, is_stable)
         with self.observation_condition:
@@ -362,7 +421,9 @@ class ProfileIdentificationNode(Node):
             # Section: Candidate identity remains tied to the upstream tracked face selection.
             'has_track_id': self.last_selected_track_id is not None,
             'track_id': int(self.last_selected_track_id or 0),
+            'tracking_session_id': self.last_tracking_session_id,
             'selected_roi': list(self.last_selected_roi or []),
+            'candidates': copy.deepcopy(self.latest_face_candidates),
         }
 
     def lookup_identity_profile_cb(self, request, response):

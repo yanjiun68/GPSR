@@ -29,3 +29,12 @@ def test_error_terminal_paths_require_stopping(terminal: str) -> None:
         machine.transition(phase.IDLE)
     assert machine.transition(phase.STOPPING) == phase.STOPPING
     assert machine.transition(phase.IDLE) == phase.IDLE
+
+
+def test_empty_mechanical_close_has_a_distinct_terminal_state() -> None:
+    """Keep an empty end-stop outcome separate from hardware FAULT."""
+    machine = GuardStateMachine()
+    machine.transition(phase.CLOSING)
+    assert machine.transition(phase.EMPTY_CLOSED) == phase.EMPTY_CLOSED
+    assert machine.transition(phase.STOPPING) == phase.STOPPING
+    assert machine.transition(phase.IDLE) == phase.IDLE

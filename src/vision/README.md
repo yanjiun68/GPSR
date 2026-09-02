@@ -38,7 +38,7 @@ ros2 launch vision human_skeleton_detection.launch.py show_gui:=true enable_tts:
 If MediaPipe reports two people when only one person is visible, first try the post-filter defaults. For strict one-person scenes, force the best single candidate:
 
 ```bash
-ros2 launch vision human_skeleton_detection.launch.py num_poses:=2 prefer_single_person_mode:=true show_gui:=true
+ros2 launch vision human_skeleton_detection.launch.py num_poses:=4 prefer_single_person_mode:=true show_gui:=true
 ```
 
 Useful inspection commands:

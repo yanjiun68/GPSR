@@ -4,6 +4,7 @@ string tracking_session_id
 int32 track_id
 int32 person_id
 string profile_id
+string person_uuid
 float32[4] bbox_xyxy
 receptionist_interfaces/GuestAppearance appearance
 receptionist_interfaces/PersonProfile profile

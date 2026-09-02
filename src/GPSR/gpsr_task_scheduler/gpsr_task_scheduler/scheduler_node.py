@@ -30,6 +30,7 @@ from gpsr_task_scheduler.scheduler_viewer_sm import SchedulerViewerSM
 from robot_ai_interfaces.action import ExecuteActionQueue, ExecuteTaskPlan
 from robot_ai_interfaces.msg import ActionQueue, ActionStep
 from robot_ai_interfaces.srv import ScheduleCommand
+from robot_yasmin_tasks.gpsr.models import summarize_action_queue_failure
 
 
 class GpsrTaskSchedulerNode(Node):
@@ -358,6 +359,18 @@ class GpsrTaskSchedulerNode(Node):
             dry_run,
             max(1.0, float(request.overall_timeout_sec or 300.0)),
         )
+        # Section: Service callers receive JSON, while operators also need an exact terminal log.
+        if not bool(processed["accepted"]):
+            self.get_logger().warn(
+                f"GPSR service command rejected: command_id={command_id} "
+                f"reason={processed['message']}"
+            )
+        elif not bool(processed["success"]):
+            self.get_logger().error(
+                f"GPSR service command failed: command_id={command_id} "
+                f"failed_step={processed.get('failed_step', 'unknown')} "
+                f"reason={processed['message']}"
+            )
         response.accepted = bool(processed["accepted"])
         response.success = bool(processed["success"])
         response.message = str(processed["message"])
@@ -1006,10 +1019,19 @@ class GpsrTaskSchedulerNode(Node):
         success = bool(queue_result.success)
         # Section: Preserve structured skill payloads for post-return result reporting.
         results = [self.skill_result_to_dict(item) for item in list(queue_result.results)]
+        message = (
+            "Execution succeeded."
+            if success
+            else summarize_action_queue_failure(outcome, results)
+        )
+        if not success:
+            self.get_logger().error(
+                f"GPSR ActionQueue failed: command_id={command_id} {message}"
+            )
         return {
             "success": success,
             "completed_steps": len(results),
-            "message": "Execution succeeded." if success else outcome,
+            "message": message,
             "outcome": outcome,
             "results": results,
         }

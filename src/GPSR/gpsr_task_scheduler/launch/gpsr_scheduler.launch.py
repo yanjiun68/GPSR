@@ -107,6 +107,11 @@ def generate_launch_description() -> LaunchDescription:
         start_count_people_pipeline,
         start_find_person_attribute_pipeline,
     )
+    # Section: Name and attribute searches reuse exactly one managed YOLO person tracker.
+    start_shared_human_identity = OrSubstitution(
+        start_find_person_pipeline,
+        start_find_person_attribute_pipeline,
+    )
 
     # Section: Main deterministic scheduler entrypoint.
     scheduler_node = Node(
@@ -342,7 +347,7 @@ def generate_launch_description() -> LaunchDescription:
         name="gpsr_human_identity_node",
         namespace="",
         output="screen",
-        condition=IfCondition(start_find_person_attribute_pipeline),
+        condition=IfCondition(start_shared_human_identity),
         parameters=[{
             "image_topic": rgb_topic,
             "output_topic": "/human_identity/recognized_people",
@@ -455,6 +460,7 @@ def generate_launch_description() -> LaunchDescription:
             "enable_profile_capture": "true",
             "enable_identification": "true",
             "enable_appearance_node": "false",
+            "face_selection_mode": "tracked_people",
             "show_appearance_gui": show_gui,
         }.items(),
     )

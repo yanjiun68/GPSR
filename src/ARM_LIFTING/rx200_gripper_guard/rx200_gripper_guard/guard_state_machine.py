@@ -10,6 +10,7 @@ class GuardStateMachine:
         phase.IDLE: {phase.CLOSING},
         phase.CLOSING: {
             phase.CONTACT_CANDIDATE,
+            phase.EMPTY_CLOSED,
             phase.TIMEOUT,
             phase.FAULT,
             phase.CANCELLED,
@@ -17,11 +18,13 @@ class GuardStateMachine:
         phase.CONTACT_CANDIDATE: {
             phase.CLOSING,
             phase.CONTACT_CONFIRMED,
+            phase.EMPTY_CLOSED,
             phase.TIMEOUT,
             phase.FAULT,
             phase.CANCELLED,
         },
         phase.CONTACT_CONFIRMED: {phase.HOLDING, phase.STOPPING},
+        phase.EMPTY_CLOSED: {phase.STOPPING},
         phase.HOLDING: {phase.STOPPING},
         phase.STOPPING: {phase.IDLE},
         phase.TIMEOUT: {phase.STOPPING},

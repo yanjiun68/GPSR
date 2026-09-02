@@ -24,6 +24,7 @@ from robot_yasmin_tasks.gpsr.outcomes import (
     SUCCESS,
     TIMEOUT,
 )
+from robot_yasmin_tasks.object_knowledge import ObjectKnowledge, ObjectKnowledgeError, TargetKind
 
 
 # Section: Private blackboard keys shared by the three wrapper states.
@@ -74,9 +75,10 @@ def pose_to_dict(pose: Any) -> dict[str, Any]:
 class BuildGoalState(State):
     """Special function: Translate CURRENT_ACTION into the authoritative action goal."""
 
-    def __init__(self) -> None:
-        """Special function: Declare goal construction outcomes."""
+    def __init__(self, knowledge: ObjectKnowledge | None = None) -> None:
+        """Special function: Declare outcomes and load authoritative object semantics."""
         super().__init__([SUCCESS, INVALID_INPUT, CANCELED])
+        self.knowledge = knowledge or ObjectKnowledge.from_file(ObjectKnowledge.default_path())
 
     def execute(self, blackboard: Blackboard) -> str:
         """Special function: Build the complete compound FIND_OBJECT request."""
@@ -98,6 +100,28 @@ class BuildGoalState(State):
                 fatal=True,
             ).to_dict()
             return INVALID_INPUT
+        # Section: Resolve aliases and reject unknown categories before lifecycle or navigation work.
+        try:
+            resolved = self.knowledge.resolve(object_name, category)
+        except ObjectKnowledgeError as exc:
+            blackboard[bb.LAST_SKILL_RESULT] = make_skill_result(
+                action.action_type,
+                INVALID_INPUT,
+                str(exc),
+                {"reason": "UNSUPPORTED_TARGET"},
+                fatal=True,
+            ).to_dict()
+            return INVALID_INPUT
+        object_name = (
+            resolved.canonical_name
+            if resolved.kind == TargetKind.EXACT_OBJECT
+            else ""
+        )
+        category = (
+            resolved.canonical_name
+            if resolved.kind != TargetKind.EXACT_OBJECT
+            else ""
+        )
 
         # Section: Explicit location is strict; omission authorizes global fallback.
         location = str(

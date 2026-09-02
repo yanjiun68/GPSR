@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from types import SimpleNamespace
 from typing import Any
 
 from yasmin import Blackboard
@@ -10,6 +11,7 @@ from yasmin import Blackboard
 from robot_yasmin_tasks.gpsr import blackboard_keys as bb
 from robot_yasmin_tasks.gpsr.models import ActionStepData
 from robot_yasmin_tasks.gpsr.outcomes import CANCELED, INVALID_INPUT, NOT_FOUND, SUCCESS, TIMEOUT
+from robot_yasmin_tasks.ros_clients.find_person_clients import FindPersonClients
 from robot_yasmin_tasks.skills.find_person_skill_sm import (
     FindPersonSkillSM,
     classify_binary_confirmation,
@@ -36,6 +38,7 @@ class FakeIdentityClient:
         self.candidate_delay_sec = candidate_delay_sec
         self.rejected_snapshots: list[set[str]] = []
         self.enrollment_calls = 0
+        self.enrollment_candidates: list[dict[str, Any]] = []
 
     def lookup_profile(self, *_args: Any) -> dict[str, Any]:
         """Special function: Return the scripted profile-availability result."""
@@ -66,9 +69,17 @@ class FakeIdentityClient:
         """Special function: Return unknown when a test omits candidate-local transcripts."""
         return {"status": "answer", "transcript": ""}
 
-    def enroll_profile(self, *_args: Any) -> dict[str, Any]:
+    def enroll_profile(
+        self,
+        _blackboard: Blackboard,
+        _action: ActionStepData,
+        _target_name: str,
+        candidate: dict[str, Any],
+        _timeout_sec: float,
+    ) -> dict[str, Any]:
         """Special function: Count and return the scripted best-effort enrollment result."""
         self.enrollment_calls += 1
+        self.enrollment_candidates.append(dict(candidate))
         return dict(self.enrollment)
 
 
@@ -104,6 +115,63 @@ def registered_person_ref() -> dict[str, Any]:
         "confidence": 0.91,
         "source": "registered_profile",
     }
+
+
+def test_live_enrollment_goal_carries_confirmed_session_and_track() -> None:
+    """Special function: The real adapter copies the exact confirmed lock into its action goal."""
+    # Section: Minimal action fakes exercise goal construction without a ROS graph.
+    goal_handle = SimpleNamespace(
+        accepted=True,
+        get_result_async=lambda: object(),
+        cancel_goal_async=lambda: None,
+    )
+    wrapped_result = SimpleNamespace(
+        result=SimpleNamespace(
+            success=True,
+            profile=SimpleNamespace(profile_id="gpsr_alex"),
+            person_uuid="person-uuid-a",
+            message="captured",
+        )
+    )
+
+    class RecordingEnrollmentClient:
+        """Special function: Record the generated goal and provide inert future tokens."""
+
+        def __init__(self) -> None:
+            """Special function: Initialize one empty goal record."""
+            self.goal = None
+
+        def wait_for_server(self, timeout_sec: float) -> bool:
+            """Special function: Report the fake action server as available."""
+            return timeout_sec > 0.0
+
+        def send_goal_async(self, goal: Any) -> object:
+            """Special function: Retain the outgoing goal for exact-field assertions."""
+            self.goal = goal
+            return object()
+
+    client = FindPersonClients(node=None, simulate=False)
+    recording_client = RecordingEnrollmentClient()
+    client._enrollment_client = recording_client
+    responses = iter([goal_handle, wrapped_result])
+    client._wait_future = lambda *_args: next(responses)
+
+    result = client.enroll_profile(
+        Blackboard(),
+        ActionStepData("FIND_PERSON"),
+        "Alex",
+        {
+            "tracking_session_id": "session-b",
+            "track_id": 7,
+            "person_uuid": "person-uuid-a",
+        },
+        1.0,
+    )
+
+    assert result["status"] == "enrolled"
+    assert recording_client.goal.tracking_session_id == "session-b"
+    assert recording_client.goal.track_id == 7
+    assert recording_client.goal.person_uuid == "person-uuid-a"
 
 
 def test_registered_profile_success() -> None:
@@ -154,6 +222,36 @@ def test_wrong_candidate_rejected_then_correct_candidate_confirmed() -> None:
     assert blackboard[bb.PERSON_REF]["tracking_id"] == 2
     assert "track:1" in blackboard[bb.LAST_SKILL_RESULT]["result"]["candidate_registry"]["rejected"]
     assert "track:1" in client.rejected_snapshots[-1]
+
+
+def test_session_track_keys_prevent_reset_collisions_and_lock_enrollment() -> None:
+    """Special function: Reused track integers in different sessions remain independent people."""
+    client = FakeIdentityClient(
+        candidates=[
+            {
+                "candidate_id": "session-a:7",
+                "tracking_session_id": "session-a",
+                "track_id": 7,
+                "tracking_id": 7,
+                "transcript": "no",
+            },
+            {
+                "candidate_id": "session-b:7",
+                "tracking_session_id": "session-b",
+                "track_id": 7,
+                "tracking_id": 7,
+                "transcript": "yes",
+            },
+        ]
+    )
+
+    outcome, blackboard = run_name_skill(client)
+
+    assert outcome == SUCCESS
+    assert blackboard[bb.PERSON_REF]["candidate_key"] == "session-b:7"
+    assert blackboard[bb.PERSON_REF]["tracking_session_id"] == "session-b"
+    assert client.enrollment_candidates[0]["candidate_id"] == "session-b:7"
+    assert "session-a:7" in client.rejected_snapshots[-1]
 
 
 def test_unclear_answer_retries_same_candidate_once() -> None:

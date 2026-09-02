@@ -242,6 +242,29 @@ def test_take_expands_then_rejects_unavailable_pick() -> None:
     assert "PICK_OBJECT" in result.issues[0].message
 
 
+def test_place_acquires_target_before_dependent_place() -> None:
+    """Special function: Placement must find and pick its target before invoking PLACE_OBJECT."""
+    result = schedule_command(
+        "place",
+        "place the coke in the kitchen",
+        default_config(),
+    )
+    # Section: Missing manipulation implementations retain the proposed queue for diagnostics.
+    assert not result.valid
+    assert [step.skill_name for step in result.steps] == [
+        "FIND_OBJECT", "PICK_OBJECT", "PLACE_OBJECT",
+    ]
+    assert result.steps[0].arguments["search_scope"] == "GLOBAL"
+    assert result.steps[1].dependencies == ["find_object"]
+    assert result.steps[1].arguments["requires_data"] == ["found_object"]
+    assert result.steps[2].dependencies == ["pick_object"]
+    assert result.steps[2].arguments["requires_data"] == ["picked_object"]
+    assert result.steps[2].arguments["target_location"] == "kitchen"
+    assert {issue.code for issue in result.issues} == {"primitive_unavailable"}
+    assert "PICK_OBJECT" in result.issues[0].message
+    assert "PLACE_OBJECT" in result.issues[0].message
+
+
 def test_bring_expands_then_rejects_unavailable_manipulation() -> None:
     """Special function: Delivery expansion is centralized in the scheduler compiler."""
     result = schedule_command("bring", "bring me the coke", default_config())

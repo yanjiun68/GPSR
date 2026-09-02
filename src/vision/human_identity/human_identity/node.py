@@ -6,6 +6,7 @@ import asyncio
 from pathlib import Path
 from threading import Lock, RLock
 from typing import Any
+from uuid import uuid4
 
 import cv2
 import numpy as np
@@ -87,6 +88,7 @@ class HumanIdentityNode(Node):
         self.latest_feature_timestamps_ns: dict[int, int] = {}
         self.current_nearest_track_id = 0
         self.current_nearest_timestamp_ns = 0
+        self.tracking_session_id = uuid4().hex
         self.last_publish_ns = 0
         publish_interval = float(self.get_parameter("publish_interval").value)
         nearest_timeout = float(self.get_parameter("nearest_timeout").value)
@@ -384,6 +386,8 @@ class HumanIdentityNode(Node):
         msg.status_text = match.status
         msg.person_id = int(match.person_id) if match.status == "RECOGNIZED" else 0
         msg.track_id = int(observation["track_id"])
+        msg.tracking_session_id = self.tracking_session_id
+        msg.person_uuid = ""
         msg.status = {
             "RECOGNIZED": RecognizedPerson.RECOGNIZED,
             "AMBIGUOUS": RecognizedPerson.AMBIGUOUS,
@@ -392,6 +396,7 @@ class HumanIdentityNode(Node):
         # Section: Add stored profile fields only for a recognized positive ID.
         profile = self.database.get_person_profile(msg.person_id)
         if profile is not None:
+            msg.person_uuid = str(profile.get("canonical_person_uuid", ""))
             msg.person_name = profile["person_name"]
             msg.age = max(0, min(int(profile["age"]), 65535))
             msg.favourite_drink = profile["favourite_drink"]
@@ -505,9 +510,16 @@ class HumanIdentityNode(Node):
                     raise RuntimeError("Requested track is not visible")
                 person_id = int(goal.person_id)
                 if person_id == 0:
-                    person_id = self.database.create_registration_profile()
+                    person_id = self.database.create_registration_profile(
+                        str(getattr(goal, "requested_person_uuid", ""))
+                    )
                 elif not self.database.person_exists(person_id):
                     raise RuntimeError(f"Person {person_id} does not exist")
+                elif str(getattr(goal, "requested_person_uuid", "")).strip():
+                    self.database.bind_canonical_person(
+                        person_id,
+                        str(goal.requested_person_uuid),
+                    )
                 context = self.registration.start(
                     person_id,
                     track_id,
@@ -559,6 +571,8 @@ class HumanIdentityNode(Node):
             result.registered_track_id = track_id
             result.prototypes_saved = 1
             result.average_quality = float(np.mean([item.body_quality for item in collected]))
+            profile = self.database.get_person_profile(person_id) or {}
+            result.person_uuid = str(profile.get("canonical_person_uuid", ""))
             result.message = f"Registered person {person_id} from track {track_id}"
             return result
         except Exception as exc:  # noqa: BLE001

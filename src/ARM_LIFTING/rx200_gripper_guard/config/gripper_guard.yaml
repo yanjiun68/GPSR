@@ -1,4 +1,4 @@
-# Section: Neutral contact thresholds require calibration before hardware deployment.
+# Section: Conservative software-derived defaults still require physical calibration.
 rx200_gripper_guard:
   ros__parameters:
     robot_name: "rx200"
@@ -28,26 +28,35 @@ rx200_gripper_guard:
       min_pwm: -200.0
       max_pwm: 200.0
       max_close_pwm_magnitude: 75.0
+      # The startup mode file and runtime Operating_Mode register must both indicate PWM.
+      command_mode: "pwm"
+      expected_operating_mode: 16
 
     contact:
-      required_samples: 5
-      # Calibration required: zero thresholds intentionally reject noisy motion as contact.
-      velocity_threshold: 0.0
-      position_span_threshold: 0.0
-      load_delta_threshold: 0.0
+      required_samples: 3
+      # Motor velocity is rad/s; per-sample motor position progress is radians.
+      velocity_threshold: 0.02
+      position_span_threshold: 0.003
+      # Driver effort/load is estimated, so this remains secondary evidence only.
+      load_delta_threshold: 10.0
       require_load_confirmation: false
-      aperture_margin: 0.0
-      history_length: 5
+      # Left-finger displacement margin in metres above the modeled closed limit.
+      aperture_margin: 0.001
+      history_length: 3
 
     calibration:
-      # Calibration required: record a repeatable empty mechanical close before deployment.
-      empty_closed_aperture: 0.0
+      # Left-finger displacement in metres; RX200 URDF closed limit is 0.015 m.
+      empty_closed_aperture: 0.015
 
     safety:
-      feedback_timeout_sec: 0.5
+      # Five missed samples at the configured 20 Hz feedback rate.
+      feedback_timeout_sec: 0.25
       action_timeout_sec: 5.0
       stop_pwm: 0.0
 
     health:
       enabled: true
-      update_rate_hz: 1.0
+      fast_update_rate_hz: 10.0
+      medium_update_rate_hz: 2.0
+      slow_update_rate_hz: 0.2
+      critical_status_timeout_sec: 0.5

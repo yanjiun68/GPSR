@@ -1,0 +1,53 @@
+# Section: Authoritative vocabulary for objects currently supported by GPSR perception.
+objects:
+  apple:
+    aliases: [apple]
+    detector_label: apple
+    category: food
+    probable_locations: [kitchen, dining_room]
+  banana:
+    aliases: [banana]
+    detector_label: banana
+    category: food
+    probable_locations: [kitchen, dining_room]
+  bottle:
+    aliases: [bottle, water bottle]
+    detector_label: bottle
+    category: drink
+    probable_locations: [kitchen, dining_room, living_room, bedroom]
+  chair:
+    aliases: [chair, seat]
+    detector_label: chair
+    probable_locations: [dining_room, living_room, bedroom, entrance]
+  chips:
+    aliases: [chips, potato chips]
+    detector_label: chips
+    category: food
+    probable_locations: [kitchen, living_room]
+  coke:
+    aliases: [coke, coca cola, cola]
+    detector_label: coke
+    category: drink
+    probable_locations: [kitchen, dining_room, living_room]
+  cup:
+    aliases: [cup, drinking cup]
+    detector_label: cup
+    category: drink
+    probable_locations: [kitchen, dining_room, living_room]
+  milk:
+    aliases: [milk, milk carton]
+    detector_label: milk
+    category: drink
+    probable_locations: [kitchen, dining_room]
+
+# Section: Category membership is explicit and validated in both directions at load time.
+categories:
+  drink:
+    members: [bottle, cup, coke, milk]
+    probable_locations: [kitchen, dining_room, living_room, bedroom]
+  food:
+    members: [apple, banana, chips]
+    probable_locations: [kitchen, dining_room, living_room]
+
+# Section: Only these generic targets are permitted to match every configured object.
+wildcards: [object, any_object]

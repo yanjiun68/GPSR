@@ -309,6 +309,17 @@ class TrackState:
     last_seen_sec: float
 
 
+def validate_num_poses(value: Any, maximum: int = 32) -> int:
+    """Special function: Reject non-positive or unreasonably large pose capacities."""
+    try:
+        configured = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("num_poses must be an integer.") from exc
+    if configured < 1 or configured > int(maximum):
+        raise ValueError(f"num_poses must be between 1 and {int(maximum)}.")
+    return configured
+
+
 class HumanSkeletonDetectionNode(LifecycleNode):
     """Special function: Detect MediaPipe human poses and publish normalized landmarks."""
 
@@ -319,7 +330,7 @@ class HumanSkeletonDetectionNode(LifecycleNode):
         # Section: Declare image, model, inference, and output parameters.
         self.declare_parameter("image_topic", "/camera/image_raw")
         self.declare_parameter("model_path", self.default_model_path())
-        self.declare_parameter("num_poses", 2)
+        self.declare_parameter("num_poses", 4)
         self.declare_parameter("min_detection_confidence", 0.60)
         self.declare_parameter("min_presence_confidence", 0.60)
         self.declare_parameter("min_tracking_confidence", 0.65)
@@ -407,7 +418,7 @@ class HumanSkeletonDetectionNode(LifecycleNode):
 
         # Section: Store runtime parameters used by callbacks.
         self.model_path = str(self.get_parameter("model_path").value)
-        self.num_poses = int(self.get_parameter("num_poses").value)
+        self.num_poses = validate_num_poses(self.get_parameter("num_poses").value)
         self.min_detection_confidence = float(self.get_parameter("min_detection_confidence").value)
         self.min_presence_confidence = float(self.get_parameter("min_presence_confidence").value)
         self.min_tracking_confidence = float(self.get_parameter("min_tracking_confidence").value)
@@ -582,7 +593,10 @@ class HumanSkeletonDetectionNode(LifecycleNode):
                     str(self.get_parameter("tts_service_name").value),
                 )
             self.reset_runtime_state()
-            self.get_logger().info("[GPSR_LIFECYCLE] MediaPipe pose: configured")
+            self.get_logger().info(
+                "[GPSR_LIFECYCLE] MediaPipe pose: configured "
+                f"with num_poses={self.num_poses}"
+            )
             return TransitionCallbackReturn.SUCCESS
         except Exception as exc:
             self.get_logger().error(f"MediaPipe pose configure failed: {exc}")

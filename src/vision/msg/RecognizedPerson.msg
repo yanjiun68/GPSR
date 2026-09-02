@@ -13,6 +13,8 @@ string status_text
 
 int32 person_id
 int32 track_id
+string tracking_session_id
+string person_uuid
 
 string person_name
 uint16 age

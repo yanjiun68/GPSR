@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import threading
 import time
+import math
 
 from std_msgs.msg import String
 from yasmin import Blackboard
@@ -203,8 +204,13 @@ def test_empty_room_scans_then_advances_to_next_waypoint() -> None:
 
     assert FindPersonByAttributeSM(client, navigation)(blackboard) == SUCCESS
     assert navigation.targets == ["kitchen", "living_room"]
-    assert client.locations == ["kitchen", "kitchen", "kitchen", "living_room"]
-    assert len(navigation.scan_angles) == 2
+    assert client.locations == ["kitchen"] * 6 + ["living_room"]
+    assert len(navigation.scan_angles) == 5
+    # Section: Relative commands produce absolute headings 60, -60, 120, -120, and 180.
+    assert [round(angle, 6) for angle in navigation.scan_angles] == [
+        round(math.radians(value), 6)
+        for value in [60.0, -120.0, 180.0, 120.0, -60.0]
+    ]
 
 
 def test_global_person_search_enforces_one_mission_deadline() -> None:

@@ -59,6 +59,24 @@ LEGACY_ACTION_ALIASES = {
 }
 
 
+# Section: Only transient GPSR skill processes may be lifecycle-managed by ActionQueue.
+GPSR_MANAGED_LIFECYCLE_NODES = frozenset({
+    "/count_objects_perception_server",
+    "/count_objects_skill_server",
+    "/count_people_perception_server",
+    "/count_people_skill_server",
+    "/extract_person_info_skill_server",
+    "/find_object_skill_server",
+    "/find_person_by_attribute_skill_server",
+    "/follow_person_skill_server",
+    "/gpsr_human_detection_node",
+    "/gpsr_human_identity_node",
+    "/gpsr_object_detection_node",
+    "/gpsr_tracked_appearance_node",
+    "/human_skeleton_detection_node",
+})
+
+
 @dataclass(frozen=True, slots=True)
 class PrimitiveCapability:
     """Special function: Represent one registry-backed executable primitive contract."""
@@ -150,6 +168,21 @@ def load_primitive_registry(registry_file: str | Path | None = None) -> dict[str
     }
     if mismatched_aliases:
         raise RuntimeError(f"Primitive registry legacy alias mismatch: {mismatched_aliases}")
+
+    # Section: Reject base, navigation, arm, camera, or any unapproved process fail-closed.
+    configured_lifecycle_nodes = {
+        node_name
+        for capability in registry.values()
+        for node_name in capability.lifecycle_nodes
+    }
+    unapproved_lifecycle_nodes = sorted(
+        configured_lifecycle_nodes - GPSR_MANAGED_LIFECYCLE_NODES
+    )
+    if unapproved_lifecycle_nodes:
+        raise RuntimeError(
+            "Primitive registry contains non-GPSR lifecycle resources: "
+            f"{unapproved_lifecycle_nodes}"
+        )
     return registry
 
 

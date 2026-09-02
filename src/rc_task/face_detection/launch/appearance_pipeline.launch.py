@@ -50,6 +50,7 @@ LAUNCH_DEFAULTS = {
     'min_enrollment_samples': '5',
     'max_enrollment_samples': '10',
     'profile_capture_timeout_sec': '8.0',
+    'track_loss_timeout_sec': '2.0',
     'recognition_threshold': '0.45',
     'recognition_margin': '0.05',
     'identity_window_size': '5',
@@ -113,7 +114,9 @@ LAUNCH_DESCRIPTIONS = {
     'opencv_dnn_target': 'OpenCV DNN target; competition default and supported value is cpu.',
     'face_inference_rate_hz': 'Maximum rate for complete detection and recognition inference.',
     'recognition_rate_hz': 'Reserved lower-rate stable-identity recognition policy.',
-    'face_selection_mode': 'Face selection mode: largest, target_roi, or tracked_person.',
+    'face_selection_mode': (
+        'Face selection mode: largest, target_roi, tracked_person, or tracked_people.'
+    ),
     'tracked_person_topic': 'Existing vision/RecognizedPerson topic used for tracked-person ROI mode.',
     'target_track_id': 'Tracked person ID to select; zero selects the tracker nearest person.',
     'tracked_roi_max_age_sec': 'Maximum color-frame to tracked-ROI timestamp difference.',
@@ -121,6 +124,7 @@ LAUNCH_DESCRIPTIONS = {
     'min_enrollment_samples': 'Distinct consistent frames required for enrollment.',
     'max_enrollment_samples': 'Maximum enrollment embeddings retained before template selection.',
     'profile_capture_timeout_sec': 'Hard timeout for profile capture action goals.',
+    'track_loss_timeout_sec': 'Grace period before exact-track enrollment aborts as lost.',
     'recognition_threshold': 'Minimum top-one cosine score for a known identity.',
     'recognition_margin': 'Minimum top-one minus top-two cosine score.',
     'identity_window_size': 'Sliding frame window used for continuous identity voting.',
@@ -202,6 +206,7 @@ def generate_launch_description():
     min_enrollment_samples = LaunchConfiguration('min_enrollment_samples')
     max_enrollment_samples = LaunchConfiguration('max_enrollment_samples')
     profile_capture_timeout_sec = LaunchConfiguration('profile_capture_timeout_sec')
+    track_loss_timeout_sec = LaunchConfiguration('track_loss_timeout_sec')
     recognition_threshold = LaunchConfiguration('recognition_threshold')
     recognition_margin = LaunchConfiguration('recognition_margin')
     identity_window_size = LaunchConfiguration('identity_window_size')
@@ -349,6 +354,7 @@ def generate_launch_description():
                 'max_enrollment_samples': max_enrollment_samples,
                 'max_face_age_sec': max_face_age_sec,
                 'profile_capture_timeout_sec': profile_capture_timeout_sec,
+                'track_loss_timeout_sec': track_loss_timeout_sec,
                 'det_score_threshold': det_score_threshold,
             }
         ],
@@ -422,6 +428,7 @@ def generate_launch_description():
             declare_launch_argument('min_enrollment_samples'),
             declare_launch_argument('max_enrollment_samples'),
             declare_launch_argument('profile_capture_timeout_sec'),
+            declare_launch_argument('track_loss_timeout_sec'),
             declare_launch_argument('recognition_threshold'),
             declare_launch_argument('recognition_margin'),
             declare_launch_argument('identity_window_size'),

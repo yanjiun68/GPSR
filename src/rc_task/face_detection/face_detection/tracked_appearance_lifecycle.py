@@ -46,6 +46,30 @@ def bbox_iou(first: list[float], second: list[float]) -> float:
     return intersection / union if union > 0.0 else 0.0
 
 
+def associate_unique_skeletons(
+    track_boxes: list[list[float]],
+    skeleton_boxes: list[list[float]],
+    minimum_iou: float,
+) -> dict[int, int]:
+    """Special function: Greedily assign unique track/skeleton pairs by descending IoU."""
+    # Section: Stable indices break equal-score ties deterministically without new dependencies.
+    pairs: list[tuple[float, int, int]] = []
+    for track_index, track_box in enumerate(track_boxes):
+        for skeleton_index, skeleton_box in enumerate(skeleton_boxes):
+            score = bbox_iou(track_box, skeleton_box)
+            if score >= float(minimum_iou):
+                pairs.append((score, track_index, skeleton_index))
+    pairs.sort(key=lambda item: (-item[0], item[1], item[2]))
+    assignments: dict[int, int] = {}
+    used_skeletons: set[int] = set()
+    for _score, track_index, skeleton_index in pairs:
+        if track_index in assignments or skeleton_index in used_skeletons:
+            continue
+        assignments[track_index] = skeleton_index
+        used_skeletons.add(skeleton_index)
+    return assignments
+
+
 def torso_roi(frame: Any, person_bbox: list[float]) -> Any:
     """Special function: Crop the upper torso inside one canonical person box."""
     height, width = frame.shape[:2]
@@ -248,17 +272,45 @@ class TrackedAppearanceLifecycleNode(LifecycleNode):
         stale_timeout = max(0.1, float(self.get_parameter("stale_timeout_sec").value))
         output = TrackedPersonAppearanceArray()
         output.header = message.header
-        for track_id, (identity, received_at) in list(self.identities.items()):
+        # Section: Freeze fresh tracks and compute one frame-wide one-to-one pose assignment.
+        fresh_identities: list[Any] = []
+        for track_id, (identity, received_at) in sorted(self.identities.items()):
             if now - received_at > stale_timeout:
                 self.identities.pop(track_id, None)
                 self.color_voters.pop(track_id, None)
                 continue
-            observation = self.build_observation(message, frame, identity)
+            fresh_identities.append(identity)
+        skeletons_are_fresh = (
+            now - self.skeleton_received_at
+            <= max(0.01, float(self.get_parameter("association_time_tolerance_sec").value))
+        )
+        current_skeletons = list(self.skeletons) if skeletons_are_fresh else []
+        assignments = associate_unique_skeletons(
+            [[float(value) for value in identity.bbox_xyxy] for identity in fresh_identities],
+            [
+                [skeleton.x1, skeleton.y1, skeleton.x2, skeleton.y2]
+                for skeleton in current_skeletons
+            ],
+            float(self.get_parameter("association_iou_threshold").value),
+        )
+        for track_index, identity in enumerate(fresh_identities):
+            skeleton = (
+                current_skeletons[assignments[track_index]]
+                if track_index in assignments
+                else None
+            )
+            observation = self.build_observation(message, frame, identity, skeleton)
             if observation is not None:
                 output.people.append(observation)
         self.publisher.publish(output)
 
-    def build_observation(self, image: Image, frame: Any, identity: RecognizedPerson) -> Any:
+    def build_observation(
+        self,
+        image: Image,
+        frame: Any,
+        identity: RecognizedPerson,
+        skeleton: Any | None = None,
+    ) -> Any:
         """Special function: Build one tracked appearance and associated pose snapshot."""
         bbox = [float(value) for value in identity.bbox_xyxy]
         person_crop, _ = crop_person_roi(frame, bbox)
@@ -280,13 +332,16 @@ class TrackedAppearanceLifecycleNode(LifecycleNode):
         self.set_positive_attribute(appearance, "face_mask", scores, ("face_mask", "mask"))
         appearance.shirt_color = stable_color
         appearance.shirt_color_confidence = float(stable_confidence)
-        skeleton, pose_data = self.associate_pose(bbox)
+        pose_data = self.pose_data_for_skeleton(skeleton)
         tracked = TrackedPersonAppearance()
         tracked.header = image.header
-        tracked.tracking_session_id = self.tracking_session_id
+        tracked.tracking_session_id = str(
+            getattr(identity, "tracking_session_id", "") or self.tracking_session_id
+        )
         tracked.track_id = int(identity.track_id)
         tracked.person_id = int(identity.person_id)
         tracked.profile_id = f"human_identity:{int(identity.person_id)}" if int(identity.person_id) > 0 else ""
+        tracked.person_uuid = str(getattr(identity, "person_uuid", ""))
         tracked.bbox_xyxy = bbox
         tracked.appearance = appearance
         tracked.profile = self.identity_profile(identity, tracked.profile_id, appearance)
@@ -319,32 +374,20 @@ class TrackedAppearanceLifecycleNode(LifecycleNode):
         setattr(appearance, field_name, GuestAppearance.YES if confidence > 0.0 else GuestAppearance.UNKNOWN)
         setattr(appearance, f"{field_name}_confidence", float(confidence))
 
-    def associate_pose(self, bbox: list[float]) -> tuple[Any | None, dict[str, Any]]:
-        """Special function: Associate a skeleton by IoU and then reuse its local gesture id."""
-        # Section: Receipt-time gating prevents an old detector frame being reused.
+    def pose_data_for_skeleton(self, skeleton: Any | None) -> dict[str, Any]:
+        """Special function: Resolve gesture data for an already unique skeleton assignment."""
+        if skeleton is None:
+            return {}
         tolerance = max(0.01, float(self.get_parameter("association_time_tolerance_sec").value))
         now = time.monotonic()
-        if now - self.skeleton_received_at > tolerance:
-            return None, {}
-        threshold = float(self.get_parameter("association_iou_threshold").value)
-        candidates = []
-        for skeleton in self.skeletons:
-            skeleton_box = [skeleton.x1, skeleton.y1, skeleton.x2, skeleton.y2]
-            candidates.append((bbox_iou(bbox, skeleton_box), skeleton))
-        if not candidates:
-            return None, {}
-        score, skeleton = max(candidates, key=lambda item: item[0])
-        if score < threshold:
-            return None, {}
         try:
             local_id = int(str(skeleton.skeleton_id).rsplit("_", 1)[-1])
         except ValueError:
             local_id = 0
-        pose_data = (
+        return (
             dict(self.pose_people.get(local_id, {}))
             if now - self.pose_received_at <= tolerance else {}
         )
-        return skeleton, pose_data
 
     @staticmethod
     def identity_profile(

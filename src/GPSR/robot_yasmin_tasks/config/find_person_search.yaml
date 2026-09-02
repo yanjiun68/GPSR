@@ -15,8 +15,11 @@ person_search:
   # Section: One hard deadline bounds the complete multi-waypoint mission when the action omits one.
   mission_timeout_sec: 300.0
 
-  # Section: Observe the arrival heading, then rotate to two additional local viewpoints.
-  scan_angles_deg: [60.0, -120.0]
+  # Section: Desired headings are absolute offsets from the arrival orientation.
+  scan:
+    fast_angles_deg: [0.0, 60.0, -60.0]
+    extended_angles_deg: [120.0, -120.0]
+    exhaustive_angles_deg: [180.0]
   scan_timeout_sec: 15.0
 
 # Section: Nav2 remains the sole owner of movement between person-search viewpoints.

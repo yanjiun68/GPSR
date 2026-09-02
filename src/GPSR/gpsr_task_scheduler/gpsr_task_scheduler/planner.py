@@ -42,7 +42,8 @@ def plan_task(request: TaskRequest, config: SchedulerConfig) -> SchedulerResult:
         steps.extend(_acquire_steps(request, config))
         return _validated_capability_result(request, steps, config)
     if request.task_type == "place_object":
-        steps.append(_step("place_object", "PLACE_OBJECT", {"object_name": request.target.get("object_name", ""), "target_location": request.task_location}, [], config))
+        # Section: Placement always acquires the named item before attempting to place it.
+        steps.extend(_place_steps(request, config))
         return _validated_capability_result(request, steps, config)
     if request.task_type == "deliver_object":
         steps.extend(_delivery_steps(request, config))
@@ -155,11 +156,21 @@ def _validated_capability_result(
 def _acquire_steps(request: TaskRequest, config: SchedulerConfig) -> list[SkillStep]:
     """Special function: Expand object acquisition into find then pick primitives."""
     target = str(request.target.get("object_name", ""))
+    return _object_acquisition_steps(target, request.task_location, config)
+
+
+def _object_acquisition_steps(
+    target: str,
+    search_location: str | None,
+    config: SchedulerConfig,
+) -> list[SkillStep]:
+    """Special function: Build dependency-linked find and pick steps for one target item."""
+    # Section: A source location constrains the search; otherwise FIND_OBJECT performs global search.
     find_arguments = {
         "object_name": target,
-        "location": request.task_location or "",
-        "target_location": request.task_location,
-        "search_scope": "STRICT_LOCATION" if request.task_location else "GLOBAL",
+        "location": search_location or "",
+        "target_location": search_location,
+        "search_scope": "STRICT_LOCATION" if search_location else "GLOBAL",
         "approach_target": True,
     }
     find_step = _step("find_object", "FIND_OBJECT", find_arguments, [], config, "found_object")
@@ -172,6 +183,29 @@ def _acquire_steps(request: TaskRequest, config: SchedulerConfig) -> list[SkillS
         "picked_object",
     )
     return [find_step, pick_step]
+
+
+def _place_steps(request: TaskRequest, config: SchedulerConfig) -> list[SkillStep]:
+    """Special function: Expand placement into global acquisition followed by dependent placement."""
+    target = str(request.target.get("object_name", ""))
+    # Section: The parsed location is the placement destination, not an assumed pickup location.
+    steps = _object_acquisition_steps(target, None, config)
+    pick_step = steps[-1]
+    # Section: PLACE_OBJECT may execute only after PICK_OBJECT produced the held-item result.
+    place_step = _step(
+        "place_object",
+        "PLACE_OBJECT",
+        {
+            "object_name": target,
+            "target_location": request.task_location,
+            "requires_data": ["picked_object"],
+        },
+        [pick_step.step_id],
+        config,
+        "placed_object",
+    )
+    steps.append(place_step)
+    return steps
 
 
 def _delivery_steps(request: TaskRequest, config: SchedulerConfig) -> list[SkillStep]:

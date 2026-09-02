@@ -5,7 +5,7 @@
 from yasmin import Blackboard
 
 from robot_yasmin_tasks.gpsr import blackboard_keys as bb
-from robot_yasmin_tasks.gpsr.outcomes import RECOVERABLE_FAILURE, SUCCESS
+from robot_yasmin_tasks.gpsr.outcomes import INVALID_INPUT, RECOVERABLE_FAILURE, SUCCESS
 from robot_yasmin_tasks.skills.find_object_skill_sm import (
     BuildGoalState,
     FIND_OBJECT_GOAL,
@@ -49,3 +49,14 @@ def test_wrapper_without_ros_node_reports_infrastructure_failure() -> None:
     }
     assert FindObjectSkillSM()(blackboard) == RECOVERABLE_FAILURE
     assert blackboard[bb.LAST_SKILL_RESULT]["outcome"] == RECOVERABLE_FAILURE
+
+
+def test_unknown_category_fails_before_action_transport() -> None:
+    """Special function: An unsupported category cannot become an empty wildcard set."""
+    blackboard = Blackboard()
+    blackboard[bb.CURRENT_ACTION] = {
+        "action_type": "FIND_OBJECT",
+        "target_category": "fruit",
+    }
+    assert BuildGoalState().execute(blackboard) == INVALID_INPUT
+    assert blackboard[bb.LAST_SKILL_RESULT]["result"]["reason"] == "UNSUPPORTED_TARGET"

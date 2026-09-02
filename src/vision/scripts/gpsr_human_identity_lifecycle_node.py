@@ -6,6 +6,7 @@ from __future__ import annotations
 from pathlib import Path
 from threading import Lock
 from typing import Any
+from uuid import uuid4
 
 import numpy as np
 import rclpy
@@ -55,6 +56,7 @@ class GpsrHumanIdentityLifecycleNode(LifecycleNode):
         self.profile_service = None
         self.device = "0"
         self.confidence_threshold = 0.40
+        self.tracking_session_id = ""
         self.inference_lock = Lock()
 
     def on_configure(self, _state: State) -> TransitionCallbackReturn:
@@ -69,6 +71,8 @@ class GpsrHumanIdentityLifecycleNode(LifecycleNode):
             self.device = str(self.get_parameter("device").value)
             self.confidence_threshold = float(self.get_parameter("confidence_threshold").value)
             self.bridge = CvBridge()
+            # Section: A new session prevents reused tracker integers colliding across cleanup.
+            self.tracking_session_id = uuid4().hex
             self.person_model = YOLO(str(person_path))
             self.attribute_model = YOLO(str(attribute_path)) if attribute_path.is_file() else None
             self.database = IdentityDatabase(str(self.get_parameter("database_path").value))
@@ -155,6 +159,7 @@ class GpsrHumanIdentityLifecycleNode(LifecycleNode):
         self.database = None
         self.extractor = None
         self.matcher = None
+        self.tracking_session_id = ""
 
     def get_profile_callback(self, request: Any, response: Any) -> Any:
         """Special function: Resolve registered identity metadata without exposing the DB."""
@@ -251,8 +256,11 @@ class GpsrHumanIdentityLifecycleNode(LifecycleNode):
         }.get(match.status, RecognizedPerson.UNKNOWN)
         message.person_id = int(match.person_id) if match.status == "RECOGNIZED" else 0
         message.track_id = int(observation["track_id"])
+        message.tracking_session_id = self.tracking_session_id
+        message.person_uuid = ""
         profile = self.database.get_person_profile(message.person_id) if message.person_id > 0 else None
         if profile is not None:
+            message.person_uuid = str(profile.get("canonical_person_uuid", ""))
             message.person_name = str(profile["person_name"])
             message.age = max(0, min(int(profile["age"]), 65535))
             message.favourite_drink = str(profile["favourite_drink"])

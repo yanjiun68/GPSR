@@ -6,8 +6,6 @@ from dataclasses import replace
 import math
 from pathlib import Path
 import time
-from typing import Any
-
 import yaml
 from ament_index_python.packages import get_package_share_directory
 from yasmin import Blackboard, State, StateMachine
@@ -28,6 +26,7 @@ NAVIGATION_FAILURES = "_person_search_navigation_failures"
 MISSION_DEADLINE = "_person_search_mission_deadline"
 SCAN_INDEX = "_person_search_scan_index"
 SCAN_FAILURES = "_person_search_scan_failures"
+SCAN_HEADING_DEG = "_person_search_scan_heading_deg"
 
 # Section: Internal transitions describe loop control without extending public skill outcomes.
 READY = "ready"
@@ -89,13 +88,24 @@ class PersonSearchPolicy:
             0.1,
             float(search.get("scan_timeout_sec", 15.0)),
         )
-        configured_angles = search.get("scan_angles_deg", [60.0, -120.0])
-        if not isinstance(configured_angles, list):
-            raise ValueError("person_search.scan_angles_deg must be a YAML list.")
-        # Section: Reject non-finite rotations before they can reach the Nav2 action server.
-        self.scan_angles_rad = [math.radians(float(value)) for value in configured_angles]
-        if not all(math.isfinite(value) for value in self.scan_angles_rad):
-            raise ValueError("person_search.scan_angles_deg must contain finite numbers.")
+        # Section: Each configured value is an absolute offset from the arrival heading.
+        scan = dict(search.get("scan", {}))
+        raw_tiers = (
+            scan.get("fast_angles_deg", [0.0, 60.0, -60.0]),
+            scan.get("extended_angles_deg", [120.0, -120.0]),
+            scan.get("exhaustive_angles_deg", [180.0]),
+        )
+        if not all(isinstance(values, list) for values in raw_tiers):
+            raise ValueError("person_search.scan angle tiers must be YAML lists.")
+        tiers = tuple(list(values) for values in raw_tiers)
+        configured_headings = [float(value) for values in tiers for value in values]
+        if not configured_headings or configured_headings[0] != 0.0:
+            raise ValueError("person_search.scan.fast_angles_deg must begin with 0.")
+        if not all(math.isfinite(value) for value in configured_headings):
+            raise ValueError("person_search.scan headings must contain finite numbers.")
+        self.observation_headings_deg = configured_headings
+        # Section: Arrival already observes zero degrees, so only later headings need Spin goals.
+        self.scan_headings_deg = configured_headings[1:]
 
     def waypoints_for(self, action: ActionStepData) -> list[str]:
         """Special function: Select one strict waypoint or a copy of the global route."""
@@ -121,6 +131,27 @@ class PersonSearchPolicy:
         raise ValueError(f"Unsupported person search_scope: {scope or 'empty'}.")
 
 
+def normalized_heading_delta(desired_deg: float, current_deg: float) -> float:
+    """Special function: Convert absolute observation headings into shortest relative turns."""
+    raw_delta = float(desired_deg) - float(current_deg)
+    normalized = (raw_delta + 180.0) % 360.0 - 180.0
+    # Section: Resolve the exactly-opposite tie in the configured heading direction.
+    if normalized == -180.0 and raw_delta > 0.0:
+        return 180.0
+    return normalized
+
+
+def scan_spin_deltas(headings_deg: list[float]) -> list[float]:
+    """Special function: Expose deterministic relative spin arithmetic for camera-free tests."""
+    current = 0.0
+    deltas: list[float] = []
+    for desired in headings_deg:
+        delta = normalized_heading_delta(desired, current)
+        deltas.append(delta)
+        current = float(desired)
+    return deltas
+
+
 def _clear_loop_state(blackboard: Blackboard) -> None:
     """Special function: Remove every task-local loop key after a terminal outcome."""
     for key in (
@@ -132,6 +163,7 @@ def _clear_loop_state(blackboard: Blackboard) -> None:
         MISSION_DEADLINE,
         SCAN_INDEX,
         SCAN_FAILURES,
+        SCAN_HEADING_DEG,
     ):
         if key in blackboard:
             del blackboard[key]
@@ -186,6 +218,7 @@ class PreparePersonSearchState(State):
         blackboard[NAVIGATION_FAILURES] = []
         blackboard[SCAN_FAILURES] = []
         blackboard[SCAN_INDEX] = 0
+        blackboard[SCAN_HEADING_DEG] = 0.0
         # Section: One deadline bounds every navigation, observation, and scan in the route.
         mission_timeout = float(action.timeout_sec or self.policy.mission_timeout_sec)
         blackboard[MISSION_DEADLINE] = time.monotonic() + max(0.1, mission_timeout)
@@ -243,6 +276,7 @@ class NavigatePersonWaypointState(State):
             visited.append(waypoint)
             blackboard[VISITED_WAYPOINTS] = visited
             blackboard[SCAN_INDEX] = 0
+            blackboard[SCAN_HEADING_DEG] = 0.0
             return ARRIVED
         if outcome == CANCELED:
             blackboard[bb.LAST_SKILL_RESULT] = make_skill_result(
@@ -297,9 +331,13 @@ class RotatePersonSearchViewState(State):
         if remaining <= 0.0:
             return TIMEOUT
         scan_index = int(bb_get(blackboard, SCAN_INDEX, 0))
-        if scan_index >= len(self.policy.scan_angles_rad):
+        if scan_index >= len(self.policy.scan_headings_deg):
             return SCAN_EXHAUSTED
-        angle_rad = self.policy.scan_angles_rad[scan_index]
+        desired_heading_deg = float(self.policy.scan_headings_deg[scan_index])
+        current_heading_deg = float(bb_get(blackboard, SCAN_HEADING_DEG, 0.0))
+        angle_rad = math.radians(
+            normalized_heading_delta(desired_heading_deg, current_heading_deg)
+        )
         blackboard[SCAN_INDEX] = scan_index + 1
         spin = getattr(self.navigation, "spin_by_angle", None)
         if not callable(spin):
@@ -313,6 +351,7 @@ class RotatePersonSearchViewState(State):
         result_dict = result.to_dict() if hasattr(result, "to_dict") else dict(result)
         outcome = str(result_dict.get("outcome", FAILED))
         if outcome == SUCCESS:
+            blackboard[SCAN_HEADING_DEG] = desired_heading_deg
             return ROTATED
         if outcome == CANCELED:
             return CANCELED

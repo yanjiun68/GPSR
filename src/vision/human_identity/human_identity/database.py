@@ -35,6 +35,7 @@ class IdentityDatabase:
                 """
                 CREATE TABLE IF NOT EXISTS people (
                     person_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    canonical_person_uuid TEXT NOT NULL DEFAULT '',
                     person_name TEXT NOT NULL DEFAULT '',
                     age INTEGER,
                     favourite_drink TEXT NOT NULL DEFAULT '',
@@ -53,19 +54,29 @@ class IdentityDatabase:
                 );
                 """
             )
+            # Section: Existing SQLite databases gain the mapping column without data loss.
+            columns = {
+                str(row[1])
+                for row in self._connection.execute("PRAGMA table_info(people)").fetchall()
+            }
+            if "canonical_person_uuid" not in columns:
+                self._connection.execute(
+                    "ALTER TABLE people ADD COLUMN canonical_person_uuid TEXT NOT NULL DEFAULT ''"
+                )
 
     @staticmethod
     def _timestamp() -> str:
         """Special function: Produce a stable UTC timestamp for database records."""
         return datetime.now(timezone.utc).isoformat()
 
-    def create_registration_profile(self) -> int:
+    def create_registration_profile(self, canonical_person_uuid: str = "") -> int:
         """Special function: Allocate the next SQLite AUTOINCREMENT person ID."""
         timestamp = self._timestamp()
         with self._lock, self._connection:
             cursor = self._connection.execute(
-                "INSERT INTO people (created_at, updated_at) VALUES (?, ?)",
-                (timestamp, timestamp),
+                "INSERT INTO people (canonical_person_uuid, created_at, updated_at) "
+                "VALUES (?, ?, ?)",
+                (str(canonical_person_uuid).strip(), timestamp, timestamp),
             )
             return int(cursor.lastrowid)
 
@@ -75,7 +86,7 @@ class IdentityDatabase:
             return None
         with self._lock:
             row = self._connection.execute(
-                "SELECT person_id, person_name, age, favourite_drink "
+                "SELECT person_id, canonical_person_uuid, person_name, age, favourite_drink "
                 "FROM people WHERE person_id = ?",
                 (person_id,),
             ).fetchone()
@@ -83,10 +94,25 @@ class IdentityDatabase:
             return None
         return {
             "person_id": int(row["person_id"]),
+            "canonical_person_uuid": str(row["canonical_person_uuid"]),
             "person_name": str(row["person_name"]),
             "age": int(row["age"] or 0),
             "favourite_drink": str(row["favourite_drink"]),
         }
+
+    def bind_canonical_person(self, person_id: int, person_uuid: str) -> None:
+        """Special function: Bind a body-identity record to a shared semantic person UUID."""
+        normalized_uuid = str(person_uuid).strip()
+        if person_id <= 0 or not normalized_uuid:
+            raise ValueError("person_id and person_uuid must be non-empty")
+        if not self.person_exists(person_id):
+            raise KeyError(f"Person {person_id} does not exist")
+        with self._lock, self._connection:
+            self._connection.execute(
+                "UPDATE people SET canonical_person_uuid = ?, updated_at = ? "
+                "WHERE person_id = ?",
+                (normalized_uuid, self._timestamp(), person_id),
+            )
 
     def update_person_profile(
         self,

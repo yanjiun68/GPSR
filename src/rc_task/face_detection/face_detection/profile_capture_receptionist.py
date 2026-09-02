@@ -3,6 +3,7 @@ import copy
 import json
 import time
 from collections import deque
+from uuid import NAMESPACE_URL, uuid5
 
 import numpy as np
 import rclpy
@@ -61,6 +62,43 @@ def bbox_is_stable(bbox, last_center_area, center_tol, area_ratio_tol):
     return stable, (center_x, center_y, area)
 
 
+def canonical_person_uuid(profile_id, requested_uuid=""):
+    """Special function: Reuse a requested UUID or derive a stable profile-scoped UUID."""
+    explicit = str(requested_uuid or "").strip()
+    return explicit or str(uuid5(NAMESPACE_URL, f"putrabot-person:{str(profile_id).casefold()}"))
+
+
+def select_locked_face(face_payload, tracking_session_id, track_id):
+    """Special function: Select exactly one face associated with the requested canonical track."""
+    if not isinstance(face_payload, dict):
+        return None
+    requested_session = str(tracking_session_id).strip()
+    requested_track = int(track_id)
+    matches = []
+    for face in list(face_payload.get("faces", [])):
+        if not isinstance(face, dict):
+            continue
+        if (
+            str(face.get("tracking_session_id", "")).strip() == requested_session
+            and int(face.get("track_id", 0) or 0) == requested_track
+            and bool(face.get("has_track_id", False))
+        ):
+            candidate = copy.deepcopy(face)
+            candidate["stamp_sec"] = int(face_payload.get("stamp_sec", 0))
+            candidate["stamp_nanosec"] = int(face_payload.get("stamp_nanosec", 0))
+            candidate["detected"] = True
+            matches.append(candidate)
+    # Section: Multiple faces for one track are ambiguous and therefore rejected.
+    return matches[0] if len(matches) == 1 else None
+
+
+def locked_track_timed_out(tracking_session_id, last_seen, now, timeout_sec):
+    """Special function: Decide when an active exact-track enrollment must abort."""
+    return bool(str(tracking_session_id).strip()) and (
+        float(now) - float(last_seen) >= float(timeout_sec)
+    )
+
+
 class ProfileCaptureNode(Node):
     """Special function: Enroll named profiles from distinct, fresh, consistent face frames."""
 
@@ -91,6 +129,7 @@ class ProfileCaptureNode(Node):
         self.declare_parameter("center_tolerance_px", 40.0)
         self.declare_parameter("area_ratio_tolerance", 0.35)
         self.declare_parameter("feedback_period_sec", 0.5)
+        self.declare_parameter("track_loss_timeout_sec", 2.0)
  # get parameter and convert into suitable format , e.g. str , float . 
         self.face_topic = str(self.get_parameter("face_topic").value)
         self.appearance_topic = str(self.get_parameter("appearance_topic").value)
@@ -125,6 +164,9 @@ class ProfileCaptureNode(Node):
         self.feedback_period_sec = max(
             0.05, float(self.get_parameter("feedback_period_sec").value)
         )
+        self.track_loss_timeout_sec = max(
+            0.1, float(self.get_parameter("track_loss_timeout_sec").value)
+        )
 
         self.latest_face = None
         self.latest_appearance = None
@@ -134,9 +176,14 @@ class ProfileCaptureNode(Node):
         self.target_name = ""
         self.target_favorite_drink = ""
         self.target_age = 0
+        self.target_person_uuid = ""
+        self.target_tracking_session_id = ""
+        self.target_track_id = 0
+        self.last_target_seen_monotonic = 0.0
         self.last_center_area = None
         self.last_accepted_face_stamp = None
         self.last_selected_track_id = None
+        self.last_target_seen_monotonic = time.monotonic()
         self.embedding_samples = deque(maxlen=self.max_enrollment_samples)
         self.appearance_snapshot = self._make_unknown_appearance()
         # Section: SFace feature length is discovered from actual model output, never assumed.
@@ -269,6 +316,13 @@ class ProfileCaptureNode(Node):
         if role not in ("guest", "host"):
             self.get_logger().warn(f"Rejecting profile capture goal with unsupported role '{role}'.")
             return GoalResponse.REJECT
+        session_id = str(getattr(goal_request, "tracking_session_id", "")).strip()
+        track_id = int(getattr(goal_request, "track_id", 0) or 0)
+        if bool(session_id) != bool(track_id > 0):
+            self.get_logger().warn(
+                "Rejecting profile capture goal with an incomplete session/track lock."
+            )
+            return GoalResponse.REJECT
 
         self.get_logger().info(
             f"Accepted profile capture goal for profile_id={profile_id}, role={role}, name={goal_request.name.strip() or 'unknown'}."
@@ -286,6 +340,16 @@ class ProfileCaptureNode(Node):
         self.target_profile_id = goal_handle.request.profile_id.strip()
         self.target_role = goal_handle.request.role.strip().lower() or "guest"
         self.target_name = goal_handle.request.name.strip()
+        self.target_person_uuid = canonical_person_uuid(
+            self.target_profile_id,
+            getattr(goal_handle.request, "person_uuid", ""),
+        )
+        self.target_tracking_session_id = str(
+            getattr(goal_handle.request, "tracking_session_id", "")
+        ).strip()
+        self.target_track_id = int(getattr(goal_handle.request, "track_id", 0) or 0)
+        # Section: Give the requested track one configured grace period to reappear.
+        self.last_target_seen_monotonic = time.monotonic()
         self.target_favorite_drink = str(
             getattr(goal_handle.request, "favorite_drink", "")
         ).strip()
@@ -345,23 +409,32 @@ class ProfileCaptureNode(Node):
         """Special function: Accept one new, fresh, high-quality enrollment observation."""
         if self.latest_face is None or self.latest_appearance is None:
             return False
-
-        if not bool(self.latest_face.get("detected", False)):
+        face_data = self.latest_face
+        if self.target_tracking_session_id and self.target_track_id > 0:
+            face_data = select_locked_face(
+                self.latest_face,
+                self.target_tracking_session_id,
+                self.target_track_id,
+            )
+            if face_data is None:
+                return False
+            self.last_target_seen_monotonic = time.monotonic()
+        if not bool(face_data.get("detected", False)):
             return False
 
-        current_stamp = observation_stamp(self.latest_face)
-        if not observation_is_new(self.latest_face, self.last_accepted_face_stamp):
+        current_stamp = observation_stamp(face_data)
+        if not observation_is_new(face_data, self.last_accepted_face_stamp):
             return False
         if not observation_is_fresh(
-            self.latest_face,
+            face_data,
             self.get_clock().now().nanoseconds,
             self.max_face_age_sec,
         ):
             return False
-        if float(self.latest_face.get("det_score", 0.0)) < self.det_score_threshold:
+        if float(face_data.get("det_score", 0.0)) < self.det_score_threshold:
             return False
-        incoming_backend = str(self.latest_face.get("embedding_backend", '')).strip()
-        incoming_model = str(self.latest_face.get("embedding_model", '')).strip()
+        incoming_backend = str(face_data.get("embedding_backend", '')).strip()
+        incoming_model = str(face_data.get("embedding_model", '')).strip()
         if incoming_backend != self.embedding_backend or incoming_backend != EMBEDDING_BACKEND:
             self.get_logger().error(
                 f"Rejected enrollment backend '{incoming_backend}'; expected '{self.embedding_backend}'."
@@ -373,9 +446,9 @@ class ProfileCaptureNode(Node):
             )
             return False
 
-        bbox = self.latest_face.get("bbox", [])
-        embedding = self.latest_face.get("embedding", [])
-        incoming_dimension = int(self.latest_face.get('embedding_dimension', len(embedding)))
+        bbox = face_data.get("bbox", [])
+        embedding = face_data.get("embedding", [])
+        incoming_dimension = int(face_data.get('embedding_dimension', len(embedding)))
         if len(bbox) != 4 or len(embedding) != incoming_dimension or incoming_dimension <= 0:
             return False
         try:
@@ -385,8 +458,8 @@ class ProfileCaptureNode(Node):
             return False
 
         # Section: A track change invalidates all accumulated enrollment evidence.
-        has_track_id = bool(self.latest_face.get('has_track_id', False))
-        selected_track_id = int(self.latest_face.get('track_id', 0)) if has_track_id else None
+        has_track_id = bool(face_data.get('has_track_id', False))
+        selected_track_id = int(face_data.get('track_id', 0)) if has_track_id else None
         if (
             selected_track_id is not None
             and self.last_selected_track_id is not None
@@ -622,6 +695,7 @@ class ProfileCaptureNode(Node):
             role=profile.role,
             favorite_drink=profile.favorite_drink,
             age=profile.age,
+            person_uuid=self.target_person_uuid,
             embedding=averaged_embedding,
             shirt_color=profile.appearance.shirt_color,
             attributes=self._build_appearance_attributes(),
@@ -677,6 +751,23 @@ class ProfileCaptureNode(Node):
 
                 capture_ready = self._process_latest_observations()
 
+                if locked_track_timed_out(
+                    self.target_tracking_session_id,
+                    self.last_target_seen_monotonic,
+                    time.monotonic(),
+                    self.track_loss_timeout_sec,
+                ):
+                    self._publish_status("track_lost", 0.0, 0.0, self.target_profile_id)
+                    result.success = False
+                    result.message = (
+                        "TARGET_TRACK_LOST: requested session/track was absent for "
+                        f"{self.track_loss_timeout_sec:.1f} seconds."
+                    )
+                    result.person_uuid = self.target_person_uuid
+                    result.profile = PersonProfile()
+                    goal_handle.abort()
+                    return result
+
                 feedback.face_detected = bool(
                     self.latest_face is not None and self.latest_face.get("detected", False)
                 )
@@ -708,6 +799,7 @@ class ProfileCaptureNode(Node):
                     self._publish_profile(profile)
                     self._publish_status("completed", 1.0, profile.confidence_score, profile.profile_id)
                     result.success = True
+                    result.person_uuid = self.target_person_uuid
                     result.message = (
                         f"Captured and published profile '{profile.profile_id}' for role '{profile.role}'."
                     )
@@ -733,6 +825,9 @@ class ProfileCaptureNode(Node):
             self.target_name = ""
             self.target_favorite_drink = ""
             self.target_age = 0
+            self.target_person_uuid = ""
+            self.target_tracking_session_id = ""
+            self.target_track_id = 0
             self._publish_status("idle", 0.0, 0.0, "")
 
 

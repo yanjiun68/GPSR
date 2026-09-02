@@ -12,6 +12,7 @@ from robot_yasmin_tasks.gpsr.action_types import (
     PrimitiveCapability,
     load_primitive_registry,
 )
+from robot_yasmin_tasks.object_knowledge import ObjectKnowledge
 
 try:
     import yaml
@@ -26,6 +27,7 @@ class SchedulerConfig:
     known_locations: set[str] = field(default_factory=set)
     known_objects: set[str] = field(default_factory=set)
     known_categories: set[str] = field(default_factory=set)
+    object_aliases: dict[str, str] = field(default_factory=dict)
     known_people: set[str] = field(default_factory=set)
     supported_object_features: dict[str, list[str]] = field(default_factory=dict)
     supported_human_poses: set[str] = field(default_factory=set)
@@ -57,10 +59,13 @@ def normalize_symbol(value: Any) -> str:
 
 def default_config() -> SchedulerConfig:
     """Special function: Provide deterministic defaults for unit tests and missing YAML."""
+    # Section: Parser vocabulary derives from the same knowledge used by FindObject matching.
+    knowledge = ObjectKnowledge.from_file(ObjectKnowledge.default_path())
     return SchedulerConfig(
         known_locations={"kitchen", "living_room", "bedroom", "dining_room", "entrance", "exit", "operator", "instruction_point"},
-        known_objects={"apple", "banana", "bottle", "chair", "coke", "cup", "milk", "chips"},
-        known_categories={"drink", "food", "object"},
+        known_objects=knowledge.known_object_names(),
+        known_categories=knowledge.known_category_names(),
+        object_aliases=dict(knowledge.alias_to_object),
         known_people={"operator", "john", "mary"},
         supported_object_features={"shirt_color": ["red", "blue", "green", "black", "white"], "object_color": ["red", "blue", "green", "black", "white"]},
         supported_human_poses={"right_hand_raised", "left_hand_raised", "waving", "sitting", "standing"},
@@ -93,8 +98,10 @@ def load_config(
     data = yaml.safe_load(loaded_path.read_text(encoding="utf-8")) or {}
     return SchedulerConfig(
         known_locations={normalize_symbol(item) for item in data.get("known_locations", config.known_locations)},
-        known_objects={normalize_symbol(item) for item in data.get("known_objects", config.known_objects)},
-        known_categories={normalize_symbol(item) for item in data.get("known_categories", config.known_categories)},
+        # Section: Ignore duplicated scheduler vocabulary and retain authoritative object knowledge.
+        known_objects=set(config.known_objects),
+        known_categories=set(config.known_categories),
+        object_aliases=dict(config.object_aliases),
         known_people={normalize_symbol(item) for item in data.get("known_people", config.known_people)},
         supported_object_features={normalize_symbol(key): [normalize_symbol(item) for item in value] for key, value in dict(data.get("supported_object_features", config.supported_object_features)).items()},
         supported_human_poses={normalize_symbol(item) for item in data.get("supported_human_poses", config.supported_human_poses)},

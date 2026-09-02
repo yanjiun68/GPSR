@@ -63,6 +63,63 @@ def xywh_to_xyxy(bbox):
     return [x, y, x + width, y + height]
 
 
+def bbox_iou_xyxy(first, second):
+    """Special function: Measure overlap between two full-frame xyxy boxes."""
+    ax1, ay1, ax2, ay2 = [float(value) for value in first]
+    bx1, by1, bx2, by2 = [float(value) for value in second]
+    intersection = max(0.0, min(ax2, bx2) - max(ax1, bx1)) * max(
+        0.0, min(ay2, by2) - max(ay1, by1)
+    )
+    first_area = max(0.0, ax2 - ax1) * max(0.0, ay2 - ay1)
+    second_area = max(0.0, bx2 - bx1) * max(0.0, by2 - by1)
+    union = first_area + second_area - intersection
+    return intersection / union if union > 0.0 else 0.0
+
+
+def associate_faces_to_tracks(
+    face_boxes,
+    person_boxes,
+    minimum_iou=0.01,
+    ambiguity_margin=0.05,
+):
+    """Special function: Associate faces to people one-to-one with ambiguity rejection."""
+    # Section: Face-center containment outranks fallback IoU as the primary geometric cue.
+    eligible_by_face = {}
+    for face_index, face_box in enumerate(face_boxes):
+        x1, y1, x2, y2 = [float(value) for value in face_box]
+        center_x = (x1 + x2) / 2.0
+        center_y = (y1 + y2) / 2.0
+        pairs = []
+        for person_index, person_box in enumerate(person_boxes):
+            px1, py1, px2, py2 = [float(value) for value in person_box]
+            contained = px1 <= center_x <= px2 and py1 <= center_y <= py2
+            iou = bbox_iou_xyxy(face_box, person_box)
+            if contained or iou >= float(minimum_iou):
+                pairs.append((1 if contained else 0, iou, face_index, person_index))
+        pairs.sort(key=lambda item: (-item[0], -item[1], item[3]))
+        if len(pairs) > 1:
+            best = pairs[0]
+            second = pairs[1]
+            if best[0] == second[0] and best[1] - second[1] < float(ambiguity_margin):
+                continue
+        if pairs:
+            eligible_by_face[face_index] = pairs[0]
+
+    # Section: Descending score assignment prevents one track receiving multiple faces.
+    ranked = sorted(
+        eligible_by_face.values(),
+        key=lambda item: (-item[0], -item[1], item[2], item[3]),
+    )
+    assignments = {}
+    used_tracks = set()
+    for _contained, _iou, face_index, person_index in ranked:
+        if person_index in used_tracks:
+            continue
+        assignments[face_index] = person_index
+        used_tracks.add(person_index)
+    return assignments
+
+
 def median_depth_m(depth_image, bbox_xyxy, radius_px):
     """Special function: Compute robust non-zero median depth around the selected face center."""
     height, width = depth_image.shape[:2]
@@ -109,6 +166,8 @@ class FacePerceptionNode(Node):
         self.declare_parameter('tracked_person_topic', '/human_identity/recognized_people')
         self.declare_parameter('target_track_id', 0)
         self.declare_parameter('tracked_roi_max_age_sec', 0.5)
+        self.declare_parameter('face_track_association_iou_threshold', 0.01)
+        self.declare_parameter('face_track_ambiguity_margin', 0.05)
         self.declare_parameter('image_topic', '/camera/image_raw')
         self.declare_parameter('enable_depth', False)
         self.declare_parameter('depth_topic', '/camera/depth/image_raw')
@@ -135,6 +194,14 @@ class FacePerceptionNode(Node):
         self.tracked_roi_max_age_sec = max(
             0.0, float(self.get_parameter('tracked_roi_max_age_sec').value)
         )
+        self.face_track_association_iou_threshold = max(
+            0.0,
+            float(self.get_parameter('face_track_association_iou_threshold').value),
+        )
+        self.face_track_ambiguity_margin = max(
+            0.0,
+            float(self.get_parameter('face_track_ambiguity_margin').value),
+        )
         self.image_topic = str(self.get_parameter('image_topic').value)
         self.enable_depth = as_bool(self.get_parameter('enable_depth').value)
         self.depth_topic = str(self.get_parameter('depth_topic').value)
@@ -148,9 +215,9 @@ class FacePerceptionNode(Node):
         self.timing_log_period_sec = max(
             0.5, float(self.get_parameter('timing_log_period_sec').value)
         )
-        if self.face_selection_mode not in ('largest', 'target_roi', 'tracked_person'):
+        if self.face_selection_mode not in ('largest', 'target_roi', 'tracked_person', 'tracked_people'):
             raise ValueError(
-                "face_selection_mode must be 'largest', 'target_roi', or 'tracked_person'."
+                "face_selection_mode must be largest, target_roi, tracked_person, or tracked_people."
             )
 
         # Section: Resolve and load both ONNX models during node configuration, never at import time.
@@ -185,6 +252,7 @@ class FacePerceptionNode(Node):
         self.last_processed_stamp_ns = None
         self.latest_tracked_person = None
         self.latest_tracked_person_stamp_ns = None
+        self.latest_tracked_people = {}
         self.last_timing_log_monotonic = 0.0
         self.face_pub = self.create_publisher(String, self.face_topic, 10)
         self.subscription = None
@@ -209,7 +277,7 @@ class FacePerceptionNode(Node):
                 Image, self.image_topic, self.image_callback, qos_profile_sensor_data
             )
         self.tracked_person_sub = None
-        if self.face_selection_mode == 'tracked_person':
+        if self.face_selection_mode in ('tracked_person', 'tracked_people'):
             if RecognizedPerson is None:
                 raise RuntimeError(
                     'tracked_person mode requires the built vision/msg/RecognizedPerson interface.'
@@ -242,7 +310,11 @@ class FacePerceptionNode(Node):
         self.latest_depth_msg = depth_msg
 
     def tracked_person_callback(self, msg):
-        """Special function: Cache the requested or nearest existing tracked-person ROI."""
+        """Special function: Cache every canonical track and the compatible selected track."""
+        session_id = str(getattr(msg, 'tracking_session_id', '')).strip()
+        key = f"{session_id}:{int(msg.track_id)}" if session_id else f"legacy:{int(msg.track_id)}"
+        stamp_ns = observation_stamp_ns(msg)
+        self.latest_tracked_people[key] = (msg, stamp_ns)
         if self.target_track_id > 0:
             selected = int(msg.track_id) == self.target_track_id
         else:
@@ -250,6 +322,17 @@ class FacePerceptionNode(Node):
         if selected:
             self.latest_tracked_person = msg
             self.latest_tracked_person_stamp_ns = observation_stamp_ns(msg)
+
+    def _tracked_people_for_frame(self, image_stamp_ns):
+        """Special function: Return only session-aware person boxes fresh for this image."""
+        maximum_delta = int(self.tracked_roi_max_age_sec * 1_000_000_000)
+        fresh = []
+        for key, (person, stamp_ns) in list(self.latest_tracked_people.items()):
+            if stamp_ns is None or abs(int(image_stamp_ns) - int(stamp_ns)) > maximum_delta:
+                self.latest_tracked_people.pop(key, None)
+                continue
+            fresh.append((key, person))
+        return sorted(fresh, key=lambda item: item[0])
 
     def _frame_is_fresh(self, image_msg):
         """Special function: Reject unstamped or stale cached camera observations."""
@@ -267,6 +350,8 @@ class FacePerceptionNode(Node):
             if len(self.target_roi) != 4 or float(self.target_roi[2]) <= float(self.target_roi[0]):
                 return None, 0, False
             return self.target_roi, 0, False
+        if self.face_selection_mode == 'tracked_people':
+            return None, 0, False
         if self.latest_tracked_person is None or self.latest_tracked_person_stamp_ns is None:
             return None, 0, False
         roi_age_ns = abs(int(image_stamp_ns) - int(self.latest_tracked_person_stamp_ns))
@@ -289,7 +374,14 @@ class FacePerceptionNode(Node):
         self.last_processed_stamp_ns = stamp_ns
         self._process_frame(image_msg, self.latest_depth_msg, stamp_ns)
 
-    def _face_payload(self, observation, track_id, has_track_id):
+    def _face_payload(
+        self,
+        observation,
+        track_id=0,
+        has_track_id=False,
+        tracking_session_id='',
+        person_bbox=None,
+    ):
         """Special function: Isolate the legacy JSON conversion from backend inference."""
         return {
             'bbox': xywh_to_xyxy(observation.bbox),
@@ -298,6 +390,8 @@ class FacePerceptionNode(Node):
             'kps': [[float(x), float(y)] for x, y in observation.landmarks.tolist()],
             'track_id': int(track_id),
             'has_track_id': bool(has_track_id),
+            'tracking_session_id': str(tracking_session_id),
+            'person_bbox': list(person_bbox or []),
             'embedding_backend': EMBEDDING_BACKEND,
             'embedding_model': self.backend.embedding_model,
             'embedding_dimension': int(observation.embedding.size),
@@ -319,6 +413,7 @@ class FacePerceptionNode(Node):
             'stamp_nanosec': int(image_msg.header.stamp.nanosec),
             'track_id': int(track_id),
             'has_track_id': bool(has_track_id),
+            'tracking_session_id': '',
             'face_count': 0,
             'faces': [],
             'selection_mode': self.face_selection_mode,
@@ -350,13 +445,51 @@ class FacePerceptionNode(Node):
             return
         selected = select_observation(observations)
         output['face_count'] = len(observations)
-        output['faces'] = [
-            self._face_payload(observation, track_id, has_track_id)
-            for observation in observations
-        ]
+        face_payloads = [self._face_payload(observation) for observation in observations]
+        if self.face_selection_mode == 'tracked_people':
+            tracked_people = self._tracked_people_for_frame(stamp_ns)
+            assignments = associate_faces_to_tracks(
+                [xywh_to_xyxy(observation.bbox) for observation in observations],
+                [list(person.bbox_xyxy) for _key, person in tracked_people],
+                self.face_track_association_iou_threshold,
+                self.face_track_ambiguity_margin,
+            )
+            for face_index, person_index in assignments.items():
+                _key, person = tracked_people[person_index]
+                face_payloads[face_index].update({
+                    'track_id': int(person.track_id),
+                    'has_track_id': True,
+                    'tracking_session_id': str(
+                        getattr(person, 'tracking_session_id', '')
+                    ),
+                    'person_bbox': list(person.bbox_xyxy),
+                })
+            associated_indices = list(assignments)
+            selected_index = (
+                max(
+                    associated_indices,
+                    key=lambda index: bbox_area_xywh(observations[index].bbox),
+                )
+                if associated_indices else None
+            )
+            selected = observations[selected_index] if selected_index is not None else None
+            if selected_index is not None:
+                selected_payload = face_payloads[selected_index]
+                track_id = int(selected_payload['track_id'])
+                has_track_id = True
+                output['tracking_session_id'] = selected_payload['tracking_session_id']
+                output['selected_roi'] = list(selected_payload['person_bbox'])
+        else:
+            face_payloads = [
+                self._face_payload(observation, track_id, has_track_id)
+                for observation in observations
+            ]
+        output['faces'] = face_payloads
         output['embedding_dimension'] = int(self.backend.embedding_dimension or 0)
         if selected is not None:
             output.update(self._face_payload(selected, track_id, has_track_id))
+            if self.face_selection_mode == 'tracked_people':
+                output.update(face_payloads[selected_index])
             output['detected'] = True
             if depth_msg is not None:
                 try:

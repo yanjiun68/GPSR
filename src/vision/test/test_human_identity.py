@@ -48,6 +48,16 @@ def test_person_ids_are_persistent_and_ascending(tmp_path: Path) -> None:
     reopened.close()
 
 
+def test_body_identity_can_bind_shared_canonical_uuid() -> None:
+    """Special function: Vision keeps its own features while sharing semantic identity."""
+    database = IdentityDatabase(":memory:")
+    person_id = database.create_registration_profile("person-uuid-42")
+    assert database.get_person_profile(person_id)["canonical_person_uuid"] == "person-uuid-42"
+    database.bind_canonical_person(person_id, "person-uuid-43")
+    assert database.get_person_profile(person_id)["canonical_person_uuid"] == "person-uuid-43"
+    database.close()
+
+
 def test_person_id_zero_is_reserved_for_unknown() -> None:
     """Special function: Unknown ID zero is neither stored nor accepted for profile updates."""
     database = IdentityDatabase(":memory:")
@@ -66,6 +76,7 @@ def test_explicit_profile_update_changes_only_selected_fields() -> None:
     database.update_person_profile(person_id, "Ignored", 25, "tea", False, True, False)
     assert database.get_person_profile(person_id) == {
         "person_id": person_id,
+        "canonical_person_uuid": "",
         "person_name": "Alex",
         "age": 25,
         "favourite_drink": "orange juice",

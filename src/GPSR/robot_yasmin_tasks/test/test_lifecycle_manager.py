@@ -1,5 +1,6 @@
 """Section: Central GPSR lifecycle-manager transition policy tests."""
 
+import json
 from pathlib import Path
 import threading
 import time
@@ -8,7 +9,10 @@ from types import SimpleNamespace
 import pytest
 from lifecycle_msgs.msg import State, Transition
 
-from robot_yasmin_tasks.gpsr.action_types import ALLOWED_ACTION_TYPES
+from robot_yasmin_tasks.gpsr.action_types import (
+    ALLOWED_ACTION_TYPES,
+    GPSR_MANAGED_LIFECYCLE_NODES,
+)
 from robot_yasmin_tasks.gpsr.lifecycle_manager import (
     GpsrLifecycleManager,
     SkillLifecycleSpec,
@@ -23,19 +27,66 @@ def test_registry_covers_every_dispatchable_skill_state_machine() -> None:
     assert set(registry) == ALLOWED_ACTION_TYPES
 
 
+def test_registry_manages_only_approved_transient_gpsr_nodes() -> None:
+    """Special function: Keep hardware, arm, camera, and Nav2 nodes persistently external."""
+    # Section: Load the production registry and collect every transition target.
+    manager = object.__new__(GpsrLifecycleManager)
+    registry_path = Path(__file__).parents[1] / "config" / "skill_registry.yaml"
+    registry = manager.load_registry(str(registry_path))
+    managed_nodes = {
+        node_name
+        for specification in registry.values()
+        for node_name in specification.lifecycle_nodes
+    }
+
+    # Section: The complete configured target set must be inside the code-owned allowlist.
+    assert managed_nodes <= GPSR_MANAGED_LIFECYCLE_NODES
+    assert not any("my_robot_nav" in node_name for node_name in managed_nodes)
+    assert not any("arm" in node_name or "rx200" in node_name for node_name in managed_nodes)
+
+
+@pytest.mark.parametrize(
+    "unapproved_node",
+    [
+        "/my_robot_nav",
+        "/base_driver",
+        "/controller_manager",
+        "/rx200_arm_driver",
+        "/camera/camera",
+    ],
+)
+def test_registry_rejects_non_gpsr_lifecycle_targets(
+    tmp_path: Path,
+    unapproved_node: str,
+) -> None:
+    """Special function: Refuse startup if configuration tries to own persistent drivers."""
+    # Section: Copy the complete registry so exact primitive coverage remains valid.
+    production_path = Path(__file__).parents[1] / "config" / "skill_registry.yaml"
+    payload = json.loads(production_path.read_text(encoding="utf-8"))
+    payload["skills"]["NAVIGATE"]["lifecycle_nodes"] = [unapproved_node]
+    unsafe_path = tmp_path / "unsafe_skill_registry.yaml"
+    unsafe_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    # Section: Registry admission must fail before any lifecycle client is created.
+    manager = object.__new__(GpsrLifecycleManager)
+    with pytest.raises(RuntimeError, match="non-GPSR lifecycle resources"):
+        manager.load_registry(str(unsafe_path))
+
+
 def test_person_routes_report_truthful_resource_ownership() -> None:
-    """Special function: Persistent CPU identity stays outside transient GPU ownership."""
+    """Special function: Both person routes reuse one managed tracker without duplicate nodes."""
     # Section: Load production policy rather than duplicating its node lists in the test.
     manager = object.__new__(GpsrLifecycleManager)
     registry_path = Path(__file__).parents[1] / "config" / "skill_registry.yaml"
     registry = manager.load_registry(str(registry_path))
     identity_nodes = set(registry["FIND_PERSON"].lifecycle_nodes)
     attribute_nodes = set(registry["FIND_PERSON_BY_ATTRIBUTE"].lifecycle_nodes)
-    assert registry["FIND_PERSON"].conflict_group == ""
-    assert identity_nodes == set()
+    assert registry["FIND_PERSON"].conflict_group == "vision_gpu"
+    assert identity_nodes == {"/gpsr_human_identity_node"}
     assert "/find_person_by_attribute_skill_server" in attribute_nodes
     assert "/gpsr_tracked_appearance_node" in attribute_nodes
     assert registry["FIND_PERSON_BY_ATTRIBUTE"].conflict_group == "vision_gpu"
+    assert identity_nodes <= attribute_nodes
 
 
 def test_extract_person_info_reuses_tracked_perception_and_owns_its_server() -> None:

@@ -11,28 +11,7 @@ rooms:
   entrance:
     viewpoints: [entrance]
 
-# Section: Semantic priors control ordering and never remove global fallback rooms.
-object_priors:
-  bottle: [kitchen, dining_room, living_room, bedroom]
-  chair: [dining_room, living_room, bedroom, entrance]
-  coke: [kitchen, dining_room, living_room]
-  cup: [kitchen, dining_room, living_room]
-  milk: [kitchen, dining_room]
-  apple: [kitchen, dining_room]
-  banana: [kitchen, dining_room]
-  chips: [kitchen, living_room]
-
-# Section: Category priors are used only when no object-specific prior exists.
-category_priors:
-  drink: [kitchen, dining_room, living_room, bedroom]
-  food: [kitchen, dining_room, living_room]
-  object: [kitchen, dining_room, living_room, bedroom, entrance]
-
-# Section: Category goals expand to detector-native object labels.
-category_members:
-  drink: [bottle, cup, coke, milk]
-  food: [apple, banana, chips]
-  object: []
+# Section: Object aliases, categories, members, detector labels, and priors live in object_knowledge.yaml.
 
 # Section: Angles are desired offsets from the arrival heading, not raw wheel commands.
 scan:

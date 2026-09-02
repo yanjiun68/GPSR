@@ -22,7 +22,11 @@ from robot_yasmin_tasks.gpsr.action_types import (
     unavailable_primitives,
 )
 from robot_yasmin_tasks.gpsr.blackboard_utils import bb_get
-from robot_yasmin_tasks.gpsr.models import make_skill_result, normalize_action_step
+from robot_yasmin_tasks.gpsr.models import (
+    make_skill_result,
+    normalize_action_step,
+    summarize_action_queue_failure,
+)
 from robot_yasmin_tasks.gpsr.outcomes import (
     CANCELED,
     FATAL_FAILURE,
@@ -628,10 +632,15 @@ def main() -> None:
             result = ExecuteActionQueue.Result()
             result.success = outcome == SUCCESS
             result.outcome = outcome
-            result.results = [
-                result_to_msg(SkillResult, item)
-                for item in list(bb_get(blackboard, bb.SKILL_RESULTS, []))
-            ]
+            # Section: Preserve each structured result for both ROS response and exact logs.
+            skill_results = list(bb_get(blackboard, bb.SKILL_RESULTS, []))
+            result.results = [result_to_msg(SkillResult, item) for item in skill_results]
+            if outcome != SUCCESS:
+                queue_id = str(getattr(goal_handle.request.queue, "task_id", ""))
+                failure = summarize_action_queue_failure(outcome, skill_results)
+                node.get_logger().error(
+                    f"[GPSR_EXECUTOR] ActionQueue failed: queue={queue_id} {failure}"
+                )
             if outcome == SUCCESS:
                 goal_handle.succeed()
             elif outcome == CANCELED:

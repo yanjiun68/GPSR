@@ -108,16 +108,24 @@ def _verbal_person_ref(
     candidate: dict[str, Any],
 ) -> dict[str, Any]:
     """Special function: Build a normalized reference for a verbally confirmed candidate."""
-    # Section: Candidate tracking remains optional because the face pipeline also supports largest-face mode.
-    tracking_id = candidate.get("tracking_id")
+    # Section: Verbal identity remains bound to one canonical tracking session and track.
+    tracking_id = candidate.get("track_id", candidate.get("tracking_id"))
+    tracking_session_id = str(candidate.get("tracking_session_id", "")).strip()
     observation = dict(candidate.get("observation", {}))
-    person_id = f"track_{tracking_id}" if tracking_id is not None else target_name
+    person_id = (
+        f"track_{tracking_session_id}_{tracking_id}"
+        if tracking_session_id and tracking_id is not None
+        else target_name
+    )
     return {
         "person_id": str(person_id),
         "name": target_name,
         "target_name": target_name,
         "profile_id": None,
         "tracking_id": tracking_id,
+        "track_id": tracking_id,
+        "tracking_session_id": tracking_session_id,
+        "candidate_key": str(candidate.get("candidate_id", "")),
         "location": str(action.target_location or action.parameters.get("location", "")),
         "pose": observation.get("pose"),
         "confidence": 1.0,
@@ -413,7 +421,15 @@ class VerbalIdentificationState(State):
                 )
                 return outcome
             candidate = dict(candidate_response["candidate"])
-            candidate_id = str(candidate.get("candidate_id", "untracked:current_face"))
+            candidate_id = str(candidate.get("candidate_id", "")).strip()
+            if not candidate_id:
+                return _store_result(
+                    blackboard,
+                    action,
+                    FAILED,
+                    "FIND_PERSON rejected a candidate without a stable identity key.",
+                    recoverable=True,
+                )
             registry.setdefault("detected", []).append(candidate_id)
             blackboard[CANDIDATE_REGISTRY] = registry
             decision = "unknown"
@@ -518,6 +534,8 @@ class EnrollAndStoreState(State):
             )
             if enrollment.get("status") == "enrolled" and enrollment.get("profile_id"):
                 person_ref["profile_id"] = str(enrollment["profile_id"])
+            if enrollment.get("status") == "enrolled" and enrollment.get("person_uuid"):
+                person_ref["person_uuid"] = str(enrollment["person_uuid"])
             # Section: Cancellation remains terminal even though ordinary enrollment failures are non-fatal.
             if enrollment.get("status") == "canceled" or _is_canceled(blackboard):
                 return _store_result(

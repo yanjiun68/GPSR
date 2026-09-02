@@ -183,7 +183,7 @@ def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument("image_topic", default_value="/camera/image_raw", description="RGB image topic from the camera adapter."),
         DeclareLaunchArgument("model_path", default_value=default_model_path, description="Path to pose_landmarker_full.task."),
-        DeclareLaunchArgument("num_poses", default_value="2", description="Maximum number of poses to detect."),
+        DeclareLaunchArgument("num_poses", default_value="4", description="Maximum number of poses to detect."),
         DeclareLaunchArgument("min_detection_confidence", default_value="0.60", description="Minimum pose detection confidence."),
         DeclareLaunchArgument("min_presence_confidence", default_value="0.60", description="Minimum pose presence confidence."),
         DeclareLaunchArgument("min_tracking_confidence", default_value="0.65", description="Minimum pose tracking confidence."),

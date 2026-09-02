@@ -163,6 +163,17 @@ def build_capture_goal(blackboard, goal_factory=CaptureNamedProfile.Goal):
     goal.profile_id = profile_id
     goal.role = role
     goal.name = name
+    # Section: Optional canonical and transient identity locks are passed when available.
+    if hasattr(goal, 'person_uuid'):
+        goal.person_uuid = str(
+            blackboard_get(blackboard, 'person_uuid', '')
+        ).strip()
+    if hasattr(goal, 'tracking_session_id'):
+        goal.tracking_session_id = str(
+            blackboard_get(blackboard, 'tracking_session_id', '')
+        ).strip()
+    if hasattr(goal, 'track_id'):
+        goal.track_id = int(blackboard_get(blackboard, 'track_id', 0) or 0)
 
     # Section: Refuse requested metadata when the generated action has not been extended yet.
     missing_fields = []

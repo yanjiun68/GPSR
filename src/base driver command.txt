@@ -1,0 +1,23 @@
+ros2 launch my_robot_nav static_map_nav.launch.py \
+  map:="$PWD/maps/gpsr_map.yaml" \
+  waypoints_file:="$PWD/waypoints/gpsr_waypoint.yaml" \
+  use_sim_time:=false \
+  use_rviz:=true
+
+================================================
+
+ros2 service call /gpsr/schedule_command \
+  robot_ai_interfaces/srv/ScheduleCommand \
+  "{
+    command_id: 'gpsr_001',
+    instruction: 'go to living room and find bottles',
+    dry_run: false,
+    execute: true,
+    overall_timeout_sec: 300.0
+  }"
+
+  ================================================
+
+  
+  Generate a UI ( either localhost or local GUI to show the reason of error. You must list all the nodes and pinpoint which is failing. )
+ Discuss whether to use yasmin state machine for top level retry attempt visualization. 

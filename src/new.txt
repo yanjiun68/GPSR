@@ -30,7 +30,7 @@ control_msgs/action/FollowJointTrajectory \
     ],
     points: [
       {
-       positions: [-0.089, -0.219, -0.517 , 0.827 , 1.687] ,
+       positions: [-0.089, -0.456, -0.953 , 1.154 , 0.000] ,
         time_from_start: {sec: 6, nanosec: 0}
       }
     ]

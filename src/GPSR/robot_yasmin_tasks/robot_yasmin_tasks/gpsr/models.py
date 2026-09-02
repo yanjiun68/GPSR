@@ -45,6 +45,45 @@ class SkillResultData:
         return {"action_type": self.action_type, "outcome": self.outcome, "message": self.message, "result": self.result, "recoverable": self.recoverable, "fatal": self.fatal}
 
 
+def format_skill_failure(result: dict[str, Any]) -> str:
+    """Special function: Preserve the exact failing action, outcome, reason, and details."""
+    # Section: Normalize mandatory diagnostic fields without hiding missing producer data.
+    action_type = str(result.get("action_type", "") or "unknown_action")
+    outcome = str(result.get("outcome", "") or "unknown_outcome")
+    reason = str(result.get("message", "") or "no failure message provided")
+    details = result.get("result", {})
+
+    # Section: Include structured client details when they carry additional failure evidence.
+    details_text = ""
+    if details not in ({}, None, ""):
+        try:
+            details_text = f" details={json.dumps(details, sort_keys=True)}"
+        except (TypeError, ValueError):
+            details_text = f" details={details!r}"
+    return f"action={action_type} outcome={outcome} reason={reason}{details_text}"
+
+
+def summarize_action_queue_failure(
+    queue_outcome: str,
+    results: list[dict[str, Any]],
+) -> str:
+    """Special function: Select and format the executor's terminal failed SkillResult."""
+    # Section: Prefer the last non-success result because it terminates queue execution.
+    failures = [
+        result
+        for result in results
+        if str(result.get("outcome", "")).strip().lower() != "success"
+    ]
+    if failures:
+        return format_skill_failure(failures[-1])
+
+    # Section: Retain the queue outcome when an abnormal executor returns no skill result.
+    return (
+        f"action=unknown_action outcome={str(queue_outcome or 'unknown_outcome')} "
+        "reason=executor returned no failed SkillResult"
+    )
+
+
 def parse_parameters(raw: Any) -> dict[str, Any]:
     """Special function: Parse JSON parameter payloads deterministically."""
     if isinstance(raw, dict):

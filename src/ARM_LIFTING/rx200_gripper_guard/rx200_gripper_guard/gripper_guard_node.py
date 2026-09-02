@@ -57,6 +57,9 @@ class GripperGuardNode(Node):
         self._load_history: deque[float] = deque(maxlen=self.history_length)
         self._goal_reserved = False
         self._commanded_pwm = 0.0
+        self._close_commands_enabled = False
+        self._stop_published = True
+        self._pwm_mode_verified_once = False
         self._load_baseline = 0.0
         self._phase = phase.IDLE
         self._last_observation = self._empty_observation()
@@ -81,7 +84,9 @@ class GripperGuardNode(Node):
             self,
             self.register_service,
             self.motor_joint,
-            self.health_update_rate_hz,
+            self.health_fast_update_rate_hz,
+            self.health_medium_update_rate_hz,
+            self.health_slow_update_rate_hz,
             self.health_group,
             self.health_enabled,
         )
@@ -95,7 +100,7 @@ class GripperGuardNode(Node):
             callback_group=self.action_group,
         )
         self.diagnostic_timer = self.create_timer(
-            1.0 / max(0.1, self.health_update_rate_hz),
+            1.0,
             self._publish_diagnostics,
             callback_group=self.health_group,
         )
@@ -122,23 +127,28 @@ class GripperGuardNode(Node):
         self.declare_parameter("control.min_pwm", -200.0)
         self.declare_parameter("control.max_pwm", 200.0)
         self.declare_parameter("control.max_close_pwm_magnitude", 75.0)
+        self.declare_parameter("control.command_mode", "pwm")
+        self.declare_parameter("control.expected_operating_mode", phase.PWM_OPERATING_MODE)
 
-        # Section: Contact values remain neutral until real calibration data is collected.
-        self.declare_parameter("contact.required_samples", 5)
-        self.declare_parameter("contact.velocity_threshold", 0.0)
-        self.declare_parameter("contact.position_span_threshold", 0.0)
-        self.declare_parameter("contact.load_delta_threshold", 0.0)
+        # Section: Conservative initial thresholds are positive and remain calibratable.
+        self.declare_parameter("contact.required_samples", 3)
+        self.declare_parameter("contact.velocity_threshold", 0.02)
+        self.declare_parameter("contact.position_span_threshold", 0.003)
+        self.declare_parameter("contact.load_delta_threshold", 10.0)
         self.declare_parameter("contact.require_load_confirmation", False)
-        self.declare_parameter("contact.aperture_margin", 0.0)
-        self.declare_parameter("contact.history_length", 5)
-        self.declare_parameter("calibration.empty_closed_aperture", 0.0)
+        self.declare_parameter("contact.aperture_margin", 0.001)
+        self.declare_parameter("contact.history_length", 3)
+        self.declare_parameter("calibration.empty_closed_aperture", 0.015)
 
         # Section: Safety timeouts and low-rate health polling.
-        self.declare_parameter("safety.feedback_timeout_sec", 0.5)
+        self.declare_parameter("safety.feedback_timeout_sec", 0.25)
         self.declare_parameter("safety.action_timeout_sec", 5.0)
         self.declare_parameter("safety.stop_pwm", 0.0)
         self.declare_parameter("health.enabled", True)
-        self.declare_parameter("health.update_rate_hz", 1.0)
+        self.declare_parameter("health.fast_update_rate_hz", 10.0)
+        self.declare_parameter("health.medium_update_rate_hz", 2.0)
+        self.declare_parameter("health.slow_update_rate_hz", 0.2)
+        self.declare_parameter("health.critical_status_timeout_sec", 0.5)
 
     def _load_parameters(self) -> None:
         """Read declared values once for deterministic action behavior."""
@@ -161,6 +171,10 @@ class GripperGuardNode(Node):
         self.max_pwm = float(self.get_parameter("control.max_pwm").value)
         self.max_close_pwm_magnitude = float(
             self.get_parameter("control.max_close_pwm_magnitude").value
+        )
+        self.command_mode = str(self.get_parameter("control.command_mode").value).lower()
+        self.expected_operating_mode = int(
+            self.get_parameter("control.expected_operating_mode").value
         )
         self.required_samples = int(self.get_parameter("contact.required_samples").value)
         self.velocity_threshold = float(
@@ -186,7 +200,23 @@ class GripperGuardNode(Node):
         self.action_timeout_sec = float(self.get_parameter("safety.action_timeout_sec").value)
         self.stop_pwm = float(self.get_parameter("safety.stop_pwm").value)
         self.health_enabled = bool(self.get_parameter("health.enabled").value)
-        self.health_update_rate_hz = float(self.get_parameter("health.update_rate_hz").value)
+        self.health_fast_update_rate_hz = float(
+            self.get_parameter("health.fast_update_rate_hz").value
+        )
+        self.health_medium_update_rate_hz = float(
+            self.get_parameter("health.medium_update_rate_hz").value
+        )
+        self.health_slow_update_rate_hz = float(
+            self.get_parameter("health.slow_update_rate_hz").value
+        )
+        self.critical_status_timeout_sec = float(
+            self.get_parameter("health.critical_status_timeout_sec").value
+        )
+        if (
+            self.command_mode != "pwm"
+            or self.expected_operating_mode != phase.PWM_OPERATING_MODE
+        ):
+            raise ValueError("gripper guard supports only verified DYNAMIXEL PWM mode (16)")
 
     def _joint_state_callback(self, message: JointState) -> None:
         """Extract motor feedback by name without using synthesized finger effort or velocity."""
@@ -198,12 +228,10 @@ class GripperGuardNode(Node):
         if motor_index >= len(message.position) or finger_index >= len(message.position):
             return
 
-        # Section: Missing motor velocity or effort is tolerated as zero-valued optional data.
-        motor_velocity = (
-            float(message.velocity[motor_index])
-            if motor_index < len(message.velocity)
-            else 0.0
-        )
+        # Section: Missing/non-finite motion feedback is unsafe and must age out the watchdog.
+        if motor_index >= len(message.velocity):
+            return
+        motor_velocity = float(message.velocity[motor_index])
         motor_effort = (
             float(message.effort[motor_index]) if motor_index < len(message.effort) else 0.0
         )
@@ -211,6 +239,15 @@ class GripperGuardNode(Node):
         right_index = names.get(self.right_finger_joint)
         if right_index is not None and right_index < len(message.position):
             right_position = float(message.position[right_index])
+
+        sample_values = (
+            float(message.position[motor_index]),
+            motor_velocity,
+            float(message.position[finger_index]),
+            motor_effort,
+        )
+        if not all(math.isfinite(value) for value in sample_values):
+            return
 
         now = self._now_seconds()
         with self._feedback_lock:
@@ -236,6 +273,16 @@ class GripperGuardNode(Node):
                 return GoalResponse.REJECT
             snapshot = self._feedback_snapshot()
             health = self.health_monitor.snapshot()
+            health_valid = (
+                not self.health_enabled
+                or (
+                    health.critical_status_fresh(
+                        self._now_seconds(), self.critical_status_timeout_sec
+                    )
+                    and not health.hardware_fault
+                    and health.operating_mode_matches(self.expected_operating_mode)
+                )
+            )
             valid = (
                 snapshot.feedback_valid
                 and self._now_seconds() - snapshot.timestamp <= self.feedback_timeout_sec
@@ -244,14 +291,16 @@ class GripperGuardNode(Node):
                 and math.isfinite(goal_request.timeout_sec)
                 and goal_request.close_pwm < 0.0
                 and goal_request.timeout_sec > 0.0
-                and not (self.health_enabled and health.hardware_fault)
+                and health_valid
             )
             if not valid:
                 self.get_logger().warn(
-                    "Rejected CloseUntilContact goal: feedback, direction, timeout, "
-                    "or health prerequisite is invalid"
+                    "Rejected CloseUntilContact goal: feedback/direction/timeout invalid, "
+                    f"or health contract not ready (error={health.hardware_error_status}, "
+                    f"mode={health.operating_mode}, expected_mode={self.expected_operating_mode})"
                 )
                 return GoalResponse.REJECT
+            self._pwm_mode_verified_once = True
             self._goal_reserved = True
         self.get_logger().info("CloseUntilContact goal accepted")
         return GoalResponse.ACCEPT
@@ -286,13 +335,14 @@ class GripperGuardNode(Node):
         close_pwm = self._bounded_close_pwm(float(goal_handle.request.close_pwm))
         hold_pwm = self._bounded_hold_pwm(float(goal_handle.request.hold_pwm), close_pwm)
         start_time = self._now_seconds()
-        next_command_time = start_time
+        next_command_time = start_time + self.command_period_sec
 
         try:
             guard.transition(phase.CLOSING)
             self._phase = guard.state
             self.contact_publisher.publish(Bool(data=False))
             self.get_logger().info("Closing gripper")
+            self._enable_closing_output()
             self.start_close(close_pwm)
 
             while rclpy.ok():
@@ -321,8 +371,37 @@ class GripperGuardNode(Node):
                     guard.transition(phase.FAULT)
                     self._phase = guard.state
                     reason = phase.REASON_HARDWARE_FAULT
-                    self.get_logger().error("Hardware error detected")
+                    self.get_logger().error(
+                        "Hardware fault: "
+                        f"status={health.hardware_error_status}, command={self._commanded_pwm}, "
+                        f"position={snapshot.motor_position:.5f}, "
+                        f"velocity={snapshot.motor_velocity:.5f}, "
+                        f"load={health.present_load}, pwm={health.present_pwm}"
+                    )
                     self.stop_gripper()
+                    goal_handle.abort()
+                    break
+                if self.health_enabled and not health.critical_status_fresh(
+                    now, self.critical_status_timeout_sec
+                ):
+                    guard.transition(phase.FAULT)
+                    self._phase = guard.state
+                    reason = phase.REASON_HEALTH_TIMEOUT
+                    self.get_logger().error("Critical Hardware_Error_Status feedback is stale")
+                    self.stop_gripper()
+                    goal_handle.abort()
+                    break
+                if self.health_enabled and not health.operating_mode_matches(
+                    self.expected_operating_mode
+                ):
+                    guard.transition(phase.FAULT)
+                    self._phase = guard.state
+                    reason = phase.REASON_MODE_MISMATCH
+                    self.get_logger().error(
+                        f"Operating_Mode changed to {health.operating_mode}; expected PWM "
+                        f"mode {self.expected_operating_mode}"
+                    )
+                    self._suppress_output_for_mode_mismatch()
                     goal_handle.abort()
                     break
                 if now - start_time >= timeout_sec:
@@ -358,9 +437,17 @@ class GripperGuardNode(Node):
                         self._phase = guard.state
 
                     if observation.empty_close_detected:
-                        guard.transition(phase.FAULT)
+                        guard.transition(phase.EMPTY_CLOSED)
                         self._phase = guard.state
                         reason = phase.REASON_EMPTY_CLOSE
+                        self.get_logger().warn(
+                            "Empty mechanical close: "
+                            f"position={snapshot.motor_position:.5f}, "
+                            f"velocity={snapshot.motor_velocity:.5f}, "
+                            f"finger={snapshot.finger_aperture:.5f} m, "
+                            f"span={observation.position_span:.5f}, "
+                            f"load_delta={observation.load_delta:.3f}"
+                        )
                         self.stop_gripper()
                         goal_handle.abort()
                         break
@@ -368,7 +455,16 @@ class GripperGuardNode(Node):
                         guard.transition(phase.CONTACT_CONFIRMED)
                         self._phase = guard.state
                         contact_detected = True
-                        self.get_logger().info("Contact confirmed")
+                        self.get_logger().info(
+                            "Contact confirmed: "
+                            f"position={snapshot.motor_position:.5f}, "
+                            f"velocity={snapshot.motor_velocity:.5f}, "
+                            f"finger={snapshot.finger_aperture:.5f} m, "
+                            f"span={observation.position_span:.5f}, "
+                            f"load_delta={observation.load_delta:.3f}, "
+                            f"samples={observation.stable_samples}, "
+                            f"elapsed={now - start_time:.3f} s"
+                        )
                         if hold_pwm != self.stop_pwm:
                             guard.transition(phase.HOLDING)
                             self._phase = guard.state
@@ -425,16 +521,45 @@ class GripperGuardNode(Node):
 
     def start_close(self, value: float) -> float:
         """Publish a closing command no stronger than the deployed grasp magnitude."""
+        if not self._close_commands_enabled:
+            self.get_logger().warn("Suppressed closing PWM after terminal stop")
+            return self._commanded_pwm
         return self.send_gripper_pwm(self._bounded_close_pwm(value))
 
     def start_hold(self, value: float) -> float:
         """Publish a non-escalating optional hold command."""
+        self._close_commands_enabled = False
+        self._stop_published = False
         return self.send_gripper_pwm(value)
 
     def stop_gripper(self) -> float:
-        """Publish the configured neutral stop command."""
+        """Latch closing off and publish PWM zero exactly once per active output."""
+        self._close_commands_enabled = False
+        if self._stop_published:
+            return self.stop_pwm
+        if not self._pwm_mode_verified_once:
+            self.get_logger().error("Suppressed stop because PWM mode was never verified")
+            return self._commanded_pwm
         self.get_logger().info("Stopping gripper")
-        return self.send_gripper_pwm(self.stop_pwm)
+        stopped_value = self.send_gripper_pwm(self.stop_pwm)
+        self._stop_published = True
+        return stopped_value
+
+    def _enable_closing_output(self) -> None:
+        """Arm the close-output latch only after goal and PWM-mode validation."""
+        if self.health_enabled and not self._pwm_mode_verified_once:
+            raise RuntimeError("cannot enable gripper output before PWM-mode verification")
+        self._close_commands_enabled = True
+        self._stop_published = False
+
+    def _suppress_output_for_mode_mismatch(self) -> None:
+        """Stop publishing entirely when PWM-zero semantics are no longer valid."""
+        self._close_commands_enabled = False
+        self._stop_published = True
+        self._pwm_mode_verified_once = False
+        self.get_logger().error(
+            "All gripper output suppressed; PWM-zero was not sent in a non-PWM mode"
+        )
 
     def _bounded_close_pwm(self, value: float) -> float:
         """Preserve negative-close direction and cap magnitude at the current safe value."""
@@ -495,6 +620,16 @@ class GripperGuardNode(Node):
         elif health.hardware_fault:
             status.level = DiagnosticStatus.ERROR
             status.message = "gripper hardware error"
+        elif self.health_enabled and not health.operating_mode_matches(
+            self.expected_operating_mode
+        ):
+            status.level = DiagnosticStatus.ERROR
+            status.message = "gripper operating mode is not verified PWM"
+        elif self.health_enabled and not health.critical_status_fresh(
+            now, self.critical_status_timeout_sec
+        ):
+            status.level = DiagnosticStatus.STALE
+            status.message = "critical hardware status is stale"
         elif self.health_enabled and not health.register_service_available:
             status.level = DiagnosticStatus.WARN
             status.message = "register diagnostics unavailable"
@@ -521,6 +656,13 @@ class GripperGuardNode(Node):
             "temperature": health.temperature,
             "input_voltage": health.input_voltage,
             "hardware_error_status": health.hardware_error_status,
+            "hardware_error_age": (
+                now - health.hardware_error_timestamp
+                if health.hardware_error_timestamp > 0.0
+                else float("inf")
+            ),
+            "operating_mode": health.operating_mode,
+            "expected_operating_mode": self.expected_operating_mode,
             "register_service_available": health.register_service_available,
         }
         status.values = [KeyValue(key=key, value=str(value)) for key, value in values.items()]
@@ -550,6 +692,7 @@ def main(args=None) -> None:
     except KeyboardInterrupt:
         pass
     finally:
+        # Section: Stop only an output that was previously armed in verified PWM mode.
         node.stop_gripper()
         executor.shutdown()
         node.destroy_node()

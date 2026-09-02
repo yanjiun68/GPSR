@@ -15,6 +15,8 @@ from face_detection.face_backend import (
     normalize_feature,
     pad_image_to_stride,
 )
+from face_detection.face_perception import associate_faces_to_tracks
+from face_detection.profile_capture_receptionist import locked_track_timed_out, select_locked_face
 
 
 # Section: Embedding validation prevents invalid SFace results from reaching ROS or storage.
@@ -57,6 +59,43 @@ def test_roi_clipping():
     assert clip_roi_xyxy([-10, 5, 120, 90], 100, 80) == (0, 5, 100, 80)
     with pytest.raises(ValueError):
         clip_roi_xyxy([10, 10, 10, 20], 100, 80)
+
+
+def test_face_track_association_is_unique_and_rejects_ambiguity():
+    """Special function: One face cannot bind twice and overlapping people fail closed."""
+    faces = [[20, 10, 40, 30], [120, 10, 140, 30]]
+    people = [[0, 0, 80, 180], [100, 0, 180, 180]]
+    assert associate_faces_to_tracks(faces, people) == {0: 0, 1: 1}
+    assert associate_faces_to_tracks(
+        [[45, 10, 55, 30]], [[0, 0, 60, 100], [40, 0, 100, 100]]
+    ) == {}
+    assert associate_faces_to_tracks([[200, 200, 210, 210]], people) == {}
+
+
+def test_locked_enrollment_ignores_wrong_track_and_ambiguous_faces():
+    """Special function: Enrollment selects only one exact session/track face sample."""
+    payload = {
+        "stamp_sec": 7,
+        "stamp_nanosec": 8,
+        "faces": [
+            {"tracking_session_id": "session-a", "track_id": 4, "has_track_id": True},
+            {"tracking_session_id": "session-a", "track_id": 5, "has_track_id": True},
+        ],
+    }
+    assert select_locked_face(payload, "session-a", 4)["track_id"] == 4
+    assert select_locked_face(payload, "session-a", 9) is None
+    payload["faces"].append(
+        {"tracking_session_id": "session-a", "track_id": 4, "has_track_id": True}
+    )
+    assert select_locked_face(payload, "session-a", 4) is None
+
+
+def test_locked_enrollment_track_loss_has_controlled_timeout():
+    """Special function: An absent locked track gets a grace period and then aborts."""
+    assert not locked_track_timed_out("session-a", 10.0, 11.9, 2.0)
+    assert locked_track_timed_out("session-a", 10.0, 12.0, 2.0)
+    # Section: Compatibility-mode enrollment has no exact track-loss contract.
+    assert not locked_track_timed_out("", 10.0, 99.0, 2.0)
 
 
 # Section: Stride padding tests protect YuNet from incompatible dynamic input dimensions.

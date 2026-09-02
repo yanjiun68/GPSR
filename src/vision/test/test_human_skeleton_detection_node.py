@@ -34,6 +34,18 @@ def make_ros_image(sec: int = 12, nanosec: int = 345_600_000) -> Image:
     return msg
 
 
+def test_num_poses_capacity_validation() -> None:
+    """Special function: Multi-person default range accepts four and rejects nonsense."""
+    module = load_pose_module()
+    assert module.validate_num_poses(4) == 4
+    for invalid in (0, -1, 33, "many"):
+        try:
+            module.validate_num_poses(invalid)
+        except ValueError:
+            continue
+        raise AssertionError(f"Expected invalid num_poses value to fail: {invalid}")
+
+
 def make_landmark(x: float = 0.5, y: float = 0.5, z: float = 0.0, visibility: float = 0.9, presence: float = 0.9):
     """Special function: Build a MediaPipe-like landmark object for conversion tests."""
     return SimpleNamespace(x=x, y=y, z=z, visibility=visibility, presence=presence)

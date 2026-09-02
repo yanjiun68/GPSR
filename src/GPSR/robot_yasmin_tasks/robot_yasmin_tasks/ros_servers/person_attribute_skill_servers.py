@@ -123,6 +123,7 @@ def observation_dict(observation: TrackedPersonAppearance) -> dict[str, Any]:
         "track_id": int(observation.track_id),
         "person_id": int(observation.person_id),
         "profile_id": str(observation.profile_id),
+        "person_uuid": str(getattr(observation, "person_uuid", "")),
         "bbox_xyxy": [float(value) for value in observation.bbox_xyxy],
         "appearance": appearance_dict(observation.appearance),
         "pose": str(observation.pose or "unknown"),

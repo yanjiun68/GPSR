@@ -1,6 +1,7 @@
 int32 person_id
 bool use_nearest
 int32 requested_track_id
+string requested_person_uuid
 float32 capture_duration
 bool require_walking
 ---
@@ -9,6 +10,7 @@ int32 person_id
 int32 registered_track_id
 int32 prototypes_saved
 float32 average_quality
+string person_uuid
 string message
 ---
 int32 active_person_id

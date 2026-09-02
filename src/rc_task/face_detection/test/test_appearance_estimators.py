@@ -7,6 +7,7 @@ from face_detection.appearance_estimators import (
     TemporalCategoricalVoter,
     crop_person_roi,
 )
+from face_detection.tracked_appearance_lifecycle import associate_unique_skeletons
 
 
 def test_person_roi_is_clipped_to_image_bounds() -> None:
@@ -42,3 +43,33 @@ def test_temporal_voter_clear_removes_confirmation() -> None:
     assert voter.update("green", 0.7)[0] == "green"
     voter.clear()
     assert voter.update("unknown", 0.0)[0] == "unknown"
+
+
+def test_skeleton_assignment_is_one_to_one_and_thresholded() -> None:
+    """Special function: Overlap ranking never assigns one skeleton to two people."""
+    tracks = [[0, 0, 100, 200], [60, 0, 160, 200]]
+    skeletons = [[20, 0, 120, 200], [100, 0, 160, 200]]
+    assignments = associate_unique_skeletons(tracks, skeletons, 0.10)
+    assert len(assignments) == 2
+    assert len(set(assignments.values())) == 2
+    assert associate_unique_skeletons(
+        [[0, 0, 10, 10]], [[20, 20, 30, 30]], 0.1
+    ) == {}
+
+
+def test_skeleton_assignment_single_pair() -> None:
+    """Special function: One overlapping person and skeleton produce one exact pairing."""
+    assert associate_unique_skeletons(
+        [[0, 0, 100, 200]], [[10, 10, 90, 190]], 0.1
+    ) == {0: 0}
+
+
+def test_skeleton_assignment_overlapping_tracks_cannot_share_one_pose() -> None:
+    """Special function: One central skeleton is consumed by only its best track match."""
+    assignments = associate_unique_skeletons(
+        [[0, 0, 100, 200], [40, 0, 140, 200]],
+        [[35, 0, 105, 200]],
+        0.1,
+    )
+    assert len(assignments) == 1
+    assert len(set(assignments.values())) == 1

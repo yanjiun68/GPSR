@@ -39,6 +39,11 @@ from yasmin import Blackboard, State, StateMachine
 
 from putrabot_interfaces.msg import ObjectDetection, ObjectDetections
 from robot_ai_interfaces.action import FindObject
+from robot_yasmin_tasks.object_knowledge import (
+    ObjectKnowledge,
+    ObjectKnowledgeError,
+    TargetKind,
+)
 
 
 # Section: Internal state-machine outcomes.
@@ -445,8 +450,16 @@ class InitialState(State):
         """Special function: Normalize goal fields without allocating persistent resources."""
         goal_handle = blackboard["goal_handle"]
         goal = goal_handle.request
-        target = clean_symbol(goal.object_name)
-        category = clean_symbol(goal.category)
+        # Section: Re-resolve at the server boundary so direct ROS clients also fail closed.
+        try:
+            resolved = self.server.object_knowledge.resolve(
+                str(goal.object_name), str(goal.category)
+            )
+        except ObjectKnowledgeError as exc:
+            blackboard["unsupported_target_message"] = str(exc)
+            return PERCEPTION_FAILED
+        target = resolved.canonical_name if resolved.kind == TargetKind.EXACT_OBJECT else ""
+        category = resolved.canonical_name if resolved.kind != TargetKind.EXACT_OBJECT else ""
         scope = str(goal.search_scope or ("STRICT_LOCATION" if goal.location else "GLOBAL")).upper()
         location = clean_symbol(goal.location)
         if not target and not category:
@@ -819,11 +832,13 @@ class FindObjectSkillServer(LifecycleNode):
         self.declare_parameter("target_status_topic", "/gpsr/find_object/target_status")
         self.declare_parameter("detector_ready_topic", "/perception/object_detector_ready")
         self.declare_parameter("search_config_file", self.default_search_config_path())
+        self.declare_parameter("object_knowledge_file", str(ObjectKnowledge.default_path()))
         self.declare_parameter("default_timeout_sec", 300.0)
 
         # Section: Handles stay empty in UNCONFIGURED.
         self.skill_active = False
         self.search_config: dict[str, Any] = {}
+        self.object_knowledge = ObjectKnowledge.from_file(ObjectKnowledge.default_path())
         self.enable_depth = True
         self.default_timeout_sec = 300.0
         self.default_stand_off = 0.8
@@ -881,6 +896,21 @@ class FindObjectSkillServer(LifecycleNode):
             # Section: Load policy before exposing the action server.
             config_path = Path(str(self.get_parameter("search_config_file").value))
             self.search_config = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+            knowledge_path = Path(str(self.get_parameter("object_knowledge_file").value))
+            self.object_knowledge = ObjectKnowledge.from_file(knowledge_path)
+            # Section: Derive every FindObject vocabulary and prior view from one source.
+            self.search_config["object_priors"] = {
+                name: [clean_symbol(item) for item in payload.get("probable_locations", [])]
+                for name, payload in self.object_knowledge.objects.items()
+            }
+            self.search_config["category_priors"] = {
+                name: [clean_symbol(item) for item in payload.get("probable_locations", [])]
+                for name, payload in self.object_knowledge.categories.items()
+            }
+            self.search_config["category_members"] = {
+                name: [clean_symbol(item) for item in payload.get("members", [])]
+                for name, payload in self.object_knowledge.categories.items()
+            }
             self.enable_depth = bool(self.get_parameter("enable_depth").value)
             self.default_timeout_sec = float(self.get_parameter("default_timeout_sec").value)
             self.default_stand_off = float(
@@ -1141,6 +1171,13 @@ class FindObjectSkillServer(LifecycleNode):
         # Section: Validate the request before reserving the single mission slot.
         if not str(goal.object_name).strip() and not str(goal.category).strip():
             return GoalResponse.REJECT
+        try:
+            resolved = self.object_knowledge.resolve(
+                str(goal.object_name), str(goal.category)
+            )
+        except ObjectKnowledgeError as exc:
+            self.get_logger().warning(f"Rejecting unsupported FindObject target: {exc}")
+            return GoalResponse.REJECT
         scope = str(goal.search_scope or ("STRICT_LOCATION" if goal.location else "GLOBAL")).upper()
         if scope not in {"GLOBAL", "STRICT_LOCATION"}:
             return GoalResponse.REJECT
@@ -1155,8 +1192,16 @@ class FindObjectSkillServer(LifecycleNode):
         try:
             now = time.monotonic()
             accepted_context = SearchContext(
-                target=clean_symbol(goal.object_name),
-                category=clean_symbol(goal.category),
+                target=(
+                    resolved.canonical_name
+                    if resolved.kind == TargetKind.EXACT_OBJECT
+                    else ""
+                ),
+                category=(
+                    resolved.canonical_name
+                    if resolved.kind != TargetKind.EXACT_OBJECT
+                    else ""
+                ),
                 scope=scope,
                 requested_location=clean_symbol(goal.location),
                 approach_target=bool(goal.approach_target),
@@ -1320,11 +1365,9 @@ class FindObjectSkillServer(LifecycleNode):
         return self.guard_outcome(goal_handle, context)
 
     def target_names(self, context: SearchContext) -> set[str]:
-        """Special function: Expand configured category members into detector labels."""
-        if context.target:
-            return {context.target}
-        members = dict(self.search_config.get("category_members", {})).get(context.category, [])
-        return {clean_symbol(member) for member in members}
+        """Special function: Expand only an explicitly validated object target."""
+        resolved = self.object_knowledge.resolve(context.target, context.category)
+        return {clean_symbol(member) for member in resolved.detector_labels}
 
     def wait_future(
         self,

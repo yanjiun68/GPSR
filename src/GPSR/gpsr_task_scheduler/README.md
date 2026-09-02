@@ -119,10 +119,12 @@ Section: Primitive-only ActionQueue vocabulary.
 Natural-language verbs are parser aliases and never enter `ActionStep.action_type`. The
 planner emits only the canonical primitives declared as constants in
 `robot_ai_interfaces/msg/ActionStep` and registered in
-`robot_yasmin_tasks/config/skill_registry.yaml`. Compound commands such as `take` and
-`bring` are expanded into ordered find, pick, navigate, and handover primitives by the
-planner. If any required primitive is not a real production-enabled capability, the plan is
-retained for diagnostics but rejected with `primitive_unavailable` before queue submission.
+`robot_yasmin_tasks/config/skill_registry.yaml`. Compound commands such as `take`, `place`,
+and `bring` are expanded into ordered primitives by the planner. A place command always
+produces `FIND_OBJECT -> PICK_OBJECT -> PLACE_OBJECT`, with explicit success and result-data
+dependencies between the steps. If any required primitive is not a real production-enabled
+capability, the plan is retained for diagnostics but rejected with `primitive_unavailable`
+before queue submission.
 
 Temporary queue aliases (`PICK`, `PLACE`, `GIVE`, `FOLLOW`, `GUIDE`, `ASK`, `REPORT`,
 `GREET`, and `RETURN_TO_INSTRUCTION_POINT`) are normalized at executor admission and emit a

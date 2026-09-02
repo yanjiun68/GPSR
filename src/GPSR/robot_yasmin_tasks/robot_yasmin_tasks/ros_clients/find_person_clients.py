@@ -176,60 +176,63 @@ class FindPersonClients:
             if isinstance(result, dict) and result:
                 return dict(result)
             return {"status": "not_found", "reason": "PROFILE_NOT_OBSERVED"}
-        if self._recognition_client is None:
-            return {"status": "failed", "reason": "RECOGNITION_INTERFACE_UNAVAILABLE"}
+        # Section: Track-keyed candidate evidence avoids largest-face identity switching.
         deadline = time.monotonic() + max(0.05, timeout_sec)
-        if not self._recognition_client.wait_for_server(
-            timeout_sec=min(2.0, max(0.05, timeout_sec))
-        ):
-            return {"status": "failed", "reason": "RECOGNITION_ACTION_UNAVAILABLE"}
-        # Section: Wrong known identities are rejected and the search continues within one deadline.
         expected_profile_id = str(profile.get("profile_id", "")).strip()
+        minimum_frames = max(
+            1, int(action.parameters.get("profile_match_min_frames", 3))
+        )
+        evidence: dict[str, int] = {}
+        last_stamp_by_key: dict[str, tuple[int, int]] = {}
+        with self._condition:
+            next_sequence = self._sequence + 1
         while time.monotonic() < deadline:
             if self._is_canceled(blackboard):
                 return {"status": "canceled", "reason": "CANCELED"}
-            goal = RecognizeHumanId.Goal()
-            goal.require_known_match = True
-            goal_handle = self._wait_future(
-                self._recognition_client.send_goal_async(goal), deadline, blackboard
-            )
-            if goal_handle is None:
-                return {
-                    "status": "canceled" if self._is_canceled(blackboard) else "timeout",
-                    "reason": "RECOGNITION_GOAL_TIMEOUT",
-                }
-            if not goal_handle.accepted:
-                return {"status": "failed", "reason": "RECOGNITION_GOAL_REJECTED"}
-            wrapped = self._wait_future(goal_handle.get_result_async(), deadline, blackboard)
-            if self._is_canceled(blackboard):
-                goal_handle.cancel_goal_async()
-                return {"status": "canceled", "reason": "CANCELED"}
-            if wrapped is None:
-                goal_handle.cancel_goal_async()
-                return {"status": "timeout", "reason": "RECOGNITION_RESULT_TIMEOUT"}
-            result = wrapped.result
-            status = result.status
-            matched_id = str(status.profile_id).strip()
-            score = float(status.match_score)
-            if bool(result.success) and bool(status.is_known) and (
-                matched_id == expected_profile_id and score >= float(threshold)
-            ):
-                if time.monotonic() >= deadline:
-                    return {"status": "timeout", "reason": "RECOGNITION_DEADLINE_EXPIRED"}
-                observation = dict(self._latest_observation)
-                return {
-                    "status": "found",
-                    "person_ref": self._person_ref(
-                        action,
-                        target_name,
-                        matched_id,
-                        observation,
-                        score,
-                        "registered_profile",
-                    ),
-                }
-            # Section: A short pause prevents a stable wrong face from creating a tight action loop.
-            time.sleep(0.05)
+            with self._condition:
+                pending = [item for item in self._history if item[0] >= next_sequence]
+                if not pending:
+                    self._condition.wait(
+                        timeout=min(0.1, max(0.0, deadline - time.monotonic()))
+                    )
+                    continue
+            for sequence, received_at, observation in pending:
+                next_sequence = sequence + 1
+                if time.monotonic() - received_at > 1.0:
+                    continue
+                for candidate in list(observation.get("candidates", [])):
+                    if not isinstance(candidate, dict):
+                        continue
+                    key = self._candidate_id(candidate)
+                    matched_id = str(candidate.get("candidate_profile_id", "")).strip()
+                    score = float(candidate.get("candidate_match_score", -1.0))
+                    if (
+                        not key
+                        or matched_id != expected_profile_id
+                        or not bool(candidate.get("candidate_is_known", False))
+                        or score < float(threshold)
+                    ):
+                        continue
+                    stamp = (
+                        int(candidate.get("stamp_sec", 0)),
+                        int(candidate.get("stamp_nanosec", 0)),
+                    )
+                    if stamp == last_stamp_by_key.get(key):
+                        continue
+                    last_stamp_by_key[key] = stamp
+                    evidence[key] = evidence.get(key, 0) + 1
+                    if evidence[key] >= minimum_frames:
+                        return {
+                            "status": "found",
+                            "person_ref": self._person_ref(
+                                action,
+                                target_name,
+                                matched_id,
+                                candidate,
+                                score,
+                                "registered_profile",
+                            ),
+                        }
         return {"status": "not_found", "reason": "PROFILE_NOT_OBSERVED"}
 
     def next_candidate(
@@ -271,23 +274,44 @@ class FindPersonClients:
                 if time.monotonic() - received_at > 1.0:
                     continue
                 saw_fresh_observation = True
-                if not observation.get("face_detected", False):
-                    continue
-                candidate_id = self._candidate_id(observation)
-                if candidate_id in rejected_ids:
-                    continue
-                return {
-                    "status": "candidate",
-                    "candidate": {
-                        "candidate_id": candidate_id,
-                        "tracking_id": (
-                            int(observation.get("track_id", 0))
-                            if observation.get("has_track_id", False)
-                            else None
-                        ),
-                        "observation": observation,
-                    },
-                }
+                # Section: One frame may contain several independently tracked face candidates.
+                candidates = observation.get("candidates", [])
+                frame_candidates = (
+                    list(candidates)
+                    if isinstance(candidates, list) and candidates
+                    else [observation]
+                )
+                for candidate_observation in frame_candidates:
+                    if not isinstance(candidate_observation, dict):
+                        continue
+                    if not (
+                        candidate_observation.get("face_detected", False)
+                        or candidate_observation.get("detected", False)
+                    ):
+                        continue
+                    candidate_id = self._candidate_id(candidate_observation)
+                    if not candidate_id or candidate_id in rejected_ids:
+                        continue
+                    session_id = str(
+                        candidate_observation.get("tracking_session_id", "")
+                    ).strip()
+                    track_id = int(candidate_observation.get("track_id", 0))
+                    return {
+                        "status": "candidate",
+                        "candidate": {
+                            "candidate_id": candidate_id,
+                            "tracking_session_id": session_id,
+                            "track_id": track_id,
+                            "tracking_id": track_id,
+                            "face_roi": list(candidate_observation.get("bbox", [])),
+                            "last_seen": {
+                                "stamp_sec": int(candidate_observation.get("stamp_sec", 0)),
+                                "stamp_nanosec": int(candidate_observation.get("stamp_nanosec", 0)),
+                            },
+                            "degraded_tracking": not bool(session_id),
+                            "observation": candidate_observation,
+                        },
+                    }
         if saw_fresh_observation:
             return {"status": "exhausted", "reason": "NO_VISIBLE_FACE_CANDIDATE"}
         return {"status": "failed", "reason": "PERSON_OBSERVATION_STREAM_UNAVAILABLE"}
@@ -297,7 +321,7 @@ class FindPersonClients:
         blackboard: Any,
         action: ActionStepData,
         target_name: str,
-        _candidate: dict[str, Any],
+        candidate: dict[str, Any],
         timeout_sec: float,
     ) -> dict[str, Any]:
         """Special function: Ask the exact binary identity question through shared TTS/STT."""
@@ -330,7 +354,7 @@ class FindPersonClients:
         blackboard: Any,
         action: ActionStepData,
         target_name: str,
-        _candidate: dict[str, Any],
+        candidate: dict[str, Any],
         timeout_sec: float,
     ) -> dict[str, Any]:
         """Special function: Best-effort enroll the verbally confirmed face under the target name."""
@@ -350,6 +374,14 @@ class FindPersonClients:
         goal.profile_id = profile_id or "gpsr_person"
         goal.role = "guest"
         goal.name = target_name
+        session_id = str(candidate.get("tracking_session_id", "")).strip()
+        track_id = int(candidate.get("track_id", candidate.get("tracking_id", 0)) or 0)
+        if not session_id or track_id <= 0:
+            return {"status": "failed", "reason": "ENROLLMENT_TARGET_NOT_TRACK_LOCKED"}
+        # Section: The action goal carries the exact verbally confirmed canonical track.
+        goal.tracking_session_id = session_id
+        goal.track_id = track_id
+        goal.person_uuid = str(candidate.get("person_uuid", ""))
         deadline = time.monotonic() + max(0.05, timeout_sec)
         goal_handle = self._wait_future(
             self._enrollment_client.send_goal_async(goal), deadline, blackboard
@@ -371,17 +403,22 @@ class FindPersonClients:
         return {
             "status": "enrolled",
             "profile_id": str(result.profile.profile_id),
+            "person_uuid": str(getattr(result, "person_uuid", "")),
             "message": str(result.message),
         }
 
     @staticmethod
     def _candidate_id(observation: dict[str, Any]) -> str:
-        """Special function: Build a task-local candidate key from tracker data or stable ROI."""
-        # Section: Tracker ids are preferred because upstream tracking owns association tolerance.
-        if observation.get("has_track_id", False):
-            return f"track:{int(observation.get('track_id', 0))}"
+        """Special function: Build a canonical session/track key or explicit degraded fallback."""
+        session_id = str(observation.get("tracking_session_id", "")).strip()
+        track_id = int(observation.get("track_id", 0) or 0)
+        if session_id and observation.get("has_track_id", False) and track_id > 0:
+            return f"{session_id}:{track_id}"
+        # Section: Compatibility keys are task-local and visibly marked as degraded.
+        if observation.get("has_track_id", False) and track_id > 0:
+            return f"degraded:track:{track_id}"
         roi = tuple(int(value) for value in observation.get("selected_roi", [])[:4])
-        return f"roi:{roi}" if len(roi) == 4 else "untracked:current_face"
+        return f"degraded:roi:{roi}" if len(roi) == 4 else ""
 
     @staticmethod
     def _person_ref(
@@ -399,13 +436,21 @@ class FindPersonClients:
             if observation.get("has_track_id", False)
             else None
         )
+        tracking_session_id = str(observation.get("tracking_session_id", "")).strip()
         person_id = str(profile_id or (f"track_{tracking_id}" if tracking_id is not None else target_name))
         return {
             "person_id": person_id,
             "name": target_name,
             "target_name": target_name,
             "profile_id": str(profile_id) if profile_id else None,
+            "person_uuid": str(observation.get("person_uuid", "")),
             "tracking_id": tracking_id,
+            "track_id": tracking_id,
+            "tracking_session_id": tracking_session_id,
+            "candidate_key": (
+                f"{tracking_session_id}:{tracking_id}"
+                if tracking_session_id and tracking_id is not None else ""
+            ),
             "location": str(action.target_location or action.parameters.get("location", "")),
             "pose": observation.get("pose"),
             "confidence": float(confidence),

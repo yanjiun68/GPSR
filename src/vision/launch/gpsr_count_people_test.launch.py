@@ -57,7 +57,7 @@ def generate_launch_description():
         parameters=[{
             "image_topic": rgb_topic,
             "model_path": pose_model_path,
-            "num_poses": 2,
+            "num_poses": 4,
             "min_detection_confidence": 0.60,
             "min_presence_confidence": 0.60,
             "min_tracking_confidence": 0.65,

@@ -261,6 +261,7 @@ class IdentityStore:
             return None
         return {
             'profile_id': normalized_profile_id,
+            'person_uuid': str(record.get('person_uuid', normalized_profile_id)).strip(),
             'name': str(record.get('name', normalized_profile_id)).strip(),
             'role': str(record.get('role', 'guest')).strip().lower() or 'guest',
             'favorite_drink': str(record.get('favorite_drink', '')).strip(),
@@ -387,6 +388,7 @@ class IdentityStore:
         templates=None,
         favorite_drink='',
         age=0,
+        person_uuid='',
     ):
         """Special function: Store a centroid plus representative normalized templates."""
         if not self.compatible:
@@ -412,6 +414,7 @@ class IdentityStore:
             )
         record = {
             'profile_id': normalized_profile_id,
+            'person_uuid': str(person_uuid).strip() or normalized_profile_id,
             'name': str(name).strip(),
             'role': str(role).strip().lower() or 'guest',
             'favorite_drink': str(favorite_drink).strip(),
@@ -471,6 +474,7 @@ class IdentityStore:
             return unknown_match(top1_score, top2_score)
         return {
             'profile_id': str(top1_record.get('profile_id', '')).strip(),
+            'person_uuid': str(top1_record.get('person_uuid', '')).strip(),
             'name': str(top1_record.get('name', '')).strip(),
             'role': str(top1_record.get('role', '')).strip(),
             'favorite_drink': str(top1_record.get('favorite_drink', '')).strip(),

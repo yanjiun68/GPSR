@@ -10,6 +10,7 @@ from robot_yasmin_tasks.gpsr.action_queue_executor_sm import (
 )
 from robot_yasmin_tasks.gpsr.blackboard_utils import bb_get
 from robot_yasmin_tasks.gpsr.models import make_skill_result
+from robot_yasmin_tasks.gpsr.models import summarize_action_queue_failure
 from robot_yasmin_tasks.gpsr.outcomes import CANCELED, FATAL_FAILURE, FAILED, INVALID_INPUT, SKILL_UNAVAILABLE, SUCCESS, TIMEOUT
 
 
@@ -38,6 +39,33 @@ def test_empty_queue_success() -> None:
     blackboard = Blackboard()
     blackboard[bb.ACTION_QUEUE] = []
     assert ActionQueueExecutorSM({})(blackboard) == SUCCESS
+
+
+def test_failure_summary_preserves_exact_skill_reason_and_details() -> None:
+    """Special function: Terminal diagnostics identify the action and underlying client reason."""
+    # Section: Model the navigation failure that previously appeared only as fatal_failure.
+    message = summarize_action_queue_failure(
+        "fatal_failure",
+        [{
+            "action_type": "NAVIGATE",
+            "outcome": "fatal_failure",
+            "message": "NavigateNamedPose action unavailable: /nav/navigate_named_pose",
+            "result": {"target": "living_room"},
+        }],
+    )
+
+    # Section: Require both the human-readable reason and structured target evidence.
+    assert "action=NAVIGATE" in message
+    assert "outcome=fatal_failure" in message
+    assert "NavigateNamedPose action unavailable: /nav/navigate_named_pose" in message
+    assert '"target": "living_room"' in message
+
+
+def test_failure_summary_reports_missing_executor_result() -> None:
+    """Special function: Abnormal empty results still explain the diagnostic limitation."""
+    message = summarize_action_queue_failure("fatal_failure", [])
+    assert "outcome=fatal_failure" in message
+    assert "executor returned no failed SkillResult" in message
 
 
 def test_select_next_action_normalizes_and_stores_current_action() -> None:

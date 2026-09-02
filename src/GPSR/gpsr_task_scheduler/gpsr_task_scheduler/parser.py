@@ -391,7 +391,7 @@ def _target(text: str, task_type: str, config: SchedulerConfig) -> dict[str, Any
         return {}
     for object_name in config.known_objects:
         if re.search(rf"\b{re.escape(object_name.replace('_', ' '))}s?\b", text):
-            return {"object_name": object_name}
+            return {"object_name": config.object_aliases.get(object_name, object_name)}
     for category in config.known_categories:
         if re.search(rf"\b{re.escape(category.replace('_', ' '))}s?\b", text):
             return {"category": category}

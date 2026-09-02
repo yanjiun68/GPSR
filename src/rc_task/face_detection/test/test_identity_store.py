@@ -69,6 +69,21 @@ def test_unknown_threshold(tmp_path):
     assert result['profile_id'] == ''
 
 
+def test_sface_profile_persists_canonical_person_uuid(tmp_path):
+    """Special function: Semantic UUID mapping does not alter stored SFace embeddings."""
+    store = _three_dimensional_store(tmp_path)
+    store.register_profile(
+        'alice-face',
+        'Alice',
+        'guest',
+        [1.0, 0.0, 0.0],
+        person_uuid='person-uuid-42',
+    )
+    match = store.recognize_profile([1.0, 0.0, 0.0], threshold=0.45, margin=0.05)
+    assert match['person_uuid'] == 'person-uuid-42'
+    assert store.get_profile('alice-face')['person_uuid'] == 'person-uuid-42'
+
+
 def test_top1_top2_margin(tmp_path):
     """Special function: Verify an ambiguous query is rejected despite a high top-one score."""
     store = _three_dimensional_store(tmp_path)

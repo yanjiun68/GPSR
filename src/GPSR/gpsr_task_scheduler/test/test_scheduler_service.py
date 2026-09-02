@@ -24,15 +24,20 @@ class _Config:
 
 
 class _Logger:
-    """Special function: Capture fake scheduler warning messages."""
+    """Special function: Capture fake scheduler warning and error messages."""
 
     def __init__(self):
         """Special function: Initialize captured warning storage."""
         self.warnings = []
+        self.errors = []
 
     def warn(self, message: str) -> None:
         """Special function: Store one emitted warning message."""
         self.warnings.append(message)
+
+    def error(self, message: str) -> None:
+        """Special function: Store one emitted error message."""
+        self.errors.append(message)
 
 
 class _StringMsg:
@@ -70,10 +75,17 @@ class _Response:
 class _FakeScheduler:
     """Special function: Provide only the node methods needed by the service callback."""
 
-    def __init__(self, *, global_dry_run: bool = False, valid: bool = True):
+    def __init__(
+        self,
+        *,
+        global_dry_run: bool = False,
+        valid: bool = True,
+        execution_success: bool = True,
+    ):
         """Special function: Configure fake planning and execution behavior."""
         self.global_dry_run = global_dry_run
         self.valid = valid
+        self.execution_success = execution_success
         self.submitted = False
         self.scheduled_dry_run = None
         self.config = _Config()
@@ -100,13 +112,20 @@ class _FakeScheduler:
         }
 
     def submit_action_queue(self, command_id: str, planned: dict, timeout_sec: float) -> dict:
-        """Special function: Record execution dispatch and return success."""
+        """Special function: Record execution dispatch and return the configured result."""
         self.submitted = True
         return {
-            "success": True,
+            "success": self.execution_success,
             "completed_steps": len(planned["steps"]),
-            "message": f"executed {command_id} in {timeout_sec:.1f}s",
-            "outcome": "success",
+            "message": (
+                f"executed {command_id} in {timeout_sec:.1f}s"
+                if self.execution_success
+                else (
+                    "action=NAVIGATE outcome=fatal_failure "
+                    "reason=NavigateNamedPose action unavailable: /nav/navigate_named_pose"
+                )
+            ),
+            "outcome": "success" if self.execution_success else "fatal_failure",
         }
 
     def process_one_command(
@@ -173,6 +192,25 @@ def test_schedule_service_execute_dispatches_valid_plan() -> None:
     assert execution["completed_steps"] == 1
     assert node.scheduled_dry_run is False
     assert node.submitted is True
+
+
+def test_schedule_service_logs_exact_executor_failure_reason() -> None:
+    """Special function: Service execution failures remain visible in scheduler ERROR logs."""
+    # Section: Force the same named-navigation failure observed during live recovery.
+    node = _FakeScheduler(execution_success=False)
+    response = GpsrTaskSchedulerNode.schedule_service_callback(
+        node,
+        _Request("go to the living room", dry_run=False, execute=True),
+        _Response(),
+    )
+
+    # Section: Require exact diagnostics in both the service response and operator log.
+    assert response.accepted is True
+    assert response.success is False
+    assert "NavigateNamedPose action unavailable" in response.message
+    assert len(node.logger.errors) == 1
+    assert "action=NAVIGATE" in node.logger.errors[0]
+    assert "NavigateNamedPose action unavailable" in node.logger.errors[0]
 
 
 def test_schedule_service_rejects_invalid_plan_without_dispatch() -> None:

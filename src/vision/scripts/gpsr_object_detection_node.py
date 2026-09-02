@@ -16,23 +16,11 @@ from sensor_msgs.msg import Image
 from std_msgs.msg import Bool
 
 from putrabot_interfaces.msg import ObjectDetection, ObjectDetections
+from robot_yasmin_tasks.object_knowledge import ObjectKnowledge
 
 
-# Section: Default open-vocabulary prompts retain COCO coverage and GPSR-specific objects.
-DEFAULT_OBJECT_CLASS_PROMPTS = [
-    "bicycle", "car", "motorcycle", "airplane", "bus", "train", "truck", "boat",
-    "traffic light", "fire hydrant", "stop sign", "parking meter", "bench", "bird",
-    "cat", "dog", "horse", "sheep", "cow", "elephant", "bear", "zebra", "giraffe",
-    "backpack", "umbrella", "handbag", "tie", "suitcase", "frisbee", "skis",
-    "snowboard", "sports ball", "kite", "baseball bat", "baseball glove", "skateboard",
-    "surfboard", "tennis racket", "bottle", "wine glass", "cup", "fork", "knife",
-    "spoon", "bowl", "banana", "apple", "sandwich", "orange", "broccoli", "carrot",
-    "hot dog", "pizza", "donut", "cake", "chair", "couch", "potted plant", "bed",
-    "dining table", "toilet", "tv", "laptop", "mouse", "remote", "keyboard",
-    "cell phone", "microwave", "oven", "toaster", "sink", "refrigerator", "book",
-    "clock", "vase", "scissors", "teddy bear", "hair drier", "toothbrush", "coke",
-    "milk", "chips", "cracker", "cookie",
-]
+# Section: Object prompts are loaded from object_knowledge.yaml during CONFIGURE.
+DEFAULT_OBJECT_CLASS_PROMPTS = ["__none__"]
 
 
 # Section: Optional YOLO import provides a deterministic CONFIGURE failure.
@@ -74,6 +62,9 @@ class GpsrObjectDetectionNode(LifecycleNode):
         self.declare_parameter("include_classes", ["__none__"])
         self.declare_parameter("exclude_classes", ["person"])
         self.declare_parameter("yolo_class_prompts", DEFAULT_OBJECT_CLASS_PROMPTS)
+        self.declare_parameter(
+            "object_knowledge_file", str(ObjectKnowledge.default_path())
+        )
         self.declare_parameter("publish_annotated_image", True)
         self.declare_parameter("show_gui", False)
         self.declare_parameter("gui_window_name", "GPSR Object Detection")
@@ -116,6 +107,15 @@ class GpsrObjectDetectionNode(LifecycleNode):
                 for name in self.get_parameter("yolo_class_prompts").value
                 if str(name).strip() and str(name).strip().lower() != "__none__"
             ]
+            knowledge_file = str(self.get_parameter("object_knowledge_file").value).strip()
+            if self.include_classes:
+                # Section: A specialized detector such as the person tracker owns its prompts.
+                self.yolo_class_prompts = sorted(self.include_classes)
+            elif knowledge_file:
+                # Section: GPSR detector prompts derive from authoritative supported objects.
+                self.yolo_class_prompts = ObjectKnowledge.from_file(
+                    knowledge_file
+                ).detector_prompts()
             self.publish_annotated_image = bool(
                 self.get_parameter("publish_annotated_image").value
             )

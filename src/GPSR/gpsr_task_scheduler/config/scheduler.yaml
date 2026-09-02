@@ -8,19 +8,7 @@ known_locations:
   - exit
   - operator
   - instruction_point
-known_objects:
-  - apple
-  - banana
-  - bottle
-  - chair
-  - coke
-  - cup
-  - milk
-  - chips
-known_categories:
-  - drink
-  - food
-  - object
+# Section: Object names, aliases, categories, and wildcards come from object_knowledge.yaml.
 known_people:
   - operator
   - john
