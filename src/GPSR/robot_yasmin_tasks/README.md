@@ -182,6 +182,9 @@ Disable spoken intake for manual testing:
 ros2 launch robot_yasmin_tasks gpsr_executor.launch.py use_voice_command:=false
 ```
 
+Spoken GPSR command intake waits 12 seconds for a transcript by default. Override the window
+when required with `command_input_timeout_sec:=<seconds>`.
+
 Enable optional LLM parsing only after `/llm` is available:
 
 ```bash

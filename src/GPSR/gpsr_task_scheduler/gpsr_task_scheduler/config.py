@@ -29,6 +29,9 @@ class SchedulerConfig:
     known_categories: set[str] = field(default_factory=set)
     object_aliases: dict[str, str] = field(default_factory=dict)
     known_people: set[str] = field(default_factory=set)
+    verb_aliases: dict[str, list[str]] = field(default_factory=dict)
+    location_aliases: dict[str, str] = field(default_factory=dict)
+    person_aliases: dict[str, str] = field(default_factory=dict)
     supported_object_features: dict[str, list[str]] = field(default_factory=dict)
     supported_human_poses: set[str] = field(default_factory=set)
     supported_person_attributes: dict[str, list[str]] = field(default_factory=dict)
@@ -61,12 +64,25 @@ def default_config() -> SchedulerConfig:
     """Special function: Provide deterministic defaults for unit tests and missing YAML."""
     # Section: Parser vocabulary derives from the same knowledge used by FindObject matching.
     knowledge = ObjectKnowledge.from_file(ObjectKnowledge.default_path())
+    language = _load_language_vocabulary()
     return SchedulerConfig(
         known_locations={"kitchen", "living_room", "bedroom", "dining_room", "entrance", "exit", "operator", "instruction_point"},
         known_objects=knowledge.known_object_names(),
         known_categories=knowledge.known_category_names(),
         object_aliases=dict(knowledge.alias_to_object),
         known_people={"operator", "john", "mary"},
+        verb_aliases={
+            str(intent).upper(): [str(alias).casefold() for alias in aliases]
+            for intent, aliases in dict(language.get("verb_aliases", {})).items()
+        },
+        location_aliases={
+            normalize_symbol(alias): normalize_symbol(canonical)
+            for alias, canonical in dict(language.get("location_aliases", {})).items()
+        },
+        person_aliases={
+            normalize_symbol(alias): normalize_symbol(canonical)
+            for alias, canonical in dict(language.get("person_aliases", {})).items()
+        },
         supported_object_features={"shirt_color": ["red", "blue", "green", "black", "white"], "object_color": ["red", "blue", "green", "black", "white"]},
         supported_human_poses={"right_hand_raised", "left_hand_raised", "waving", "sitting", "standing"},
         supported_person_attributes={
@@ -103,6 +119,9 @@ def load_config(
         known_categories=set(config.known_categories),
         object_aliases=dict(config.object_aliases),
         known_people={normalize_symbol(item) for item in data.get("known_people", config.known_people)},
+        verb_aliases=dict(config.verb_aliases),
+        location_aliases=dict(config.location_aliases),
+        person_aliases=dict(config.person_aliases),
         supported_object_features={normalize_symbol(key): [normalize_symbol(item) for item in value] for key, value in dict(data.get("supported_object_features", config.supported_object_features)).items()},
         supported_human_poses={normalize_symbol(item) for item in data.get("supported_human_poses", config.supported_human_poses)},
         supported_person_attributes={normalize_symbol(key): [normalize_symbol(item) for item in value] for key, value in dict(data.get("supported_person_attributes", config.supported_person_attributes)).items()},
@@ -117,3 +136,22 @@ def load_config(
         primitive_capabilities=config.primitive_capabilities,
         allow_simulated_primitives=bool(data.get("allow_simulated_primitives", False)),
     )
+
+
+def _load_language_vocabulary() -> dict[str, Any]:
+    """Special function: Load the single natural-language alias source."""
+    # Section: Resolve source and installed paths without introducing another database.
+    source_path = Path(__file__).resolve().parents[1] / "config" / "language.yaml"
+    try:
+        from ament_index_python.packages import get_package_share_directory
+
+        installed_path = Path(get_package_share_directory("gpsr_task_scheduler")) / "config" / "language.yaml"
+    except Exception:
+        installed_path = source_path
+    vocabulary_path = installed_path if installed_path.is_file() else source_path
+    if yaml is None or not vocabulary_path.is_file():
+        raise RuntimeError(f"GPSR language vocabulary is unavailable: {vocabulary_path}")
+    payload = yaml.safe_load(vocabulary_path.read_text(encoding="utf-8")) or {}
+    if not isinstance(payload, dict):
+        raise RuntimeError(f"GPSR language vocabulary must be a mapping: {vocabulary_path}")
+    return payload

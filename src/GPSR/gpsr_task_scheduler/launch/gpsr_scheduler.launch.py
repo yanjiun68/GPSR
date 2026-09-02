@@ -40,6 +40,8 @@ def generate_launch_description() -> LaunchDescription:
     start_follow_person_pipeline = LaunchConfiguration("start_follow_person_pipeline")
     start_voice_tts = LaunchConfiguration("start_voice_tts")
     start_voice_stt = LaunchConfiguration("start_voice_stt")
+    start_voice_command = LaunchConfiguration("start_voice_command")
+    command_input_timeout_sec = LaunchConfiguration("command_input_timeout_sec")
     allow_simulated_primitives = LaunchConfiguration("allow_simulated_primitives")
 
     # Section: Shared perception launch-time controls.
@@ -445,6 +447,25 @@ def generate_launch_description() -> LaunchDescription:
         condition=IfCondition(start_voice_stt),
     )
 
+    # Section: Initial spoken command reception remains at the robot's current position.
+    gpsr_voice_command_node = Node(
+        package="robot_yasmin_tasks",
+        executable="gpsr_voice_command",
+        name="gpsr_voice_command",
+        output="screen",
+        condition=IfCondition(start_voice_command),
+        parameters=[{
+            "command_topic": command_topic,
+            "scheduler_state_topic": "/gpsr/state",
+            "command_result_topic": "/gpsr/command_result",
+            # Section: Apply the bounded logical listening window without touching subscriptions.
+            "listen_timeout_sec": ParameterValue(
+                command_input_timeout_sec,
+                value_type=float,
+            ),
+        }],
+    )
+
     # Section: Reuse the existing YuNet/SFace pipeline instead of starting a GPSR-specific detector.
     find_person_pipeline = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
@@ -563,6 +584,8 @@ def generate_launch_description() -> LaunchDescription:
             ),
             DeclareLaunchArgument("start_voice_tts", default_value="true", description="Start the local /voice/tts/say service."),
             DeclareLaunchArgument("start_voice_stt", default_value="true", description="Start local STT used by verbal FIND_PERSON confirmation."),
+            DeclareLaunchArgument("start_voice_command", default_value="true", description="Start bounded spoken GPSR command reception at the current robot position."),
+            DeclareLaunchArgument("command_input_timeout_sec", default_value="12.0", description="Seconds in each spoken GPSR command listening window before re-arming."),
             DeclareLaunchArgument("allow_simulated_primitives", default_value="false", description="Test-only opt-in for registry entries explicitly marked simulated."),
             DeclareLaunchArgument("rgb_topic", default_value="/camera/camera/color/image_raw", description="RGB image topic for GPSR perception detectors."),
             DeclareLaunchArgument("enable_depth", default_value="true", description="Enable aligned-depth localization and target approach; false permits RGB-only object and face searches."),
@@ -586,8 +609,8 @@ def generate_launch_description() -> LaunchDescription:
             DeclareLaunchArgument("amcl_pose_topic", default_value="/amcl_pose", description="Localization pose captured when each command begins."),
             DeclareLaunchArgument("amcl_pose_max_age_sec", default_value="1.0", description="Maximum age of an AMCL observation accepted for command-start capture."),
             DeclareLaunchArgument("amcl_pose_capture_timeout_sec", default_value="3.0", description="Maximum wait for a fresh command-start AMCL pose."),
-            DeclareLaunchArgument("return_fallback_named_location", default_value="instruction_point", description="Named return target used when AMCL capture is unavailable."),
-            DeclareLaunchArgument("enable_error_recovery", default_value="true", description="Retry returning to the Instruction Point after scheduler ERROR."),
+            DeclareLaunchArgument("return_fallback_named_location", default_value="instruction_point", description="Named later-return target used by explicit named mode or unavailable AMCL capture."),
+            DeclareLaunchArgument("enable_error_recovery", default_value="true", description="Retry the frozen command-start return target after scheduler ERROR."),
             DeclareLaunchArgument("error_recovery_max_attempts", default_value="3", description="Maximum automatic recovery returns; zero retries indefinitely."),
             DeclareLaunchArgument("error_recovery_retry_delay_sec", default_value="5.0", description="Delay between failed automatic recovery returns."),
             DeclareLaunchArgument("executor_goal_response_timeout_sec", default_value="10.0", description="Seconds to wait for executor goal acceptance or rejection."),
@@ -622,6 +645,7 @@ def generate_launch_description() -> LaunchDescription:
             find_object_skill_server,
             voice_tts_node,
             voice_stt_node,
+            gpsr_voice_command_node,
             find_person_pipeline,
             follow_person_pipeline,
             follow_person_skill_server,

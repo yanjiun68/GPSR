@@ -144,8 +144,8 @@ class _ExecutorReadiness:
 class _InitializationHarness:
     """Special function: Exercise dry-run initialization without commanding navigation."""
 
-    def __init__(self) -> None:
-        """Special function: Initialize a dry-run scheduler before its startup transition."""
+    def __init__(self, dry_run: bool = True, navigate_on_start: bool = True) -> None:
+        """Special function: Initialize a scheduler before its startup transition."""
         self.cycle = GpsrCycleController(max_commands=3)
         self.initialization_started = False
         self.initialization_timer = _Timer()
@@ -154,12 +154,14 @@ class _InitializationHarness:
         self.command_intake_enabled = False
         self.ready_logged = False
         self.logger = _Logger()
+        self.dry_run = dry_run
+        self.navigate_on_start = navigate_on_start
 
     def get_parameter(self, name: str) -> _Param:
-        """Special function: Enable both dry-run and the normally enabled startup return."""
+        """Special function: Return configurable startup-navigation policy values."""
         return _Param({
-            "dry_run": True,
-            "navigate_to_instruction_point_on_start": True,
+            "dry_run": self.dry_run,
+            "navigate_to_instruction_point_on_start": self.navigate_on_start,
             "require_executor_ready": True,
         }[name])
 
@@ -346,6 +348,18 @@ def test_dry_run_skips_physical_initial_navigation() -> None:
     assert harness.ready_logged is True
 
 
+def test_default_startup_waits_at_current_position_without_navigation() -> None:
+    """Special function: Enter command waiting directly during normal non-dry startup."""
+    # Section: Model the production default with startup navigation disabled.
+    harness = _InitializationHarness(dry_run=False, navigate_on_start=False)
+
+    # Section: Verify INITIALIZING transitions directly to stationary command intake.
+    GpsrTaskSchedulerNode.initialize_competition_cycle(harness)
+    assert harness.navigation_submitted is False
+    assert harness.cycle.snapshot().state == SchedulerState.WAITING_FOR_COMMAND
+    assert harness.command_intake_enabled is True
+
+
 def test_scheduler_remains_initializing_until_executor_is_ready() -> None:
     """Special function: Do not open command intake before ActionQueue dependencies exist."""
     harness = _InitializationHarness()
@@ -462,6 +476,27 @@ def test_normal_command_returns_before_waiting_again() -> None:
         SchedulerState.RETURNING_TO_COMMAND_START,
         SchedulerState.WAITING_FOR_COMMAND,
     ]
+
+
+def test_missing_command_start_pose_does_not_block_command_execution() -> None:
+    """Special function: Keep command reception independent from AMCL availability."""
+    # Section: Simulate stored fallback metadata after an AMCL capture timeout.
+    harness = _CycleHarness(["NAVIGATE"])
+    harness.capture_return_target = lambda _command_id, _dry_run: ReturnTarget(
+        source="instruction_point_fallback",
+        target_location="instruction_point",
+    )
+
+    # Section: Verify the task remains accepted and normal navigation still executes.
+    result = harness.process("command_1")
+    assert result["accepted"] is True
+    assert result["success"] is True
+    assert harness.submissions == [
+        ("command_1", ["NAVIGATE"]),
+        ("command_1_return", ["NAVIGATE"]),
+    ]
+    assert harness.cycle.snapshot().state == SchedulerState.WAITING_FOR_COMMAND
+    assert harness.cycle.snapshot().completed_command_count == 1
 
 
 def test_multi_skill_command_returns_only_after_final_skill() -> None:

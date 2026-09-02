@@ -354,7 +354,8 @@ collision_monitor:
 
 lifecycle_manager_navigation:
   ros__parameters:
-    autostart: true
+    # The prerequisite gate is the sole STARTUP owner in static-map navigation.
+    autostart: false
     # navigation_launch 只管理标准 Nav2 导航栈。
     # collision_monitor 使用独立 lifecycle manager 启动。
     node_names:

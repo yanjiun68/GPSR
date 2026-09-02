@@ -207,8 +207,12 @@ class GpsrTaskSchedulerNode(Node):
             self.latest_amcl_pose_receipt_time = time.monotonic()
             self.amcl_pose_condition.notify_all()
 
-    def capture_return_target(self, command_id: str, dry_run: bool) -> ReturnTarget:
-        """Special function: Freeze a raw AMCL pose or deterministic named fallback."""
+    def capture_return_target(
+        self,
+        command_id: str,
+        dry_run: bool,
+    ) -> ReturnTarget:
+        """Special function: Freeze a current pose or later-return named fallback."""
         mode = str(self.get_parameter("return_target_mode").value).strip().lower()
         fallback = self.named_fallback_target()
         if dry_run:
@@ -218,13 +222,14 @@ class GpsrTaskSchedulerNode(Node):
                 target_location=fallback.target_location if mode == "named_location" else "",
             )
         if mode == "named_location":
+            # Section: Preserve named navigation only as an explicit legacy operator policy.
             return ReturnTarget(
                 source="named_location",
                 target_location=fallback.target_location,
             )
         if mode != "command_start_amcl":
             self.get_logger().warn(
-                f"Unknown return_target_mode '{mode}'; using named fallback."
+                f"Unknown return_target_mode '{mode}'; storing named return fallback."
             )
             return fallback
 
@@ -253,13 +258,13 @@ class GpsrTaskSchedulerNode(Node):
                 self.amcl_pose_condition.wait(timeout=min(0.1, remaining))
 
         self.get_logger().warn(
-            f"No fresh valid AMCL pose captured for {command_id}; "
-            f"using named fallback '{fallback.target_location}'."
+            f"Unable to capture fresh return pose for {command_id}; command reception "
+            f"remains valid and named return fallback '{fallback.target_location}' is stored."
         )
         return fallback
 
     def named_fallback_target(self) -> ReturnTarget:
-        """Special function: Resolve the configured named return fallback."""
+        """Special function: Resolve the explicitly requested legacy named return target."""
         location = str(
             self.get_parameter("return_fallback_named_location").value
             or self.config.instruction_point
@@ -337,10 +342,20 @@ class GpsrTaskSchedulerNode(Node):
             dry_run,
             float(self.config.default_skill_timeout_sec or 300.0),
         )
+        # Section: Executed commands publish inside process_one_command; early outcomes publish here.
+        if not isinstance(result.get("execution"), dict):
+            self.publish_command_result(result)
         if not result["accepted"]:
             self.get_logger().warn(f"GPSR command rejected: {result['message']}")
         elif not result["success"]:
             self.get_logger().warn(f"GPSR command failed: {result['message']}")
+
+    def publish_command_result(self, result: dict[str, Any]) -> None:
+        """Special function: Publish one structured command verdict for voice and operators."""
+        # Section: Preserve the complete scheduler result as deterministic JSON.
+        result_msg = String()
+        result_msg.data = json.dumps(result, sort_keys=True)
+        self.command_result_pub.publish(result_msg)
 
     def schedule_service_callback(
         self,

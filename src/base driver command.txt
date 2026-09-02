@@ -1,6 +1,7 @@
 ros2 launch my_robot_nav static_map_nav.launch.py \
-  map:="$PWD/maps/gpsr_map.yaml" \
-  waypoints_file:="$PWD/waypoints/gpsr_waypoint.yaml" \
+  map:="/home/yanjiun68/workspace/WS1/PutrabotUPM-project/maps/gpsr_map.yaml" \
+  waypoints_file:="/home/yanjiun68/workspace/WS1/PutrabotUPM-project/waypoints/gpsr_waypoint.yaml" \
+  nav2_autostart:=true \
   use_sim_time:=false \
   use_rviz:=true
 
@@ -20,4 +21,4 @@ ros2 service call /gpsr/schedule_command \
 
   
   Generate a UI ( either localhost or local GUI to show the reason of error. You must list all the nodes and pinpoint which is failing. )
- Discuss whether to use yasmin state machine for top level retry attempt visualization. 
+ Discuss whether to use yasmin state machine for top level retry attempt visualization.

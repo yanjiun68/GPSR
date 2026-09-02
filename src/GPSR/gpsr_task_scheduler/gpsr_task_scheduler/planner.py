@@ -324,6 +324,11 @@ def plan_to_dict(result: SchedulerResult) -> dict[str, Any]:
     return {
         "command_id": result.command_id,
         "valid": result.valid,
+        "command_context": (
+            result.command_context.to_dict()
+            if result.command_context is not None
+            else None
+        ),
         "task_request": None if result.task_request is None else {
             "command_id": result.task_request.command_id,
             "task_type": result.task_request.task_type,

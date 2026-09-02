@@ -30,6 +30,7 @@ setup(
     entry_points={
         "console_scripts": [
             "gpsr_scheduler = gpsr_task_scheduler.scheduler_node:main",
+            "gpsr_parse_dry_run = gpsr_task_scheduler.parse_dry_run:main",
             "gpsr_validate_sequences = gpsr_task_scheduler.sequence_validator:main",
         ],
     },

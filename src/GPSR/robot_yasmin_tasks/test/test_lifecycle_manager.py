@@ -11,7 +11,12 @@ from lifecycle_msgs.msg import State, Transition
 
 from robot_yasmin_tasks.gpsr.action_types import (
     ALLOWED_ACTION_TYPES,
+    GPSR_CLEANUP_SKILL_SERVICE,
+    GPSR_GET_SKILL_STATE_SERVICE,
+    GPSR_LIFECYCLE_SERVICE_PREFIX,
     GPSR_MANAGED_LIFECYCLE_NODES,
+    GPSR_PREPARE_SKILL_SERVICE,
+    GPSR_RECOVER_SKILL_SERVICE,
 )
 from robot_yasmin_tasks.gpsr.lifecycle_manager import (
     GpsrLifecycleManager,
@@ -49,6 +54,16 @@ def test_registry_manages_only_approved_transient_gpsr_nodes() -> None:
     "unapproved_node",
     [
         "/my_robot_nav",
+        "/lifecycle_manager_navigation",
+        "/controller_server",
+        "/smoother_server",
+        "/planner_server",
+        "/behavior_server",
+        "/bt_navigator",
+        "/waypoint_follower",
+        "/velocity_smoother",
+        "/map_server",
+        "/amcl",
         "/base_driver",
         "/controller_manager",
         "/rx200_arm_driver",
@@ -71,6 +86,27 @@ def test_registry_rejects_non_gpsr_lifecycle_targets(
     manager = object.__new__(GpsrLifecycleManager)
     with pytest.raises(RuntimeError, match="non-GPSR lifecycle resources"):
         manager.load_registry(str(unsafe_path))
+
+
+def test_gpsr_control_services_are_isolated_from_nav2_manager() -> None:
+    """Special function: Reserve a GPSR-only lifecycle control namespace."""
+    # Section: Every public GPSR manager service must remain under one prefix.
+    gpsr_services = {
+        GPSR_PREPARE_SKILL_SERVICE,
+        GPSR_CLEANUP_SKILL_SERVICE,
+        GPSR_RECOVER_SKILL_SERVICE,
+        GPSR_GET_SKILL_STATE_SERVICE,
+    }
+    assert all(
+        service_name.startswith(f"{GPSR_LIFECYCLE_SERVICE_PREFIX}/")
+        for service_name in gpsr_services
+    )
+
+    # Section: GPSR must never expose or consume Nav2 lifecycle-manager APIs.
+    assert not any(
+        service_name.startswith("/lifecycle_manager_navigation/")
+        for service_name in gpsr_services
+    )
 
 
 def test_person_routes_report_truthful_resource_ownership() -> None:

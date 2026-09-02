@@ -77,6 +77,22 @@ GPSR_MANAGED_LIFECYCLE_NODES = frozenset({
 })
 
 
+# Section: Keep every GPSR lifecycle control endpoint outside Nav2's manager API.
+GPSR_LIFECYCLE_SERVICE_PREFIX = "/gpsr_lifecycle"
+GPSR_PREPARE_SKILL_SERVICE = (
+    f"{GPSR_LIFECYCLE_SERVICE_PREFIX}/prepare_skill"
+)
+GPSR_CLEANUP_SKILL_SERVICE = (
+    f"{GPSR_LIFECYCLE_SERVICE_PREFIX}/cleanup_skill"
+)
+GPSR_RECOVER_SKILL_SERVICE = (
+    f"{GPSR_LIFECYCLE_SERVICE_PREFIX}/recover_skill"
+)
+GPSR_GET_SKILL_STATE_SERVICE = (
+    f"{GPSR_LIFECYCLE_SERVICE_PREFIX}/get_skill_state"
+)
+
+
 @dataclass(frozen=True, slots=True)
 class PrimitiveCapability:
     """Special function: Represent one registry-backed executable primitive contract."""

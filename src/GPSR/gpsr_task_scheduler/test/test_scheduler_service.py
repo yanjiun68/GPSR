@@ -40,6 +40,18 @@ class _Logger:
         self.errors.append(message)
 
 
+class _Publisher:
+    """Special function: Record structured topic-command result messages."""
+
+    def __init__(self):
+        """Special function: Initialize an empty publication history."""
+        self.messages = []
+
+    def publish(self, message) -> None:
+        """Special function: Store one published ROS-style result message."""
+        self.messages.append(message)
+
+
 class _StringMsg:
     """Special function: Carry one fake std_msgs/String payload."""
 
@@ -90,6 +102,7 @@ class _FakeScheduler:
         self.scheduled_dry_run = None
         self.config = _Config()
         self.logger = _Logger()
+        self.command_result_pub = _Publisher()
 
     def get_parameter(self, _name: str) -> _Param:
         """Special function: Return the fake global dry-run parameter."""
@@ -98,6 +111,10 @@ class _FakeScheduler:
     def get_logger(self) -> _Logger:
         """Special function: Return the fake logger used by topic callbacks."""
         return self.logger
+
+    def publish_command_result(self, result: dict) -> None:
+        """Special function: Reuse production structured command-result publication."""
+        GpsrTaskSchedulerNode.publish_command_result(self, result)
 
     def schedule(self, command_id: str, instruction: str, dry_run: bool) -> dict:
         """Special function: Return a deterministic fake plan."""
@@ -259,8 +276,12 @@ def test_topic_command_skips_dispatch_when_global_dry_run_is_true() -> None:
 
 
 def test_topic_command_rejects_invalid_plan_without_dispatch() -> None:
-    """Special function: Invalid topic commands log the planning issue and skip executor dispatch."""
+    """Special function: Invalid topic commands publish rejection for voice feedback."""
     node = _FakeScheduler(global_dry_run=False, valid=False)
     GpsrTaskSchedulerNode.command_callback(node, _StringMsg("find it in the kitchen"))
     assert node.submitted is False
     assert "GPSR command rejected" in node.logger.warnings[0]
+    assert len(node.command_result_pub.messages) == 1
+    result = json.loads(node.command_result_pub.messages[0].data)
+    assert result["accepted"] is False
+    assert result["success"] is False

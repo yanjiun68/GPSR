@@ -1,0 +1,25 @@
+# Section: Natural-language aliases only; executable primitives remain in skill_registry.yaml.
+verb_aliases:
+  NAVIGATE: [go to, navigate to, move to, head to, proceed to]
+  FIND: [look for, search for, find, locate]
+  PICK_OBJECT: [pick up, grasp, grab, pick]
+  PLACE_OBJECT: [put down, place, put]
+  DELIVER_OBJECT: [bring, deliver, carry to, give to, hand over]
+  FOLLOW_PERSON: [follow]
+  GUIDE_PERSON: [guide, lead]
+  COUNT: [how many, count]
+  SAY: [say, speak, report, tell, greet]
+  ASK_AND_LISTEN: [ask, talk to]
+
+# Section: Location aliases map only to locations already accepted by scheduler.yaml.
+location_aliases:
+  lounge: living_room
+  living room: living_room
+  dining room: dining_room
+  instruction point: instruction_point
+
+# Section: Operator references map to the existing authoritative person identifier.
+person_aliases:
+  me: operator
+  instruction person: operator
+  operator: operator

@@ -5,17 +5,24 @@ from launch.actions import DeclareLaunchArgument
 from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 
 
 def generate_launch_description() -> LaunchDescription:
     """Special function: Launch TTS, STT, executor, and voice command intake."""
     use_local_voice = LaunchConfiguration("use_local_voice")
     use_voice_command = LaunchConfiguration("use_voice_command")
+    command_input_timeout_sec = LaunchConfiguration("command_input_timeout_sec")
     start_lifecycle_manager = LaunchConfiguration("start_lifecycle_manager")
     return LaunchDescription(
         [
             DeclareLaunchArgument("use_local_voice", default_value="true", description="Start local voice TTS/STT nodes."),
             DeclareLaunchArgument("use_voice_command", default_value="true", description="Start spoken GPSR command intake."),
+            DeclareLaunchArgument(
+                "command_input_timeout_sec",
+                default_value="12.0",
+                description="Seconds to wait for the initial spoken GPSR command transcript.",
+            ),
             DeclareLaunchArgument("use_llm_parser", default_value="false", description="Use optional /llm parser service if available."),
             DeclareLaunchArgument(
                 "start_lifecycle_manager",
@@ -40,6 +47,13 @@ def generate_launch_description() -> LaunchDescription:
                 name="gpsr_voice_command",
                 output="screen",
                 condition=IfCondition(use_voice_command),
+                # Section: Forward the launch timeout as a strongly typed ROS parameter.
+                parameters=[{
+                    "listen_timeout_sec": ParameterValue(
+                        command_input_timeout_sec,
+                        value_type=float,
+                    ),
+                }],
             ),
         ]
     )

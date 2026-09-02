@@ -22,8 +22,10 @@ class GpsrVoiceCommandNode(Node):
         self.declare_parameter("repeat", False)
         self.declare_parameter("command_topic", "/gpsr/command")
         self.declare_parameter("scheduler_state_topic", "/gpsr/state")
+        self.declare_parameter("command_result_topic", "/gpsr/command_result")
         self.declare_parameter("record_sec", 6.0)
-        self.declare_parameter("listen_timeout_sec", 16.0)
+        # Section: Bound the initial GPSR spoken-command input window to twelve seconds.
+        self.declare_parameter("listen_timeout_sec", 12.0)
         self.declare_parameter("prompt_text", "Please give me a GPSR command after the beep.")
         self.tts = self.create_client(SayText, "/voice/tts/say")
         self.stt_pub = self.create_publisher(Float32, "/voice/stt/start", 10)
@@ -38,17 +40,25 @@ class GpsrVoiceCommandNode(Node):
             self._scheduler_state_cb,
             10,
         )
+        self.command_result_sub = self.create_subscription(
+            String,
+            str(self.get_parameter("command_result_topic").value),
+            self._command_result_cb,
+            10,
+        )
         self.scheduler_state = "INITIALIZING"
         self.latest = ""
         self.event = threading.Event()
         self.busy = False
+        self.awaiting_result = False
         if bool(self.get_parameter("auto_start").value):
             self.create_timer(2.0, self._start_once)
 
     def _start_once(self) -> None:
         """Special function: Start one voice-command cycle."""
-        if self.busy or self.scheduler_state != "WAITING_FOR_COMMAND":
+        if self.busy or self.awaiting_result or self.scheduler_state != "WAITING_FOR_COMMAND":
             return
+        # Section: Reserve the single command worker before starting its background thread.
         self.busy = True
         threading.Thread(target=self._run, daemon=True).start()
 
@@ -56,17 +66,32 @@ class GpsrVoiceCommandNode(Node):
         """Special function: Execute prompt/listen/plan/submit pipeline."""
         try:
             self._say(str(self.get_parameter("prompt_text").value))
-            transcript = self._listen()
-            if not transcript:
-                self._say("I could not hear a command.")
-                return
-            # Section: Publish exactly one transcript; scheduler owns parsing and execution.
-            command_msg = String()
-            command_msg.data = transcript
-            self.command_pub.publish(command_msg)
-            self._say("I received the command.")
+            # Section: Reuse one worker and persistent subscriptions across timeout windows.
+            while self.scheduler_state == "WAITING_FOR_COMMAND":
+                timeout_sec = float(self.get_parameter("listen_timeout_sec").value)
+                self.get_logger().info(
+                    f"Waiting for GPSR command (timeout: {timeout_sec:.1f} s)."
+                )
+                transcript = self._listen()
+                if transcript:
+                    # Section: Publish exactly one transcript; scheduler owns parsing and execution.
+                    self.get_logger().info(
+                        "GPSR transcript received; awaiting scheduler result."
+                    )
+                    command_msg = String()
+                    command_msg.data = transcript
+                    self.awaiting_result = True
+                    self.command_pub.publish(command_msg)
+                    return
+                # Section: A listening timeout only re-arms intake and never requests motion.
+                self.get_logger().info(
+                    f"No command received within {timeout_sec:.1f} s; "
+                    "re-arming command input."
+                )
         finally:
-            self.busy = False
+            # Section: Keep intake blocked until the scheduler supplies the command verdict.
+            if not self.awaiting_result:
+                self.busy = False
 
     def _scheduler_state_cb(self, msg: String) -> None:
         """Special function: Enable listening only while the scheduler is ready."""
@@ -76,12 +101,46 @@ class GpsrVoiceCommandNode(Node):
             return
         state = str(payload.get("state", "")).strip()
         if state:
+            # Section: Log entry into ready state once per scheduler transition.
+            if state == "WAITING_FOR_COMMAND" and self.scheduler_state != state:
+                self.get_logger().info(
+                    "GPSR ready to receive command at current robot position."
+                )
             self.scheduler_state = state
 
     def _stt_cb(self, msg: String) -> None:
         """Special function: Receive one STT transcript."""
         self.latest = msg.data.strip()
         self.event.set()
+
+    def _command_result_cb(self, msg: String) -> None:
+        """Special function: Speak only after a submitted voice command has a scheduler verdict."""
+        if not self.awaiting_result:
+            return
+        try:
+            result = json.loads(str(msg.data))
+        except json.JSONDecodeError:
+            return
+
+        # Section: Distinguish proven queue success, rejection/failure, and non-executed results.
+        execution = result.get("execution")
+        response_text = ""
+        if isinstance(execution, dict):
+            response_text = (
+                "I received the command."
+                if bool(execution.get("success", False))
+                else "The command is rejected."
+            )
+        elif not bool(result.get("accepted", False)):
+            response_text = "The command is rejected."
+
+        # Section: Keep quiet for dry runs or inconclusive results, then reopen command intake.
+        try:
+            if response_text:
+                self._say(response_text)
+        finally:
+            self.awaiting_result = False
+            self.busy = False
 
     def _listen(self) -> str:
         """Special function: Trigger local STT and wait for transcript."""
@@ -91,10 +150,17 @@ class GpsrVoiceCommandNode(Node):
         trigger.data = float(self.get_parameter("record_sec").value)
         self.stt_pub.publish(trigger)
         deadline = time.monotonic() + float(self.get_parameter("listen_timeout_sec").value)
-        while time.monotonic() < deadline:
-            if self.event.wait(timeout=0.05):
-                return self.latest
-        return ""
+        while True:
+            # Section: Cap the final event wait at the exact remaining command window.
+            remaining = deadline - time.monotonic()
+            if remaining <= 0.0:
+                return ""
+            if self.event.wait(timeout=min(0.05, remaining)):
+                # Section: Ignore empty STT callbacks while retaining the original deadline.
+                transcript = self.latest.strip()
+                if transcript:
+                    return transcript
+                self.event.clear()
 
     def _say(self, text: str) -> bool:
         """Special function: Speak prompt or status through local TTS."""

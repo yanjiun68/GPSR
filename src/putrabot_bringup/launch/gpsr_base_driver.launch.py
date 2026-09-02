@@ -7,9 +7,14 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import EnvironmentVariable, LaunchConfiguration
+from launch.substitutions import LaunchConfiguration
 from launch.substitutions import PathJoinSubstitution
 from launch_ros.substitutions import FindPackageShare
+
+
+# Section: Absolute GPSR runtime files requested for this robot workspace.
+GPSR_MAP_FILE = "/home/yanjiun68/workspace/WS1/PutrabotUPM-project/maps/gpsr_map.yaml"
+GPSR_WAYPOINTS_FILE = "/home/yanjiun68/workspace/WS1/PutrabotUPM-project/waypoints/gpsr_waypoint.yaml"
 
 
 # Special function: Build the complete hardware and navigation launch graph for GPSR.
@@ -20,16 +25,13 @@ def generate_launch_description() -> LaunchDescription:
     waypoints_file = LaunchConfiguration("waypoints_file")
     use_sim_time = LaunchConfiguration("use_sim_time")
     use_rviz = LaunchConfiguration("use_rviz")
+    nav2_autostart = LaunchConfiguration("nav2_autostart")
     start_realsense = LaunchConfiguration("start_realsense")
     enable_depth = LaunchConfiguration("enable_depth")
 
-    # Section: Default mutable GPSR data paths relative to the launch working directory.
-    default_map_file = PathJoinSubstitution(
-        [EnvironmentVariable("PWD"), "maps", "gpsr_map.yaml"]
-    )
-    default_waypoints_file = PathJoinSubstitution(
-        [EnvironmentVariable("PWD"), "waypoints", "gpsr_waypoint.yaml"]
-    )
+    # Section: Use deterministic absolute paths instead of the caller's working directory.
+    default_map_file = GPSR_MAP_FILE
+    default_waypoints_file = GPSR_WAYPOINTS_FILE
 
     # Section: Official RealSense launch with the depth stream explicitly enabled.
     realsense_camera = IncludeLaunchDescription(
@@ -56,6 +58,7 @@ def generate_launch_description() -> LaunchDescription:
             "waypoints_file": waypoints_file,
             "use_sim_time": use_sim_time,
             "use_rviz": use_rviz,
+            "nav2_autostart": nav2_autostart,
             # Section: Prevent static_map_nav from starting a second RealSense instance.
             "use_realsense_imu": "false",
             "use_external_drivers": "false",
@@ -84,6 +87,11 @@ def generate_launch_description() -> LaunchDescription:
                 "use_rviz",
                 default_value="true",
                 description="Start RViz with the static-map navigation stack.",
+            ),
+            DeclareLaunchArgument(
+                "nav2_autostart",
+                default_value="true",
+                description="Autostart the static-map Nav2 lifecycle manager.",
             ),
             DeclareLaunchArgument(
                 "start_realsense",

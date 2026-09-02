@@ -10,6 +10,8 @@ from typing import Any
 import rclpy
 from rclpy.action import ActionServer, CancelResponse, GoalResponse
 from rclpy.executors import MultiThreadedExecutor
+from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
+from std_msgs.msg import String
 from yasmin import Blackboard, State, StateMachine
 from yasmin_viewer import YasminViewerPub
 
@@ -36,6 +38,11 @@ from robot_yasmin_tasks.gpsr.outcomes import (
     SKILL_UNAVAILABLE,
     SUCCESS,
     is_recoverable,
+)
+from robot_yasmin_tasks.gpsr.queue_status import (
+    QueueStatusCallback,
+    build_queue_status,
+    emit_queue_status,
 )
 from robot_yasmin_tasks.ros_clients.lifecycle_client import NullSkillResourceManager
 from robot_yasmin_tasks.skills.recovery_skill_sm import RecoverySkillSM
@@ -66,9 +73,10 @@ class QueueAdmissionGuard:
 class CheckQueueState(State):
     """Special function: Validate queue and initialize bookkeeping."""
 
-    def __init__(self) -> None:
+    def __init__(self, status_callback: QueueStatusCallback | None = None) -> None:
         """Special function: Declare queue check outcomes."""
         super().__init__([SUCCESS, "has_actions", INVALID_INPUT])
+        self.status_callback = status_callback
 
     def execute(self, blackboard: Blackboard) -> str:
         """Special function: Prepare queue execution blackboard state."""
@@ -96,6 +104,7 @@ class CheckQueueState(State):
         blackboard[bb.ACTIVE_LIFECYCLE_SKILL] = ""
         blackboard[bb.ACTIVE_SKILL_TARGET] = ""
         blackboard[bb.ACTIVE_SKILL_GENERATION] = ""
+        emit_queue_status(self.status_callback, blackboard, "QUEUE_STARTED")
         return SUCCESS if not steps else "has_actions"
 
 
@@ -107,12 +116,14 @@ class SelectNextActionState(State):
         capability_registry: dict[str, PrimitiveCapability] | None = None,
         allow_simulated: bool = False,
         warning_logger: Callable[[str], None] | None = None,
+        status_callback: QueueStatusCallback | None = None,
     ) -> None:
         """Special function: Declare selection outcomes and fail-closed capability policy."""
         super().__init__([SUCCESS, INVALID_INPUT])
         self.capability_registry = capability_registry or load_primitive_registry()
         self.allow_simulated = bool(allow_simulated)
         self.warning_logger = warning_logger
+        self.status_callback = status_callback
 
     def execute(self, blackboard: Blackboard) -> str:
         """Special function: Store CURRENT_ACTION from the committed queue index."""
@@ -126,6 +137,9 @@ class SelectNextActionState(State):
             return INVALID_INPUT
         action = normalize_action_step(queue[index])
         blackboard[bb.CURRENT_ACTION] = action
+        # Section: Clear the previous action outcome before reporting the new selection.
+        blackboard[bb.DISPATCH_OUTCOME] = ""
+        blackboard[bb.LAST_SKILL_RESULT] = {}
         legacy = str(action.parameters.get("_legacy_action_type", ""))
         if legacy and self.warning_logger is not None:
             self.warning_logger(
@@ -144,6 +158,7 @@ class SelectNextActionState(State):
                 f"Primitive unavailable in this executor mode: {unavailable}."
             )
             return INVALID_INPUT
+        emit_queue_status(self.status_callback, blackboard, "ACTION_SELECTED")
         return SUCCESS
 
 
@@ -331,9 +346,10 @@ class StopSkillResourcesState(State):
 class StoreSkillResultState(State):
     """Special function: Commit a result only after the teardown barrier succeeds."""
 
-    def __init__(self) -> None:
+    def __init__(self, status_callback: QueueStatusCallback | None = None) -> None:
         """Special function: Declare result routing outcomes."""
         super().__init__([SUCCESS, RECOVERABLE_FAILURE, FATAL_FAILURE, CANCELED])
+        self.status_callback = status_callback
 
     def execute(self, blackboard: Blackboard) -> str:
         """Special function: Append the result and increment only a fully cleaned success."""
@@ -362,7 +378,14 @@ class StoreSkillResultState(State):
             blackboard[bb.CURRENT_ACTION_INDEX] = int(
                 bb_get(blackboard, bb.CURRENT_ACTION_INDEX, 0) or 0
             ) + 1
+            emit_queue_status(self.status_callback, blackboard, "ACTION_FINISHED", outcome)
             return SUCCESS
+        emit_queue_status(
+            self.status_callback,
+            blackboard,
+            "ACTION_RETRYING" if is_recoverable(outcome) else "ACTION_FINISHED",
+            outcome,
+        )
         if outcome == CANCELED:
             return CANCELED
         return RECOVERABLE_FAILURE if is_recoverable(outcome) else FATAL_FAILURE
@@ -385,13 +408,16 @@ class CheckCompletionState(State):
 class RecoveryState(State):
     """Special function: Run deterministic bounded recovery after complete cleanup."""
 
-    def __init__(self) -> None:
+    def __init__(self, status_callback: QueueStatusCallback | None = None) -> None:
         """Special function: Declare recovery outcomes."""
         super().__init__([SUCCESS, FATAL_FAILURE])
+        self.status_callback = status_callback
 
     def execute(self, blackboard: Blackboard) -> str:
         """Special function: Retry the current action once with a future fresh generation."""
-        return SUCCESS if RecoverySkillSM()(blackboard) == SUCCESS else FATAL_FAILURE
+        outcome = SUCCESS if RecoverySkillSM()(blackboard) == SUCCESS else FATAL_FAILURE
+        emit_queue_status(self.status_callback, blackboard, "ACTION_RETRYING", outcome)
+        return outcome
 
 
 class ActionQueueExecutorSM(StateMachine):
@@ -404,6 +430,7 @@ class ActionQueueExecutorSM(StateMachine):
         capability_registry: dict[str, PrimitiveCapability] | None = None,
         allow_simulated: bool = False,
         warning_logger: Callable[[str], None] | None = None,
+        status_callback: QueueStatusCallback | None = None,
     ) -> None:
         """Special function: Extend the existing graph without replacing its dispatcher."""
         super().__init__(
@@ -417,12 +444,17 @@ class ActionQueueExecutorSM(StateMachine):
         # Section: Start and stop states surround every dispatch, including retries.
         self.add_state(
             "CHECK_QUEUE",
-            CheckQueueState(),
+            CheckQueueState(status_callback),
             transitions={SUCCESS: SUCCESS, "has_actions": "SELECT_NEXT_ACTION", INVALID_INPUT: INVALID_INPUT},
         )
         self.add_state(
             "SELECT_NEXT_ACTION",
-            SelectNextActionState(registry, allow_simulated, warning_logger),
+            SelectNextActionState(
+                registry,
+                allow_simulated,
+                warning_logger,
+                status_callback,
+            ),
             transitions={SUCCESS: "CHECK_PREREQUISITES", INVALID_INPUT: INVALID_INPUT},
         )
         self.add_state(
@@ -451,7 +483,7 @@ class ActionQueueExecutorSM(StateMachine):
         )
         self.add_state(
             "STORE_SKILL_RESULT",
-            StoreSkillResultState(),
+            StoreSkillResultState(status_callback),
             transitions={
                 SUCCESS: "CHECK_COMPLETION",
                 RECOVERABLE_FAILURE: "RECOVERY",
@@ -466,7 +498,7 @@ class ActionQueueExecutorSM(StateMachine):
         )
         self.add_state(
             "RECOVERY",
-            RecoveryState(),
+            RecoveryState(status_callback),
             transitions={SUCCESS: "START_SKILL_RESOURCES", FATAL_FAILURE: FATAL_FAILURE},
         )
 
@@ -533,6 +565,7 @@ def main() -> None:
     node.declare_parameter("lifecycle_transition_timeout_sec", 60.0)
     node.declare_parameter("lifecycle_operation_timeout_margin_sec", 10.0)
     node.declare_parameter("startup_dependency_poll_sec", 5.0)
+    node.declare_parameter("queue_status_topic", "/gpsr/action_queue_status_json")
     registry_file = str(node.get_parameter("skill_registry_file").value).strip()
     capability_registry = load_primitive_registry(registry_file or None)
     speech = SpeechClients(node=node, simulate=False)
@@ -582,12 +615,43 @@ def main() -> None:
     factories[EXTRACT_PERSON_INFO] = lambda: ExtractPersonInfoSkillSM(extract_guest_info)
     factories[COUNT_OBJECTS] = lambda: CountObjectsSkillSM(perception)
     factories[COUNT_PEOPLE] = lambda: CountPeopleSkillSM(perception)
+    # Section: Publish the latest executor-owned status for late-joining read-only monitors.
+    status_qos = QoSProfile(
+        history=HistoryPolicy.KEEP_LAST,
+        depth=1,
+        reliability=ReliabilityPolicy.RELIABLE,
+        durability=DurabilityPolicy.TRANSIENT_LOCAL,
+    )
+    status_pub = node.create_publisher(
+        String,
+        str(node.get_parameter("queue_status_topic").value),
+        status_qos,
+    )
+    active_goal: dict[str, Any] = {"handle": None}
+
+    def publish_queue_status(blackboard: Blackboard, phase: str, outcome: str) -> None:
+        """Special function: Publish JSON status and existing action feedback from one snapshot."""
+        payload = build_queue_status(blackboard, phase, outcome)
+        message = String()
+        message.data = json.dumps(payload, separators=(",", ":"), sort_keys=True)
+        status_pub.publish(message)
+
+        # Section: Mirror the same authoritative cursor through ExecuteActionQueue feedback.
+        goal_handle = active_goal.get("handle")
+        if goal_handle is not None:
+            feedback = ExecuteActionQueue.Feedback()
+            feedback.current_index = max(0, int(payload["current_index"]))
+            feedback.current_action_type = str(payload["current_action_type"])
+            feedback.status = str(payload["queue_state"])
+            goal_handle.publish_feedback(feedback)
+
     sm = ActionQueueExecutorSM(
         factories,
         resources,
         capability_registry,
         bool(node.get_parameter("allow_simulated_primitives").value),
         node.get_logger().warn,
+        publish_queue_status,
     )
     YasminViewerPub(sm, "GPSR_ACTION_QUEUE_EXECUTOR", node=node)
     YasminViewerPub(find_person_sm, "GPSR_FIND_PERSON_BY_NAME", node=node)
@@ -626,9 +690,12 @@ def main() -> None:
         """Special function: Execute one admitted queue and release admission after cleanup."""
         blackboard = Blackboard()
         blackboard[bb.ACTION_QUEUE] = list(goal_handle.request.queue.steps)
+        blackboard[bb.CURRENT_TASK_ID] = str(goal_handle.request.queue.task_id)
         blackboard[bb.CANCEL_REQUESTED] = lambda: goal_handle.is_cancel_requested
+        active_goal["handle"] = goal_handle
         try:
             outcome = sm(blackboard)
+            emit_queue_status(publish_queue_status, blackboard, "QUEUE_FINISHED", outcome)
             result = ExecuteActionQueue.Result()
             result.success = outcome == SUCCESS
             result.outcome = outcome
@@ -649,6 +716,7 @@ def main() -> None:
                 goal_handle.abort()
             return result
         finally:
+            active_goal["handle"] = None
             admission.release()
 
     # Section: The persistent action server exposes the existing public queue API.

@@ -19,7 +19,10 @@ from rclpy.node import Node
 
 from robot_ai_interfaces.srv import GetLifecycleSkillState, ManageLifecycleSkill
 from robot_yasmin_tasks.gpsr.action_types import (
-    ALLOWED_ACTION_TYPES,
+    GPSR_CLEANUP_SKILL_SERVICE,
+    GPSR_GET_SKILL_STATE_SERVICE,
+    GPSR_PREPARE_SKILL_SERVICE,
+    GPSR_RECOVER_SKILL_SERVICE,
     load_primitive_registry,
 )
 
@@ -89,25 +92,25 @@ class GpsrLifecycleManager(Node):
         # Section: Expose high-level operations; transition details stay inside this node.
         self._prepare_service = self.create_service(
             ManageLifecycleSkill,
-            "/gpsr_lifecycle/prepare_skill",
+            GPSR_PREPARE_SKILL_SERVICE,
             self.prepare_callback,
             callback_group=self._callback_group,
         )
         self._cleanup_service = self.create_service(
             ManageLifecycleSkill,
-            "/gpsr_lifecycle/cleanup_skill",
+            GPSR_CLEANUP_SKILL_SERVICE,
             self.cleanup_callback,
             callback_group=self._callback_group,
         )
         self._recover_service = self.create_service(
             ManageLifecycleSkill,
-            "/gpsr_lifecycle/recover_skill",
+            GPSR_RECOVER_SKILL_SERVICE,
             self.recover_callback,
             callback_group=self._callback_group,
         )
         self._state_service = self.create_service(
             GetLifecycleSkillState,
-            "/gpsr_lifecycle/get_skill_state",
+            GPSR_GET_SKILL_STATE_SERVICE,
             self.get_state_callback,
             callback_group=self._callback_group,
         )

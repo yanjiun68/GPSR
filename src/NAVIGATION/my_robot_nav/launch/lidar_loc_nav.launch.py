@@ -108,6 +108,11 @@ def generate_launch_description():
     )
     use_nav2_stack = LaunchConfiguration('use_nav2_stack', default='true')
     use_startup_gate = LaunchConfiguration('use_startup_gate', default='true')
+    # Section: Never allow manager autostart and the gate to co-own STARTUP.
+    startup_gate_enabled = PythonExpression([
+        "'", use_startup_gate, "' == 'true' and '",
+        nav2_autostart, "' != 'true'",
+    ])
     require_nav2_transform = LaunchConfiguration(
         'require_nav2_transform',
         default='true',
@@ -243,7 +248,7 @@ def generate_launch_description():
         package='my_robot_nav',
         executable='nav2_autostart_gate.py',
         name='nav2_autostart_gate',
-        condition=IfCondition(use_startup_gate),
+        condition=IfCondition(startup_gate_enabled),
         parameters=[{
             'service_name': '/lifecycle_manager_navigation/manage_nodes',
             'odom_topic': '/odom',
@@ -688,7 +693,7 @@ def generate_launch_description():
         TimerAction(
             period=PythonExpression([nav2_delay, ' + 1.0']),
             actions=[nav2_autostart_gate],
-            condition=IfCondition(use_startup_gate),
+            condition=IfCondition(startup_gate_enabled),
         ),
         TimerAction(
             period=rviz_delay,

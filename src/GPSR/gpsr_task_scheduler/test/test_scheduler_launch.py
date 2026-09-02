@@ -9,7 +9,7 @@ from types import ModuleType
 
 from launch import LaunchContext
 from launch.actions import DeclareLaunchArgument
-from launch_ros.actions import LifecycleNode
+from launch_ros.actions import LifecycleNode, Node
 
 
 def load_scheduler_launch(tmp_path: Path) -> ModuleType:
@@ -46,6 +46,20 @@ def lifecycle_node(entities: list[object], node_name: str) -> LifecycleNode:
         entity
         for entity in entities
         if isinstance(entity, LifecycleNode)
+        and str(getattr(entity, "_Node__node_name", "")) == node_name
+    ]
+    assert len(matches) == 1
+    return matches[0]
+
+
+def launched_node(entities: list[object], node_name: str) -> Node:
+    """Special function: Select one ordinary launch node by configured node name."""
+    # Section: Match the launch action's stored node-name substitution.
+    matches = [
+        entity
+        for entity in entities
+        if isinstance(entity, Node)
+        and not isinstance(entity, LifecycleNode)
         and str(getattr(entity, "_Node__node_name", "")) == node_name
     ]
     assert len(matches) == 1
@@ -156,6 +170,18 @@ def test_command_start_amcl_return_defaults_disable_startup_motion(tmp_path: Pat
     assert context.launch_configurations["return_fallback_named_location"] == "instruction_point"
     assert context.launch_configurations["navigate_to_pose_action"] == "/navigate_to_pose"
     assert context.launch_configurations["navigate_to_named_pose_action"] == "/nav/navigate_named_pose"
+
+
+def test_initial_voice_command_window_defaults_to_twelve_seconds(tmp_path: Path) -> None:
+    """Special function: Launch one bounded command listener without startup navigation."""
+    # Section: Resolve the public timeout and spoken-command launch defaults.
+    entities, context = launch_entities(tmp_path)
+    assert context.launch_configurations["start_voice_command"] == "true"
+    assert context.launch_configurations["command_input_timeout_sec"] == "12.0"
+
+    # Section: Verify the full scheduler launch creates exactly one command listener.
+    command_node = launched_node(entities, "gpsr_voice_command")
+    assert command_node.condition is not None and command_node.condition.evaluate(context)
 
 
 def test_depth_localization_is_selectable_and_enabled_by_default(tmp_path: Path) -> None:

@@ -8,6 +8,11 @@ import time
 from typing import Any, Callable
 
 from robot_ai_interfaces.srv import ManageLifecycleSkill
+from robot_yasmin_tasks.gpsr.action_types import (
+    GPSR_CLEANUP_SKILL_SERVICE,
+    GPSR_PREPARE_SKILL_SERVICE,
+    GPSR_RECOVER_SKILL_SERVICE,
+)
 from robot_yasmin_tasks.gpsr import blackboard_keys as bb
 from robot_yasmin_tasks.gpsr.blackboard_utils import bb_get
 
@@ -32,9 +37,9 @@ class LifecycleSkillResourceClient:
     def __init__(
         self,
         node: Any,
-        prepare_service_name: str = "/gpsr_lifecycle/prepare_skill",
-        cleanup_service_name: str = "/gpsr_lifecycle/cleanup_skill",
-        recover_service_name: str = "/gpsr_lifecycle/recover_skill",
+        prepare_service_name: str = GPSR_PREPARE_SKILL_SERVICE,
+        cleanup_service_name: str = GPSR_CLEANUP_SKILL_SERVICE,
+        recover_service_name: str = GPSR_RECOVER_SKILL_SERVICE,
         transition_timeout_sec: float = 60.0,
         operation_timeout_margin_sec: float = 10.0,
     ) -> None:

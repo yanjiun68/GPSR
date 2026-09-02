@@ -4,6 +4,22 @@ Section: Deterministic GPSR scheduler front end.
 
 This package parses constrained GPSR commands without an LLM, plans the physical task order, and submits reusable symbolic skills to the existing `robot_yasmin_tasks` executor.
 
+Section: Canonical language pipeline.
+
+The scheduler retains raw and optional externally normalized text separately. It applies
+longest-phrase aliases from `config/language.yaml`, preserves clause order, resolves only
+type-safe references, builds a serializable semantic plan, and then adapts that plan to the
+existing planner and primitive registry. An upstream LLM may repair grammar and remove filler
+words, but it must preserve every entity, attribute, quantity, relationship, and requested
+step. It must never emit executor names or directly construct an ActionQueue. Critical-field
+drift between raw and normalized text blocks compilation with `LLM_SEMANTIC_DRIFT`.
+
+```text
+raw + normalized text -> canonical clauses -> semantic plan
+                    -> existing macro planner -> validated ActionQueue
+                    -> existing dispatcher and YASMIN skills
+```
+
 Section: Build.
 
 ```bash
@@ -16,6 +32,23 @@ Section: Dry-run launch.
 ```bash
 source install/setup.bash
 ros2 launch gpsr_task_scheduler gpsr_scheduler.launch.py dry_run:=true command_input_mode:=topic
+```
+
+Section: Parser/compiler-only dry run.
+
+This command creates no ROS node and dispatches no robot action:
+
+```bash
+ros2 run gpsr_task_scheduler gpsr_parse_dry_run \
+  "Go to the kitchen, find the Coke, and bring it to John."
+```
+
+To inspect an externally normalized command while retaining the raw ASR text:
+
+```bash
+ros2 run gpsr_task_scheduler gpsr_parse_dry_run \
+  "could you uh go kitchen and find coke" \
+  --normalized "Go to the kitchen and find the Coke."
 ```
 
 Section: Full-system launch.
@@ -79,12 +112,19 @@ independent switches but share one `/gpsr_object_detection_node`; the detector p
 when either pipeline is enabled. Lifecycle activation still occurs only for the state machine
 selected by the executor.
 
+Section: Initial spoken command reception.
+
+The full scheduler launch starts one persistent `gpsr_voice_command` listener. Each logical STT
+window lasts `12.0` seconds by default. A timeout leaves the robot stationary and the existing
+timer re-arms the same listener; it does not recreate `/gpsr/command` subscriptions or submit a
+navigation goal. Configure the window with `command_input_timeout_sec:=12.0`.
+
 Section: Per-command return policy.
 
 The default scheduler freezes the newest valid `map`-frame `/amcl_pose` when a command is
 accepted. The pose is normalized and remains unchanged until that command finishes. If no
-fresh valid pose arrives within three seconds, the scheduler freezes the named
-`instruction_point` fallback instead.
+fresh valid pose arrives within three seconds, command reception remains valid and the scheduler
+stores the named `instruction_point` only as metadata for its later return policy.
 
 For an exhaustive `FIND_OBJECT` `NOT_FOUND` result, the scheduler first returns to this
 frozen command-start pose and then reports `I could not find the <target>.` through the
@@ -96,7 +136,7 @@ return recovery succeeds.
 WAITING_FOR_COMMAND
         |
         v
-CAPTURING_RETURN_POSE -- no valid AMCL pose in 3 s --> named fallback
+CAPTURING_RETURN_POSE -- no valid AMCL pose in 3 s --> store later-return fallback
         |
         v
 PLANNING -> EXECUTING -> RETURNING_TO_COMMAND_START
@@ -108,9 +148,9 @@ PLANNING -> EXECUTING -> RETURNING_TO_COMMAND_START
                    WAITING_FOR_COMMAND / FINISHED
 ```
 
-Raw captured poses use Nav2 `/navigate_to_pose`; ordinary semantic locations and the
-fallback use `/nav/navigate_named_pose`. Startup navigation is disabled by default. Set
-`return_target_mode:=named_location` for the prior named-only policy, or explicitly set
+Raw captured poses use Nav2 `/navigate_to_pose`; ordinary semantic locations and the later-return
+fallback use `/nav/navigate_named_pose`. Startup navigation is disabled by default. Explicitly set
+`return_target_mode:=named_location` for the prior named-only policy, or set
 `navigate_to_instruction_point_on_start:=true` to restore startup motion. Dry-run mode does
 not wait for AMCL and publishes only the configured return policy.
 

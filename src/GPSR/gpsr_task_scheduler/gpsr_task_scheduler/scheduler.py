@@ -6,13 +6,19 @@ from __future__ import annotations
 
 from gpsr_task_scheduler.config import SchedulerConfig
 from gpsr_task_scheduler.models import SchedulerResult
-from gpsr_task_scheduler.parser import parse_command
-from gpsr_task_scheduler.planner import plan_task
+from gpsr_task_scheduler.semantic_compiler import compile_command
 
 
-def schedule_command(command_id: str, instruction: str, config: SchedulerConfig) -> SchedulerResult:
-    """Special function: Parse and plan a GPSR command without LLM or model inference."""
-    request, issues = parse_command(command_id, instruction, config)
-    if issues or request is None:
-        return SchedulerResult(command_id, request, [], issues)
-    return plan_task(request, config)
+def schedule_command(
+    command_id: str,
+    instruction: str,
+    config: SchedulerConfig,
+    normalized_instruction: str | None = None,
+) -> SchedulerResult:
+    """Special function: Canonicalize, validate, and plan without LLM execution authority."""
+    return compile_command(
+        command_id,
+        instruction,
+        config,
+        normalized_text=normalized_instruction,
+    )

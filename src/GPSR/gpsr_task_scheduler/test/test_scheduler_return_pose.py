@@ -108,11 +108,11 @@ def test_fresh_amcl_pose_is_normalized_and_frozen() -> None:
         (_pose("map"), time.monotonic() - 2.0),
     ],
 )
-def test_invalid_or_stale_amcl_pose_uses_named_fallback(
+def test_invalid_or_stale_amcl_pose_stores_named_return_fallback(
     message: PoseWithCovarianceStamped | None,
     receipt_time: float,
 ) -> None:
-    """Special function: Reject missing, non-map, zero-quaternion, and stale poses."""
+    """Special function: Preserve command intake with later-return fallback metadata."""
     harness = _CaptureHarness()
     harness.latest_amcl_pose = message
     harness.latest_amcl_pose_receipt_time = receipt_time

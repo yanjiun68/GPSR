@@ -1,0 +1,79 @@
+gpsr_sys_ui_core:
+  ros__parameters:
+    diagnostics_topic: /diagnostics
+    rosout_topic: /rosout
+
+    graph_rate_hz: 1.0
+    lifecycle_rate_hz: 1.0
+    health_rate_hz: 5.0
+    system_rate_hz: 1.0
+    publish_state_rate_hz: 5.0
+
+    event_history_size: 10000
+    event_dedupe_window_sec: 2.0
+
+    collision_stop_persistent_sec: 5.0
+
+    # Structured owner-side GPSR and Voice interfaces.
+    gpsr_plan_topic: /gpsr/task_plan
+    gpsr_scheduler_state_topic: /gpsr/state
+    gpsr_queue_status_topic: /gpsr/action_queue_status_json
+    voice_transcript_topic: /voice/stt/transcript
+
+    expected_nodes:
+      - /gpsr_task_scheduler
+      - /controller_server
+      - /planner_server
+      - /bt_navigator
+      - /amcl
+      - /local_costmap/local_costmap
+      - /global_costmap/global_costmap
+
+    optional_node_patterns:
+      - /collision_monitor
+      - /camera/*
+      - /move_group
+
+    lifecycle_nodes:
+      - /controller_server
+      - /planner_server
+      - /bt_navigator
+      - /local_costmap/local_costmap
+      - /global_costmap/global_costmap
+      - /collision_monitor
+      - /gpsr_object_detection_node
+      - /gpsr_person_detection_node
+
+    collision_state_topic: /collision_monitor_state
+    cmd_vel_pre_topic: /cmd_vel_smoothed
+    cmd_vel_post_topic: /cmd_vel
+    odom_topic: /odom
+    navigate_status_topic: /navigate_to_pose/_action/status
+
+    joint_state_topics:
+      - /rx200/joint_states
+      - /joint_states
+    arm_joints:
+      - waist
+      - shoulder
+      - elbow
+      - wrist_angle
+      - wrist_rotate
+      - gripper
+    arm_feedback_stale_sec: 1.0
+
+    supervisor_state_topic: /putrabot_bringup/managed_process_status_json
+
+    battery_topic: /battery_state
+    battery_stale_sec: 2.0
+    battery_warn_percent: 20.0
+    battery_critical_percent: 10.0
+
+    nvidia_smi_enabled: true
+    cpu_warn_percent: 90.0
+    ram_warn_percent: 90.0
+    disk_warn_percent: 90.0
+
+    # Backward-compatible monitor API. Do not rename without migrating consumers.
+    state_topic: /gpsr_system_monitor/state_json
+    event_topic: /gpsr_system_monitor/event_json

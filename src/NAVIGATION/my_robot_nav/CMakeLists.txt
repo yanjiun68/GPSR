@@ -45,6 +45,11 @@ if(BUILD_TESTING)
   set(ament_cmake_cpplint_FOUND TRUE)
   ament_lint_auto_find_test_dependencies()
   ament_add_pytest_test(test_lidar_loc_safety test/test_lidar_loc_safety.py)
+  # Section: Verify Nav2 STARTUP state classification and duplicate suppression.
+  ament_add_pytest_test(
+    test_nav2_autostart_gate
+    test/test_nav2_autostart_gate.py
+  )
 endif()
 
 install(DIRECTORY

@@ -101,7 +101,8 @@ def generate_launch_description():
     use_realsense_imu = LaunchConfiguration('use_realsense_imu', default='false')
     use_rviz = LaunchConfiguration('use_rviz', default='true')
     nav2_delay = LaunchConfiguration('nav2_delay', default='10.0')
-    nav2_autostart = LaunchConfiguration('nav2_autostart', default='false')
+    # Section: Start the static-map Nav2 lifecycle automatically by default.
+    nav2_autostart = LaunchConfiguration('nav2_autostart', default='true')
     navigate_to_pose_server_timeout_sec = LaunchConfiguration(
         'navigate_to_pose_server_timeout_sec',
         default='30.0',
@@ -299,10 +300,10 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument(
             'nav2_autostart',
-            default_value='false',
+            default_value='true',
             description=(
-                'Autostart Nav2 immediately; keep false to wait for '
-                '2D Pose Estimate first'
+                'Autostart Nav2 immediately; set false to wait for the '
+                'prerequisite startup gate'
             ),
         ),
         DeclareLaunchArgument(
@@ -436,7 +437,7 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument(
             'angle_scale_factor',
-            default_value='1.49',
+            default_value='0.952',
             description='Scale factor for odometry angle calibration',
         ),
         DeclareLaunchArgument(
