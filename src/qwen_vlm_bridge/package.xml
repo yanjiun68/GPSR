@@ -1,0 +1,29 @@
+<?xml version="1.0"?>
+<!-- Section: Package metadata for the device-local Qwen text-planning bridge. -->
+<package format="3">
+  <!-- Section: Package identity. -->
+  <name>qwen_vlm_bridge</name>
+  <version>0.1.0</version>
+  <description>Persistent ROS 2 text-planning bridge for a locally deployed Qwen VLM.</description>
+  <maintainer email="yanjiun68@example.com">yanjiun68</maintainer>
+  <license>Apache-2.0</license>
+
+  <!-- Section: Build dependencies. -->
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <buildtool_depend>ament_cmake_python</buildtool_depend>
+
+  <!-- Section: ROS runtime dependencies; model libraries live in the configured Qwen environment. -->
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+
+  <!-- Section: Test dependencies. -->
+  <test_depend>ament_cmake_pytest</test_depend>
+  <test_depend>python3-pytest</test_depend>
+
+  <!-- Section: Ament build-system declaration. -->
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

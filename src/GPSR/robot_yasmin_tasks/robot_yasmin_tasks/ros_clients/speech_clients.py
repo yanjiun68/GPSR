@@ -50,8 +50,10 @@ class SpeechClients:
                     {"missing_fields": missing},
                     recoverable=True,
                 )
-        if self.simulate or self.client is None:
+        if self.simulate:  # Only explicitly requested simulation may bypass the voice driver.
             return make_skill_result(action.action_type, SUCCESS, "Simulated speech completed.", {"text": text})
+        if self.client is None:  # A missing real driver must not report that a greeting was spoken.
+            return make_skill_result(action.action_type, FAILED, f"TTS client unavailable: {self.service_name}", recoverable=True)  # Preserve failure feedback for queue recovery.
         if not self.client.wait_for_service(timeout_sec=3.0):
             return make_skill_result(action.action_type, FAILED, f"TTS service unavailable: {self.service_name}", recoverable=True)
         request = SayText.Request()

@@ -121,9 +121,9 @@ def _severity_attr(level: str) -> int:
 
 def _health_attr(value: str) -> int:
     value = str(value or "").upper()
-    if value in {"OK", "HEALTHY", "ACTIVE", "RUNNING", "READY", "ONLINE", "SUCCEEDED", "EXECUTING", "ACCEPTED", "DONE", "LISTENING", "SPEAKING"}:
+    if value in {"OK", "HEALTHY", "ACTIVE", "RUNNING", "READY", "ONLINE", "SUCCEEDED", "EXECUTING", "ACCEPTED", "DONE", "COMPLETED", "LISTENING", "SPEAKING"}:
         return _attr(PAIR_OK, bold=True)
-    if value in {"WARN", "WARNING", "BLOCKED", "STALE", "INACTIVE", "RECOVERING", "RETRYING", "SKIPPED", "CANCELED", "UNKNOWN", "STOP", "SLOWDOWN", "LIMIT", "APPROACH"}:
+    if value in {"WARN", "WARNING", "BLOCKED", "STALE", "INACTIVE", "RECOVERING", "RETRYING", "SKIPPED", "CANCELED", "UNKNOWN", "PENDING", "IN QUEUE", "STOP", "SLOWDOWN", "LIMIT", "APPROACH"}:
         return _attr(PAIR_WARN, bold=True)
     if "PERSISTENT" in value or "BLOCKED" in value or "NOT_MOVING" in value:
         return _attr(PAIR_WARN, bold=True)
@@ -494,14 +494,35 @@ class MonitorTui:
         y = self._metric(win, y, "Current skill", _dig(context, "current_skill", default="-"))
         y = self._metric(win, y, "Scheduler state", _dig(context, "scheduler_state", default="-"))
         y = self._metric(win, y, "Queue state", _dig(context, "queue_state", default="-"), status=_text(_dig(context, "queue_state", default=""), ""))
-        queue_index = _dig(context, "current_index", default=-1)
+        completed_count = _dig(context, "completed_count", default=0)
         queue_length = _dig(context, "queue_length", default=0)
-        queue_position = min(queue_index + 1, queue_length) if isinstance(queue_index, int) and isinstance(queue_length, int) and queue_index >= 0 else 0
-        y = self._metric(win, y, "Queue progress", f"{queue_position}/{queue_length}")
+        y = self._metric(win, y, "Queue progress", f"{completed_count}/{queue_length} completed")
         retry = _dig(context, "retry_attempt", default=None)
         retry_limit = _dig(context, "retry_limit", default=None)
         if retry is not None or retry_limit is not None:
             y = self._metric(win, y, "Retry", f"{_text(retry, '0')}/{_text(retry_limit, '-')}")
+
+        # Section: Keep the accepted task sequence visible on the default monitor page.
+        task_rows = _queue_rows(_dig(context, "queue", default=[]))
+        counts = _dig(context, "task_status_counts", default={}) or {}
+        count_text = "  ".join(
+            f"{label}:{int(counts.get(label, 0) or 0)}"
+            for label in ("IN QUEUE", "RUNNING", "COMPLETED", "ABORTED")
+        )
+        y = self._section(win, y + 1, "ActionQueue tasks", count_text)
+        y = self._draw_table(
+            win,
+            y,
+            task_rows,
+            [
+                Column("number", "#", 5, 3),
+                Column("skill", "TASK", 30, 12, grow=2),
+                Column("target", "TARGET", 28, 10, grow=2),
+                Column("state", "STATUS", 12, 8),
+            ],
+            max_rows=8,
+            row_style=lambda row: _attr(PAIR_SELECTED, bold=True) if row.get("current") else _attr(PAIR_DEFAULT),
+        )
 
         y += 1
         y = self._section(win, y, "Voice")
@@ -549,10 +570,9 @@ class MonitorTui:
         y = self._metric(win, y, "Command ID", _dig(gpsr, "command_id", default="-"))
         y = self._metric(win, y, "Scheduler", _dig(gpsr, "scheduler_state", default="-"))
         y = self._metric(win, y, "Queue", _dig(gpsr, "queue_state", default="-"), status=_text(_dig(gpsr, "queue_state", default=""), ""))
-        queue_index = _dig(gpsr, "current_index", default=-1)
+        completed_count = _dig(gpsr, "completed_count", default=0)
         queue_length = _dig(gpsr, "queue_length", default=0)
-        queue_position = min(queue_index + 1, queue_length) if isinstance(queue_index, int) and isinstance(queue_length, int) and queue_index >= 0 else 0
-        y = self._metric(win, y, "Queue progress", f"{queue_position}/{queue_length}")
+        y = self._metric(win, y, "Queue progress", f"{completed_count}/{queue_length} completed")
         y = self._metric(win, y, "Current domain", _dig(gpsr, "current_domain", default="-"))
         y = self._metric(win, y, "Current skill", _dig(gpsr, "current_skill", default="-"))
         y = self._metric(win, y, "Retry", f"{_text(_dig(gpsr, 'retry_attempt', default=0))}/{_text(_dig(gpsr, 'retry_limit', default=0))}")
@@ -579,7 +599,7 @@ class MonitorTui:
                 Column("domain", "DOMAIN", 14, 8),
                 Column("skill", "SKILL", 28, 12, grow=2),
                 Column("target", "TARGET", 28, 10, grow=2),
-                Column("state", "STATE", 11, 8),
+                Column("state", "STATUS", 12, 8),
                 Column("attempt", "ATTEMPT", 9, 7, align="right"),
             ],
             row_style=lambda row: _attr(PAIR_SELECTED, bold=True) if row.get("current") else _attr(PAIR_DEFAULT),

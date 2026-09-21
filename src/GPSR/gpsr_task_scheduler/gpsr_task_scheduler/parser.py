@@ -7,6 +7,7 @@ from typing import Any
 
 from gpsr_task_scheduler.config import SchedulerConfig, normalize_symbol
 from gpsr_task_scheduler.models import TaskRequest, ValidationIssue
+from robot_yasmin_tasks.gpsr.greetings import DEFAULT_GREETING  # Use the same trait-independent greeting as direct skill execution.
 
 
 def parse_command(command_id: str, instruction: str, config: SchedulerConfig) -> tuple[TaskRequest | None, list[ValidationIssue]]:
@@ -24,7 +25,7 @@ def parse_command(command_id: str, instruction: str, config: SchedulerConfig) ->
     if task_type == "accompany_ambiguous":
         issues.append(ValidationIssue("ambiguous_leader", "Accompany requires an explicit human-leads or robot-leads role."))
         task_type = ""
-    unsupported = re.search(r"\b(meet|answer|describe|remember|offer)\b", text)
+    unsupported = re.search(r"\b(answer|describe|remember|offer)\b", text)
     if not task_type and unsupported:
         issues.append(ValidationIssue("unsupported_task", f"Unsupported task verb: {unsupported.group(1)}."))
     if not task_type:
@@ -55,7 +56,7 @@ def parse_command(command_id: str, instruction: str, config: SchedulerConfig) ->
     if _requires_report(text) and not report_location and len(known_locations) > 1:
         issues.append(ValidationIssue("missing_report_location", "Instruction requests output at a destination, but no known report location was found."))
     if task_type in {"find_object", "count_objects"} and not target:
-        unknown_named_person = re.search(r"\b(?:find|locate)\s+(?:the\s+)?([A-Z][a-z]+)\b", original_instruction)
+        unknown_named_person = re.search(r"\b(?:find|locate|meet)\s+(?:the\s+)?([A-Z][a-z]+)\b", original_instruction)
         if task_type == "find_object" and unknown_named_person:
             issues.append(ValidationIssue("unknown_person", f"Unknown person: {normalize_symbol(unknown_named_person.group(1))}."))
         else:
@@ -123,7 +124,7 @@ def _person_selector(
     search_clause = re.split(r"\b(?:tell|report|say|answer)\b", text, maxsplit=1)[0]
     for person in sorted(config.known_people):
         phrase = person.replace("_", " ")
-        if re.search(rf"\b(?:find|locate|look for)\b.*\b{re.escape(phrase)}\b", search_clause):
+        if re.search(rf"\b(?:find|locate|look for|meet)\b.*\b{re.escape(phrase)}\b", search_clause):
             searched_names.append(person)
 
     # Section: Pose filters are authoritative for attribute-routed person searches.
@@ -186,7 +187,7 @@ def _requested_person_fields(text: str, task_type: str) -> list[str]:
         return []
     # Section: Preserve a deterministic reporting order independent of phrase order.
     patterns = {
-        "name": r"\b(?:their|his|her|the guest'?s|person'?s)\s+name\b|\bwhat(?:'s| is)\s+(?:their|his|her)\s+name\b",
+        "name": r"\b(?:their|his|her|the guest'?s|person'?s)\s+name\b|\bwhat(?:'s| is)\s+(?:their|his|her)\s+name\b|\bname\s+of\s+(?:the\s+)?(?:person|guest)\b",
         "age": r"\b(?:their|his|her|the guest'?s|person'?s)\s+age\b|\bhow old\b",
         "gender": r"\b(?:their|his|her|the guest'?s|person'?s)\s+gender\b",
         "favorite_drink": r"\b(?:favorite|favourite)\s+drink\b",
@@ -195,8 +196,8 @@ def _requested_person_fields(text: str, task_type: str) -> list[str]:
         "glasses": r"\bwhether (?:they|he|she) (?:are|is) wearing glasses\b",
         "hat": r"\bwhether (?:they|he|she) (?:are|is) wearing (?:a )?hat\b",
         "face_mask": r"\bwhether (?:they|he|she) (?:are|is) wearing (?:a )?mask\b",
-        "pose": r"\b(?:their|his|her)\s+pose\b",
-        "gesture": r"\b(?:their|his|her)\s+gesture\b",
+        "pose": r"\b(?:their|his|her)\s+pose\b|\bpose\s+of\s+(?:the\s+)?(?:person|guest)\b",
+        "gesture": r"\b(?:their|his|her)\s+gesture\b|\bgesture\s+of\s+(?:the\s+)?(?:person|guest)\b",
     }
     return [field for field, pattern in patterns.items() if re.search(pattern, text)]
 
@@ -209,18 +210,29 @@ def _contains_known_target(text: str, config: SchedulerConfig) -> bool:
 
 def _detect_task_type(text: str, config: SchedulerConfig) -> str:
     """Special function: Classify the supported GPSR task family."""
+    # Section: World-grounded dialogue must perceive the person before speaking its answer.
+    if _requested_person_fields(text, "find_person") and re.search(
+        r"\b(?:person|guest|someone|man|woman)\b", text
+    ):
+        return "find_person"
     if re.search(r"\b(how many|count)\b.*\b(people|persons|humans)\b", text):
         return "count_people"
     if re.search(r"\b(how many|count)\b", text):
         return "count_objects"
-    if re.search(r"\b(find|locate|look for)\b.*\b(person|man|woman|someone|guest)\b", text):
+    if re.search(r"\b(find|locate|look for)\b.*\b(person|man|woman|someone|guest)\b", text) or re.search(
+        r"^meet\b.*\b(person|man|woman|someone|guest)\b", text
+    ):
         return "find_person"
     # Section: A configured person name after a search verb selects the named-person task.
     name_search_clause = re.split(r"\b(?:tell|report|say|answer)\b", text, maxsplit=1)[0]
     if any(
         re.search(rf"\b(?:find|locate|look for)\b.*\b{re.escape(person.replace('_', ' '))}\b", name_search_clause)
+        or re.search(rf"^meet\b.*\b{re.escape(person.replace('_', ' '))}\b", name_search_clause)
         for person in config.known_people
     ):
+        return "find_person"
+    # Section: MEET is a person-search verb even when the target needs clarification.
+    if re.search(r"^meet\b", text):
         return "find_person"
     if re.search(r"\b(find|locate|look for)\b", text):
         return "find_object"
@@ -276,8 +288,17 @@ def _unknown_location_mentions(text: str, config: SchedulerConfig) -> list[str]:
             continue
         if candidate in config.known_people or any(candidate.startswith(person) for person in config.known_people):
             continue
-        # Section: Person-directed verbs diagnose unknown people separately from locations.
-        if re.search(r"\b(?:deliver|tell|talk|follow|guide|greet|accompany)\b", text) and match.group(0).lstrip().startswith("to"):
+        # Section: Only the nearest governing verb may classify a TO phrase as person-directed.
+        governing_verbs = re.findall(
+            r"\b(deliver|tell|talk|say|speak|report|answer|ask|follow|guide|greet|accompany|go|navigate|move|count|find|locate|look)\b",
+            text[:match.start()],
+        )
+        person_verbs = {
+            "deliver", "tell", "talk", "say", "speak", "report", "answer",
+            "ask", "follow", "guide", "greet", "accompany",
+        }
+        # Section: The location regex is zero-width, so inspect source text at its offset.
+        if governing_verbs and governing_verbs[-1] in person_verbs and text[match.start():].lstrip().startswith("to"):
             continue
         if candidate not in known_locations and not any(candidate.startswith(location) for location in known_locations):
             unknown.append(candidate)
@@ -347,7 +368,7 @@ def _action_person(
     }
     match = re.search(patterns[task_type], text)
     candidate = normalize_symbol(match.group(1)) if match else ""
-    ignored = {"the", "a", "an", "me", "operator", "person", "guest", "human"}
+    ignored = {"the", "a", "an", "me", "operator", "person", "guest", "human", "everyone", "everybody"}  # Generic audiences do not require identity lookup.
     if candidate and candidate not in ignored:
         return "", [ValidationIssue("unknown_person", f"Unknown person: {candidate}.")]
     if task_type in {"follow_person", "guide_person"}:
@@ -374,8 +395,7 @@ def _speech_payload(
     if re.search(r"\b(?:the\s+)?(?:time|date|weather)\b", text):
         return {}, [ValidationIssue("unsupported_query", "Dynamic query content requires a query-resolution component.")]
     if re.search(r"\bgreet\b", text):
-        greeting = f"Hello {target_person}." if target_person else "Hello."
-        return {"text": greeting, "target_person": target_person}, []
+        return {"text": DEFAULT_GREETING, "target_person": target_person}, []  # Preserve an explicit recipient without personalizing the wording.
     match = re.search(r"\b(?:say|speak|report|tell)\b\s+(.*)$", text)
     speech = str(match.group(1) if match else "").strip()
     if target_person and speech.startswith(target_person.replace("_", " ")):
@@ -398,12 +418,24 @@ def _target(text: str, task_type: str, config: SchedulerConfig) -> dict[str, Any
     return {}
 
 
+def strip_object_mentions(text: str, config: SchedulerConfig) -> str:
+    """Special function: Hide named objects before reading separate attributes."""
+    cleaned = text
+    # Section: Longest aliases win so a complete branded name hides its color word.
+    for alias in sorted(config.known_objects, key=len, reverse=True):
+        phrase = alias.replace("_", " ")
+        cleaned = re.sub(rf"\b{re.escape(phrase)}\b", " ", cleaned)
+    return cleaned
+
+
 def _filters(text: str, config: SchedulerConfig) -> list[dict[str, Any]]:
     """Special function: Extract object features and human pose filters."""
     filters: list[dict[str, Any]] = []
+    # Section: An object's published name does not itself request a color filter.
+    feature_text = strip_object_mentions(text, config)
     for feature, values in config.supported_object_features.items():
         for value in values:
-            if re.search(rf"\b{re.escape(value.replace('_', ' '))}\b", text):
+            if re.search(rf"\b{re.escape(value.replace('_', ' '))}\b", feature_text):
                 filters.append({"feature": feature, "operator": "equals", "value": value})
     for pose in config.supported_human_poses:
         if re.search(rf"\b{re.escape(pose.replace('_', ' '))}\b", text):
@@ -453,6 +485,10 @@ def _output_template(text: str, task_type: str, requested_person_fields: list[st
             return "The guest's name is {result.name}."
         if fields == ["favorite_drink"]:
             return "The guest's favorite drink is {result.favorite_drink}."
+        if fields == ["pose"]:
+            return "The guest's pose is {result.pose}."
+        if fields == ["gesture"]:
+            return "The guest's gesture is {result.gesture}."
         if fields == ["name", "favorite_drink"]:
             return "The guest is {result.name} and likes {result.favorite_drink}."
         return "I found the requested person."

@@ -10,3 +10,5 @@ robot_ai_interfaces/SkillResult[] results
 uint32 current_index
 string current_action_type
 string status
+# Section: Authoritative snapshot with correlated step identity, outcome, and skill results.
+string status_json

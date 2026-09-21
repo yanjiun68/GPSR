@@ -56,7 +56,7 @@ def test_unknown_category_fails_before_action_transport() -> None:
     blackboard = Blackboard()
     blackboard[bb.CURRENT_ACTION] = {
         "action_type": "FIND_OBJECT",
-        "target_category": "fruit",
+        "target_category": "vehicle",
     }
     assert BuildGoalState().execute(blackboard) == INVALID_INPUT
     assert blackboard[bb.LAST_SKILL_RESULT]["result"]["reason"] == "UNSUPPORTED_TARGET"

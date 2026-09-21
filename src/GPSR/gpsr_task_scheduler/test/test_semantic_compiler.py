@@ -9,6 +9,101 @@ import pytest
 from gpsr_task_scheduler.config import default_config
 from gpsr_task_scheduler.scheduler import schedule_command
 from robot_yasmin_tasks.gpsr.action_types import CANONICAL_PRIMITIVES
+from robot_yasmin_tasks.gpsr.greetings import DEFAULT_GREETING  # Assert shared neutral wording throughout command compilation.
+
+
+@pytest.mark.parametrize("command", ["Greet.", "Greet the person.", "Greet everyone."])  # Anonymous greetings require only voice output.
+def test_generic_greeting_needs_no_person_search(command: str) -> None:  # Exercise the spoken-command compiler entrypoint.
+    """Special function: Compile an anonymous greeting to one trait-independent SAY step."""
+    result = schedule_command("greeting", command, default_config())  # Parse exactly the text delivered by STT.
+    assert result.valid, result.issues  # Bare greetings must not fail for missing speech or person fields.
+    assert [step.skill_name for step in result.steps] == ["SAY"]  # Do not introduce camera or identity dependencies.
+    assert result.steps[0].arguments["text"] == DEFAULT_GREETING  # Speak greeting text instead of the command or audience.
+
+
+def test_greeting_after_navigation_preserves_neutral_speech() -> None:  # Cover the contextual multi-clause compiler too.
+    """Special function: Keep a greeting executable when it follows another command."""
+    result = schedule_command("greeting_sequence", "Go to the kitchen and greet the person.", default_config())  # Supply a location followed by an anonymous greeting.
+    assert result.valid, result.issues  # Generic greeting must not demand person traits.
+    assert [step.skill_name for step in result.steps] == ["NAVIGATE", "SAY"]  # Preserve command order without person search.
+    assert result.steps[-1].arguments["text"] == DEFAULT_GREETING  # Keep wording consistent with direct greeting execution.
+
+
+def test_named_greeting_keeps_explicit_recipient_but_neutral_wording() -> None:  # An explicitly named person still controls routing.
+    """Special function: Avoid silently dropping a requested recipient when simplifying speech."""
+    result = schedule_command("named_greeting", "Greet John.", default_config())  # Preserve the user's explicit identity request.
+    assert result.valid, result.issues  # Named greetings remain supported.
+    assert [step.skill_name for step in result.steps] == ["FIND_PERSON", "SAY"]  # Search only because the command explicitly requested John.
+    assert result.steps[-1].arguments["text"] == DEFAULT_GREETING  # Do not personalize speech from inferred traits.
+
+
+@pytest.mark.parametrize(
+    ("field", "expected_text"),
+    [
+        ("name", "The guest's name is {result.name}."),
+        ("pose", "The guest's pose is {result.pose}."),
+        ("gesture", "The guest's gesture is {result.gesture}."),
+    ],
+)
+def test_world_information_dialogue_searches_and_extracts_person_data(
+    field: str,
+    expected_text: str,
+) -> None:
+    """Special function: Ground unavailable person information before reporting it."""
+    # Section: Use the same surface form emitted by the GPSR command generator.
+    result = schedule_command(
+        f"person_{field}",
+        f"Tell me the {field} of the person in the bedroom.",
+        default_config(),
+    )
+    assert result.valid, result.issues
+    assert [step.skill_name for step in result.steps] == [
+        "FIND_PERSON_BY_ATTRIBUTE",
+        "EXTRACT_PERSON_INFO",
+        "SAY",
+    ]
+    assert result.steps[0].arguments["target_location"] == "bedroom"
+    assert result.steps[1].arguments["fields"] == [field]
+    assert result.steps[1].dependencies == [result.steps[0].step_id]
+    assert result.steps[2].arguments["text"] == expected_text
+    assert result.steps[2].dependencies == [result.steps[1].step_id]
+
+
+def test_meet_is_a_find_person_skill() -> None:
+    """Special function: Treat MEET as person discovery without inventing a dialogue action."""
+    result = schedule_command(
+        "meet_person",
+        "Meet Robin in the living room.",
+        default_config(),
+    )
+    assert result.valid, result.issues
+    assert [step.skill_name for step in result.steps] == ["FIND_PERSON"]
+    assert result.steps[0].arguments["target_person"] == "robin"
+    assert result.steps[0].arguments["target_location"] == "living_room"
+
+
+def test_meet_after_navigation_remains_an_ordered_find() -> None:
+    """Special function: Preserve navigation dependencies when MEET appears in a compound command."""
+    result = schedule_command(
+        "navigate_then_meet",
+        "Go to the kitchen, then meet John.",
+        default_config(),
+    )
+    assert result.valid, result.issues
+    assert [step.skill_name for step in result.steps] == ["NAVIGATE", "FIND_PERSON"]
+    assert result.steps[1].dependencies == [result.steps[0].step_id]
+
+
+def test_meet_inside_literal_speech_is_not_rewritten_as_find() -> None:
+    """Special function: Limit MEET routing to an action verb at the start of its clause."""
+    result = schedule_command(
+        "literal_meet",
+        "Say nice to meet you.",
+        default_config(),
+    )
+    assert result.valid, result.issues
+    assert [step.skill_name for step in result.steps] == ["SAY"]
+    assert result.steps[0].arguments["text"] == "nice to meet you."
 
 
 def _semantic_signature(command: str):
@@ -258,11 +353,11 @@ def test_quantity_and_location_aliases_are_canonicalized() -> None:
     ["Bring it to John.", "Go there."],
 )
 def test_unresolved_references_block_compilation(command: str) -> None:
-    """Special function: Reject missing antecedents without inventing an entity."""
+    """Special function: Clarify missing antecedents without inventing an entity."""
     result = schedule_command("unresolved", command, default_config())
 
     assert not result.valid
-    assert {issue.code for issue in result.issues} == {"UNRESOLVED_REFERENCE"}
+    assert {issue.code for issue in result.issues} == {"CLARIFICATION_REQUIRED"}
     assert result.steps == []
 
 

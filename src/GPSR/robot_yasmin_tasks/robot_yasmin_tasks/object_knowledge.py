@@ -81,6 +81,23 @@ class ObjectKnowledge:
                     )
                 self.alias_to_object[alias] = canonical_name
 
+        # Section: Map singular and plural category phrases to one canonical category.
+        self.alias_to_category: dict[str, str] = {}
+        for canonical_name, payload in self.categories.items():
+            for raw_alias in [canonical_name, *list(payload.get("aliases", []))]:
+                alias = normalize_object_symbol(raw_alias)
+                if not alias or alias in self.alias_to_object or alias in self.wildcards:
+                    raise ObjectKnowledgeError(
+                        f"Invalid category alias '{alias}' for '{canonical_name}'."
+                    )
+                previous = self.alias_to_category.get(alias)
+                if previous is not None and previous != canonical_name:
+                    raise ObjectKnowledgeError(
+                        f"Duplicate category alias '{alias}' belongs to '{previous}' and "
+                        f"'{canonical_name}'."
+                    )
+                self.alias_to_category[alias] = canonical_name
+
         # Section: Category membership must agree in both directions with defined objects.
         for category_name, payload in self.categories.items():
             for raw_member in list(payload.get("members", [])):
@@ -162,10 +179,11 @@ class ObjectKnowledge:
                     for item in payload.get("probable_locations", [])
                 ),
             )
-        if target in self.categories:
+        canonical_category = self.alias_to_category.get(target)
+        if canonical_category is not None:
             members = tuple(
                 normalize_object_symbol(item)
-                for item in self.categories[target].get("members", [])
+                for item in self.categories[canonical_category].get("members", [])
             )
             labels = tuple(
                 normalize_object_symbol(
@@ -175,11 +193,11 @@ class ObjectKnowledge:
             )
             locations = tuple(
                 normalize_object_symbol(item)
-                for item in self.categories[target].get("probable_locations", [])
+                for item in self.categories[canonical_category].get("probable_locations", [])
             )
             return ResolvedObjectTarget(
                 TargetKind.KNOWN_CATEGORY,
-                target,
+                canonical_category,
                 labels,
                 locations,
             )
@@ -187,14 +205,16 @@ class ObjectKnowledge:
         raise ObjectKnowledgeError(f"UNSUPPORTED_TARGET: '{target}' is not configured.")
 
     def detector_prompts(self) -> list[str]:
-        """Special function: Return unique detector labels in stable object order."""
+        """Special function: Return readable YOLOE prompts in stable object order."""
         prompts: list[str] = []
         for object_name in self.objects:
             label = normalize_object_symbol(
                 self.objects[object_name].get("detector_label", object_name)
             )
-            if label not in prompts:
-                prompts.append(label)
+            # Section: Spoken identifiers use underscores; visual prompts need natural spaces.
+            prompt = label.replace("_", " ")
+            if prompt not in prompts:
+                prompts.append(prompt)
         return prompts
 
     def known_object_names(self) -> set[str]:
@@ -203,4 +223,4 @@ class ObjectKnowledge:
 
     def known_category_names(self) -> set[str]:
         """Special function: Expose valid categories plus explicit generic wildcards."""
-        return set(self.categories) | set(self.wildcards)
+        return set(self.alias_to_category) | set(self.wildcards)

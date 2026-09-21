@@ -70,7 +70,11 @@ def default_config() -> SchedulerConfig:
         known_objects=knowledge.known_object_names(),
         known_categories=knowledge.known_category_names(),
         object_aliases=dict(knowledge.alias_to_object),
-        known_people={"operator", "john", "mary"},
+        # Section: Keep fallback vocabulary aligned with the bundled competition generator.
+        known_people={
+            "operator", "john", "mary", "adel", "angel", "axel", "charlie",
+            "jane", "jules", "morgan", "paris", "robin", "simone",
+        },
         verb_aliases={
             str(intent).upper(): [str(alias).casefold() for alias in aliases]
             for intent, aliases in dict(language.get("verb_aliases", {})).items()

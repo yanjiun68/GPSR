@@ -1,12 +1,16 @@
 """Section: Action queue executor tests."""
 
 from yasmin import Blackboard
+import pytest  # Parameterize contradictory and absent completion feedback.
+import json  # Decode the public ROS feedback completion snapshot.
+from robot_ai_interfaces.msg import FoundEntityRecord
 
 from robot_yasmin_tasks.gpsr import blackboard_keys as bb
 from robot_yasmin_tasks.gpsr.action_queue_executor_sm import (
     ActionQueueExecutorSM,
     QueueAdmissionGuard,
     SelectNextActionState,
+    queue_feedback_from_status,  # Verify generated feedback preserves completion identity.
 )
 from robot_yasmin_tasks.gpsr.blackboard_utils import bb_get
 from robot_yasmin_tasks.gpsr.models import make_skill_result
@@ -39,6 +43,31 @@ def test_empty_queue_success() -> None:
     blackboard = Blackboard()
     blackboard[bb.ACTION_QUEUE] = []
     assert ActionQueueExecutorSM({})(blackboard) == SUCCESS
+
+
+def test_ros_feedback_carries_correlated_completion_result() -> None:
+    """Special function: Exercise the rebuilt ROS interface with completed sub-action data."""
+    from robot_ai_interfaces.action import ExecuteActionQueue  # Require the generated feedback schema used on the wire.
+    payload = {"event_index": 0, "event_step_id": "s1", "current_index": 1, "current_action_type": "NAVIGATE", "queue_state": "RUNNING", "phase": "ACTION_FINISHED", "last_skill_result": {"outcome": "success"}}  # Model success before the next action starts.
+    feedback = queue_feedback_from_status(ExecuteActionQueue.Feedback, payload)  # Populate actual ROS feedback, not a permissive fake.
+    assert feedback.current_index == 0 and feedback.current_action_type == "NAVIGATE"  # Keep index and action type aligned.
+    assert json.loads(feedback.status_json) == payload  # Preserve exact step identity and result for clients.
+
+
+@pytest.mark.parametrize("skill_result", [{}, {"action_type": "SAY", "outcome": "success"}, {"action_type": "COUNT_OBJECTS", "outcome": "failed"}])  # Cover absent, wrong-action, and contradictory feedback.
+def test_success_requires_matching_result_and_still_cleans_resources(skill_result) -> None:
+    """Special function: Never advance from a success string without matching completion evidence."""
+    events = []  # Record resource cleanup independently of the reported outcome.
+    resources = RecordingResourceManager(events)  # Use the existing resource ownership fixture.
+    blackboard = Blackboard()  # Create a fresh queue execution context.
+    blackboard[bb.ACTION_QUEUE] = [{"action_type": "COUNT_OBJECTS"}]  # Select a real registered skill.
+    def malformed_skill(board):  # Simulate an incorrectly implemented skill callback.
+        """Special function: Claim success with invalid structured feedback."""
+        board[bb.LAST_SKILL_RESULT] = skill_result  # Supply the malformed completion payload.
+        return SUCCESS  # Reproduce the previously accepted bare success outcome.
+    outcome = ActionQueueExecutorSM({"COUNT_OBJECTS": lambda: malformed_skill}, resources)(blackboard)  # Exercise the full teardown barrier.
+    assert outcome == FATAL_FAILURE and blackboard[bb.CURRENT_ACTION_INDEX] == 0  # Block dependent work.
+    assert events == ["start:generation-1", "stop:generation-1"]  # Clean resources even when the completion contract is broken.
 
 
 def test_failure_summary_preserves_exact_skill_reason_and_details() -> None:
@@ -242,6 +271,74 @@ def test_find_object_dispatch_occurs_only_after_active_verification() -> None:
         "execute:FIND_OBJECT",
         "cleanup:FIND_OBJECT",
         "verify-unconfigured:FIND_OBJECT",
+    ]
+
+
+def test_find_history_hydrates_before_dispatch_and_saves_after_cleanup() -> None:
+    """Special function: History hints route finds and writes only after teardown succeeds."""
+    events: list[str] = []
+
+    class History:
+        """Special function: Provide one remembered viewpoint and record save ordering."""
+
+        def lookup(self, _action):
+            """Special function: Return one matching compact object observation."""
+            record = FoundEntityRecord()
+            record.entity_type = "object"
+            record.target_key = "name:bottle"
+            record.semantic_location = "kitchen"
+            record.viewpoint = "kitchen_table"
+            return record
+
+        def remember(self, action, result):
+            """Special function: Record persistence after the resource cleanup event."""
+            events.append(f"remember:{action.parameters['preferred_viewpoint']}")
+            assert result["object_id"] == "bottle_1"
+            return True
+
+    class Skill:
+        """Special function: Verify hydration was visible to the dispatched skill."""
+
+        def __call__(self, blackboard):
+            """Special function: Store one valid successful find result."""
+            action = bb_get(blackboard, bb.CURRENT_ACTION)
+            events.append(f"execute:{action.parameters['preferred_viewpoint']}")
+            blackboard[bb.LAST_SKILL_RESULT] = make_skill_result(
+                "FIND_OBJECT",
+                SUCCESS,
+                result={"object_id": "bottle_1"},
+            ).to_dict()
+            blackboard[bb.DISPATCH_OUTCOME] = SUCCESS
+            return SUCCESS
+
+    class Resources:
+        """Special function: Record the managed resource barriers."""
+
+        def start(self, _blackboard, _action_type):
+            """Special function: Admit the lifecycle resource."""
+            events.append("start")
+            return True, "ACTIVE"
+
+        def stop(self, _blackboard):
+            """Special function: Confirm teardown before history persistence."""
+            events.append("stop")
+            return True, "UNCONFIGURED"
+
+    blackboard = Blackboard()
+    blackboard[bb.ACTION_QUEUE] = [
+        {"action_type": "FIND_OBJECT", "target_object": "bottle"}
+    ]
+    outcome = ActionQueueExecutorSM(
+        {"FIND_OBJECT": Skill},
+        Resources(),
+        find_history=History(),
+    )(blackboard)
+    assert outcome == SUCCESS
+    assert events == [
+        "start",
+        "execute:kitchen_table",
+        "stop",
+        "remember:kitchen_table",
     ]
 
 

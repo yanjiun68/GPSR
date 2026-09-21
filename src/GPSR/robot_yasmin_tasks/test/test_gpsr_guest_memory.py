@@ -5,8 +5,9 @@
 import json
 
 from builtin_interfaces.msg import Time
+from geometry_msgs.msg import PoseWithCovarianceStamped
 from receptionist_interfaces.msg import GuestAppearance
-from robot_ai_interfaces.msg import GpsrGuestRecord
+from robot_ai_interfaces.msg import FoundEntityRecord, GpsrGuestRecord
 
 from robot_yasmin_tasks.ros_servers.gpsr_guest_memory_node import GpsrGuestMemoryStore
 
@@ -56,6 +57,23 @@ def test_clear_retains_session_but_removes_records() -> None:
     assert store.session_id == "session_a"
     assert store.list_records() == []
     assert store.get() is None
+
+
+def test_guest_memory_is_bounded_and_caps_face_embeddings() -> None:
+    """Special function: Existing guest storage also stays within fixed RAM limits."""
+    store = GpsrGuestMemoryStore(
+        lambda: Time(sec=10),
+        session_id="session_a",
+        max_guest_records=2,
+    )
+    for profile_id in ("guest_1", "guest_2", "guest_3"):
+        record = GpsrGuestRecord()
+        record.profile.profile_id = profile_id
+        record.profile.face_embedding = [0.1] * 1500
+        saved = store.save(record)
+        assert len(saved.profile.face_embedding) == 1024
+    assert store.get("profile:guest_1") is None
+    assert len(store.list_records()) == 2
 
 
 def test_unknown_update_does_not_erase_known_guest_info() -> None:
@@ -112,3 +130,57 @@ def test_weaker_and_older_observation_does_not_replace_evidence() -> None:
     assert person_ref["pose"] == "standing"
     assert guest_info["shirt_color"] == "red"
     assert guest_info["pose"] == "standing"
+
+
+def test_find_history_is_bounded_and_evicts_oldest_record() -> None:
+    """Special function: Compact history never exceeds its configured RAM record limit."""
+    store = GpsrGuestMemoryStore(
+        lambda: Time(sec=10),
+        session_id="session_a",
+        max_find_records=2,
+    )
+    for target in ("name:apple", "name:banana", "name:orange"):
+        record = FoundEntityRecord()
+        record.entity_type = "object"
+        record.target_key = target
+        store.save_found(record)
+    assert store.lookup_found("object", "name:apple") is None
+    assert [record.target_key for record in store.list_found_records()] == [
+        "name:banana",
+        "name:orange",
+    ]
+
+
+def test_find_history_uses_latest_amcl_pose_for_person_observation() -> None:
+    """Special function: Person finds store the latest map pose without a second pose node."""
+    store = make_store()
+    amcl = PoseWithCovarianceStamped()
+    amcl.header.frame_id = "map"
+    amcl.pose.pose.position.x = 1.25
+    amcl.pose.pose.orientation.w = 1.0
+    store.update_observation_pose(amcl)
+    record = FoundEntityRecord()
+    record.entity_type = "person"
+    record.target_key = "name:alex"
+    saved = store.save_found(record)
+    assert saved.observation_pose.header.frame_id == "map"
+    assert saved.observation_pose.pose.position.x == 1.25
+
+
+def test_clear_releases_find_records_and_cached_pose() -> None:
+    """Special function: Explicit shutdown clear leaves no retained record or AMCL value."""
+    store = make_store()
+    amcl = PoseWithCovarianceStamped()
+    amcl.header.frame_id = "map"
+    store.update_observation_pose(amcl)
+    first = FoundEntityRecord()
+    first.entity_type = "person"
+    first.target_key = "name:alex"
+    store.save_found(first)
+    store.clear()
+    second = FoundEntityRecord()
+    second.entity_type = "person"
+    second.target_key = "name:sam"
+    saved = store.save_found(second)
+    assert store.lookup_found("person", "name:alex") is None
+    assert saved.observation_pose.header.frame_id == ""

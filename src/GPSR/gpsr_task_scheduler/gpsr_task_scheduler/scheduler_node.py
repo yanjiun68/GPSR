@@ -18,10 +18,12 @@ from rclpy.action import ActionClient, ActionServer, CancelResponse, GoalRespons
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
+from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
 from std_msgs.msg import String
 from std_srvs.srv import Trigger
 
 from gpsr_task_scheduler.config import SchedulerConfig, load_config
+from gpsr_task_scheduler.clarification import ClarificationSession, merge_clarification
 from gpsr_task_scheduler.cycle import GpsrCycleController, SchedulerState
 from gpsr_task_scheduler.models import ReturnTarget
 from gpsr_task_scheduler.planner import plan_to_dict, step_to_action_step_dict
@@ -31,6 +33,17 @@ from robot_ai_interfaces.action import ExecuteActionQueue, ExecuteTaskPlan
 from robot_ai_interfaces.msg import ActionQueue, ActionStep
 from robot_ai_interfaces.srv import ScheduleCommand
 from robot_yasmin_tasks.gpsr.models import summarize_action_queue_failure
+
+
+def retained_plan_qos() -> QoSProfile:
+    """Special function: Retain the latest plan for optional late-joining monitors."""
+    # Section: A depth of one keeps only the current accepted or dry-run plan.
+    return QoSProfile(
+        history=HistoryPolicy.KEEP_LAST,
+        depth=1,
+        reliability=ReliabilityPolicy.RELIABLE,
+        durability=DurabilityPolicy.TRANSIENT_LOCAL,
+    )
 
 
 class GpsrTaskSchedulerNode(Node):
@@ -74,6 +87,9 @@ class GpsrTaskSchedulerNode(Node):
         self.declare_parameter("error_recovery_retry_delay_sec", 5.0)
         self.declare_parameter("state_topic", "/gpsr/state")
         self.declare_parameter("command_result_topic", "/gpsr/command_result")
+        self.declare_parameter("clarification_response_topic", "/gpsr/clarification_response")
+        self.declare_parameter("max_clarification_attempts", 2)
+        self.declare_parameter("clarification_timeout_sec", 40.0)
         self.declare_parameter("enable_scheduler_viewer", True)
         self.declare_parameter("require_executor_ready", True)
 
@@ -93,6 +109,10 @@ class GpsrTaskSchedulerNode(Node):
         # Section: Freeze return and deferred-report context independently for every admitted command.
         self.command_return_targets: dict[str, ReturnTarget] = {}
         self.pending_post_return: dict[str, dict[str, Any]] = {}
+        # Section: Reserve one topic dialogue across executor threads and reject stale replies.
+        self.clarification_lock = threading.Lock()
+        self.clarification_session: ClarificationSession | None = None
+        self.command_intake_busy = False
 
         # Section: Publish the complete scheduler lifecycle, including ERROR, to YASMIN Viewer.
         self.scheduler_viewer = (
@@ -101,8 +121,12 @@ class GpsrTaskSchedulerNode(Node):
             else None
         )
 
-        # Section: Publish complete dry-run or accepted plans for operator inspection.
-        self.plan_pub = self.create_publisher(String, str(self.get_parameter("plan_topic").value), 10)
+        # Section: Publish without waiting for a TUI and retain the latest plan for late subscribers.
+        self.plan_pub = self.create_publisher(
+            String,
+            str(self.get_parameter("plan_topic").value),
+            retained_plan_qos(),
+        )
 
         # Section: Publish scheduler readiness and terminal command results for voice/operator nodes.
         self.state_pub = self.create_publisher(String, str(self.get_parameter("state_topic").value), 10)
@@ -110,6 +134,15 @@ class GpsrTaskSchedulerNode(Node):
             String,
             str(self.get_parameter("command_result_topic").value),
             10,
+        )
+        # Section: Reply and timeout callbacks stay runnable during guarded command work.
+        self.clarification_callback_group = ReentrantCallbackGroup()
+        self.clarification_response_sub = self.create_subscription(
+            String,
+            str(self.get_parameter("clarification_response_topic").value),
+            self.clarification_response_callback,
+            10,
+            callback_group=self.clarification_callback_group,
         )
 
         # Section: A reentrant localization callback remains runnable while command capture waits.
@@ -161,6 +194,10 @@ class GpsrTaskSchedulerNode(Node):
         self.initialization_timer = self.create_timer(1.0, self.initialize_competition_cycle)
         self.error_recovery_timer = self.create_timer(1.0, self.recover_from_error)
         self.state_timer = self.create_timer(1.0, self.publish_cycle_state)
+        self.clarification_timer = self.create_timer(
+            0.5, self.check_clarification_timeout,
+            callback_group=self.clarification_callback_group,
+        )
         self.publish_cycle_state()
 
         # Section: Log initialization without claiming that command intake is available yet.
@@ -334,21 +371,170 @@ class GpsrTaskSchedulerNode(Node):
 
     def command_callback(self, msg: String) -> None:
         """Special function: Admit and execute one topic command through the guarded cycle."""
+        # Section: Voice may supply an ID for end-to-end verdict correlation; raw text stays supported.
         command_id = f"topic_{uuid.uuid4().hex}"
+        instruction = str(msg.data)
+        try:
+            envelope = json.loads(instruction)
+        except (TypeError, ValueError):
+            envelope = None
+        if isinstance(envelope, dict) and envelope.get("type") == "gpsr_voice_command":
+            command_id = str(envelope.get("command_id") or command_id)
+            instruction = str(envelope.get("instruction") or "")
+        # Section: A pending clarification owns the next transcript, never a new task.
+        lock = getattr(self, "clarification_lock", None)
+        if lock is not None:
+            with lock:
+                if self.command_intake_busy or self.clarification_session is not None:
+                    self.publish_command_result({
+                        "accepted": False, "success": False, "command_id": command_id,
+                        "source": "topic", "message": "clarification_pending",
+                    })
+                    return
+                self.command_intake_busy = True
         dry_run = bool(self.get_parameter("dry_run").value)
-        result = self.process_one_command(
-            command_id,
-            str(msg.data),
-            dry_run,
-            float(self.config.default_skill_timeout_sec or 300.0),
-        )
+        timeout_sec = float(self.config.default_skill_timeout_sec or 300.0)
+        try:
+            result = (
+                self.process_one_command(command_id, instruction, dry_run, timeout_sec, from_topic=True)
+                if lock is not None else
+                self.process_one_command(command_id, instruction, dry_run, timeout_sec)
+            )
+            # Section: Keep only the partial command when semantic clarification is required.
+            validation = ((result.get("plan") or {}).get("command_context") or {}).get("validation") or {}
+            if validation.get("status") in {"MISSING_ACTION", "MISSING_TARGET", "MISSING_LOCATION", "MULTIPLE_MISSING"}:
+                self.start_clarification(result, instruction, dry_run, timeout_sec, validation)
+        finally:
+            if lock is not None:
+                with lock:
+                    self.command_intake_busy = False
+        result["source"] = "topic"
         # Section: Executed commands publish inside process_one_command; early outcomes publish here.
         if not isinstance(result.get("execution"), dict):
             self.publish_command_result(result)
+        if "clarification" in result:
+            return
         if not result["accepted"]:
             self.get_logger().warn(f"GPSR command rejected: {result['message']}")
         elif not result["success"]:
             self.get_logger().warn(f"GPSR command failed: {result['message']}")
+
+    def start_clarification(
+        self,
+        result: dict[str, Any],
+        instruction: str,
+        dry_run: bool,
+        timeout_sec: float,
+        validation: dict[str, Any],
+    ) -> None:
+        """Special function: Publish a correlated prompt while preserving parsed context."""
+        # Section: A disabled dialogue limit returns the ordinary invalid-plan verdict.
+        maximum = max(0, int(self.get_parameter("max_clarification_attempts").value))
+        if maximum == 0:
+            return
+        deadline = time.monotonic() + max(1.0, float(self.get_parameter("clarification_timeout_sec").value))
+        session = ClarificationSession(str(result["command_id"]), instruction, 1, deadline, dry_run, timeout_sec, dict(validation))
+        with self.clarification_lock:
+            self.clarification_session = session
+        result["clarification"] = {
+            "command_id": session.command_id,
+            "attempt": session.attempt,
+            "max_attempts": maximum,
+            "status": str(validation["status"]),
+            "missing_fields": list(validation.get("missing_fields", [])),
+            "prompt": str(validation["clarification_prompt"]),
+        }
+        self.get_logger().info(
+            f"GPSR clarification {session.attempt}/{maximum}: "
+            f"{validation['status']} {validation.get('missing_fields', [])}"
+        )
+        self.publish_cycle_state()
+
+    def clarification_response_callback(self, msg: String) -> None:
+        """Special function: Reparse one reply only for its matching dialogue attempt."""
+        try:
+            payload = json.loads(str(msg.data))
+        except (TypeError, ValueError):
+            return
+        if not isinstance(payload, dict):
+            return
+        with self.clarification_lock:
+            session = self.clarification_session
+            if (
+                session is None or self.command_intake_busy
+                or str(payload.get("command_id", "")) != session.command_id
+                or payload.get("attempt") != session.attempt
+            ):
+                return
+            self.command_intake_busy = True
+        try:
+            # Section: Expired or empty replies cannot accidentally complete a task.
+            if time.monotonic() >= session.deadline:
+                self.finish_clarification(session, "clarification_timeout")
+                return
+            transcript = str(payload.get("transcript") or "").strip()
+            self.get_logger().info(f"GPSR clarification reply received: attempt {session.attempt}.")
+            merged = merge_clarification(session.instruction, transcript, self.config)
+            if transcript and merged != session.instruction:
+                result = self.process_one_command(
+                    session.command_id, merged, session.dry_run, session.timeout_sec,
+                    from_clarification=True,
+                )
+                validation = ((result.get("plan") or {}).get("command_context") or {}).get("validation") or {}
+                if validation.get("status") not in {"MISSING_ACTION", "MISSING_TARGET", "MISSING_LOCATION", "MULTIPLE_MISSING"}:
+                    with self.clarification_lock:
+                        self.clarification_session = None
+                    result["source"] = "topic"
+                    self.publish_command_result(result)
+                    self.publish_cycle_state()
+                    return
+                session.instruction = merged
+                session.validation = dict(validation)
+            else:
+                validation = session.validation
+            maximum = max(0, int(self.get_parameter("max_clarification_attempts").value))
+            if session.attempt >= maximum:
+                self.finish_clarification(session, "clarification_retry_exhausted")
+                return
+            session.attempt += 1
+            session.deadline = time.monotonic() + max(1.0, float(self.get_parameter("clarification_timeout_sec").value))
+            result = {
+                "accepted": False, "success": False, "command_id": session.command_id,
+                "source": "topic", "message": "clarification_required",
+                "clarification": {
+                    "command_id": session.command_id,
+                    "attempt": session.attempt,
+                    "max_attempts": maximum,
+                    "status": str(validation.get("status", "MULTIPLE_MISSING")),
+                    "missing_fields": list(validation.get("missing_fields", [])),
+                    "prompt": str(validation.get("clarification_prompt", "")),
+                },
+            }
+            self.publish_command_result(result)
+            self.publish_cycle_state()
+        finally:
+            with self.clarification_lock:
+                self.command_intake_busy = False
+
+    def finish_clarification(self, session: ClarificationSession, reason: str, require_idle: bool = False) -> None:
+        """Special function: Abandon a timed-out or exhausted dialogue without dispatch."""
+        with self.clarification_lock:
+            if self.clarification_session is not session or (require_idle and self.command_intake_busy):
+                return
+            self.clarification_session = None
+        self.get_logger().warn(f"GPSR clarification abandoned: {reason}.")
+        self.publish_command_result({
+            "accepted": False, "success": False, "command_id": session.command_id,
+            "source": "topic", "message": reason, "failed_step": "clarification",
+        })
+        self.publish_cycle_state()
+
+    def check_clarification_timeout(self) -> None:
+        """Special function: End a silent clarification window on the ROS timer."""
+        with self.clarification_lock:
+            session = self.clarification_session if not self.command_intake_busy else None
+        if session is not None and time.monotonic() >= session.deadline:
+            self.finish_clarification(session, "clarification_timeout", require_idle=True)
 
     def publish_command_result(self, result: dict[str, Any]) -> None:
         """Special function: Publish one structured command verdict for voice and operators."""
@@ -424,6 +610,10 @@ class GpsrTaskSchedulerNode(Node):
         """Special function: Reject empty or concurrently submitted top-level goals."""
         if not str(goal_request.original_instruction or goal_request.structured_task_json or "").strip():
             return GoalResponse.REJECT
+        # Section: An action goal cannot overtake an active spoken clarification.
+        with self.clarification_lock:
+            if self.clarification_session is not None or self.command_intake_busy:
+                return GoalResponse.REJECT
         return (
             GoalResponse.ACCEPT
             if self.cycle.snapshot().state == SchedulerState.WAITING_FOR_COMMAND
@@ -614,8 +804,20 @@ class GpsrTaskSchedulerNode(Node):
         instruction: str,
         dry_run: bool,
         timeout_sec: float,
+        from_clarification: bool = False,
+        from_topic: bool = False,
     ) -> dict[str, Any]:
         """Special function: Plan, execute, clean up, return, and reset one command."""
+        # Section: Service/action callers cannot replace a pending topic transaction.
+        lock = getattr(self, "clarification_lock", None)
+        if lock is not None and not from_clarification:
+            with lock:
+                pending = self.clarification_session
+            if pending is not None or (self.command_intake_busy and not from_topic):
+                return {
+                    "accepted": False, "success": False, "command_id": command_id,
+                    "message": "clarification_pending", "failed_step": "clarification",
+                }
         if not self.cycle.try_accept_command(command_id):
             snapshot = self.cycle.snapshot()
             return {
@@ -733,9 +935,11 @@ class GpsrTaskSchedulerNode(Node):
             "post_return_report": report_result,
             "state": self.cycle.snapshot().state.value,
         }
-        result_msg = String()
-        result_msg.data = json.dumps(processed, sort_keys=True)
-        self.command_result_pub.publish(result_msg)
+        # Section: A clarified execution reports only after its session is released.
+        if not from_clarification:
+            result_msg = String()
+            result_msg.data = json.dumps(processed, sort_keys=True)
+            self.command_result_pub.publish(result_msg)
         if return_success:
             self.clear_command_context(command_id)
         return processed
@@ -932,9 +1136,16 @@ class GpsrTaskSchedulerNode(Node):
         # Section: Keep the YASMIN supervisory state synchronized with the guarded cycle.
         if self.scheduler_viewer is not None:
             self.scheduler_viewer.update(snapshot.state)
+        # Section: Keep established state values while exposing dialogue progress to monitors.
+        with self.clarification_lock:
+            session = self.clarification_session
+            clarification_status = "WAITING_FOR_CLARIFICATION" if session is not None else ""
+            clarification_command_id = session.command_id if session is not None else ""
         msg = String()
         msg.data = json.dumps({
             "state": snapshot.state.value,
+            "clarification_status": clarification_status,
+            "pending_clarification_command_id": clarification_command_id,
             "active_command_id": snapshot.active_command_id,
             "completed_command_count": snapshot.completed_command_count,
             "max_commands": snapshot.max_commands,
@@ -989,6 +1200,12 @@ class GpsrTaskSchedulerNode(Node):
 
     def submit_action_queue(self, command_id: str, planned: dict[str, Any], timeout_sec: float) -> dict[str, Any]:
         """Special function: Submit an ActionQueue goal and return a JSON-friendly execution summary."""
+        # Section: Defensive dispatch gate covers all command plans, including direct callers.
+        if planned.get("valid") is False:
+            return {
+                "success": False, "completed_steps": 0,
+                "message": "invalid_or_incomplete_plan", "outcome": "invalid_plan",
+            }
         if not self.executor_client.wait_for_server(timeout_sec=5.0):
             return {
                 "success": False,

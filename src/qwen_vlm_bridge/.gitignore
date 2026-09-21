@@ -1,0 +1,4 @@
+# Section: Exclude local Python and pytest products from the ROS package source tree.
+__pycache__/
+*.py[cod]
+.pytest_cache/

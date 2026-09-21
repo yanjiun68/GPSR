@@ -302,17 +302,11 @@ class RegisteredProfileState(State):
         if remaining <= 0.0:
             _store_result(blackboard, action, TIMEOUT, "FIND_PERSON registered search timed out.", recoverable=True)
             return TIMEOUT
-        allow_fallback = bool(
-            action.parameters.get(
-                "allow_verbal_fallback",
-                action.parameters.get("fallback_to_verbal", True),
-            )
+        # Section: Reserve bounded time for mandatory conversation when vision cannot confirm the name.
+        configured = float(
+            action.parameters.get("profile_search_timeout_sec", min(10.0, remaining * 0.5))
         )
-        # Section: Reserve bounded time for fallback only when the caller explicitly permits it.
-        search_timeout = remaining
-        if allow_fallback:
-            configured = float(action.parameters.get("profile_search_timeout_sec", min(10.0, remaining * 0.5)))
-            search_timeout = min(remaining, max(0.05, configured))
+        search_timeout = min(remaining, max(0.05, configured))
         response = self.client.find_registered(
             blackboard,
             action,
@@ -330,7 +324,8 @@ class RegisteredProfileState(State):
             return CANCELED
         # Section: Fallback reason is always surfaced in the final structured result.
         reason = str(response.get("reason", "REGISTERED_PROFILE_NOT_FOUND"))
-        if allow_fallback and _remaining(blackboard) > 0.0:
+        # Section: Every unresolved visual result enters candidate-by-candidate verbal confirmation.
+        if _remaining(blackboard) > 0.0:
             blackboard[FALLBACK_REASON] = reason
             blackboard[MODE] = "VERBAL_IDENTIFICATION"
             return "fallback"
@@ -613,7 +608,7 @@ class _FindPersonAtLocationSM(StateMachine):
                 TIMEOUT: TIMEOUT,
             },
         )
-        # Section: Registered lookup can fall back without silently changing success semantics.
+        # Section: Registered lookup must fall back to dialogue when visual identity is unresolved.
         self.add_state(
             "REGISTERED_PROFILE",
             RegisteredProfileState(identity_client),

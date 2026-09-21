@@ -70,7 +70,8 @@ confirm initial arrival at and final return to the configured `instruction_point
 ```text
 FIND_PERSON
     -> name selector only
-    -> registered face or verbal identity confirmation
+    -> registered face match when visual identity is available
+    -> mandatory ask-and-listen confirmation when vision cannot confirm the name
 
 FIND_PERSON_BY_ATTRIBUTE
     -> pose, gesture, or any-person selector only

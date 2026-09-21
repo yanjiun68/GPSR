@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from robot_yasmin_tasks.gpsr.action_types import normalize_primitive_name
+from robot_yasmin_tasks.gpsr.greetings import DEFAULT_GREETING  # Keep legacy queue greetings independent of human traits.
 
 
 @dataclass(slots=True)
@@ -163,8 +164,8 @@ def canonicalize_action_step(action: ActionStepData) -> ActionStepData:
         )
         action.parameters.setdefault("target_location", action.target_location)
     elif legacy == "GREET":
-        target = action.target_person or str(action.parameters.get("target_person", ""))
-        action.parameters.setdefault("text", f"Hello {target}." if target else "Hello.")
+        if not str(action.parameters.get("text") or "").strip():  # Supply wording even when legacy callers send an empty text field.
+            action.parameters["text"] = DEFAULT_GREETING  # Do not speak raw person identifiers or descriptions.
     return action
 
 

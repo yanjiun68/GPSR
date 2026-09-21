@@ -11,7 +11,7 @@ ros2 service call /gpsr/schedule_command \
   robot_ai_interfaces/srv/ScheduleCommand \
   "{
     command_id: 'gpsr_001',
-    instruction: 'go to living room and find bottles',
+    instruction: 'go to living room , find bottles',
     dry_run: false,
     execute: true,
     overall_timeout_sec: 300.0
@@ -19,6 +19,11 @@ ros2 service call /gpsr/schedule_command \
 
   ================================================
 
-  
-  Generate a UI ( either localhost or local GUI to show the reason of error. You must list all the nodes and pinpoint which is failing. )
- Discuss whether to use yasmin state machine for top level retry attempt visualization.
+ros2 topic echo /gpsr/action_queue_status_json
+
+ros2 topic echo /gpsr/action_queue_status_json --field data \
+  | jq -r 'fromjson |
+      "\(.current_index + 1)/\(.queue_length) " +
+      "\(.current_action_type) [\(.queue_state)] phase=\(.phase)"'
+
+=====================================================

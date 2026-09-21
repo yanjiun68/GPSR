@@ -3,7 +3,7 @@
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
 from launch.conditions import IfCondition
-from launch.substitutions import LaunchConfiguration, OrSubstitution
+from launch.substitutions import LaunchConfiguration, OrSubstitution, PythonExpression
 from launch.substitutions import PathJoinSubstitution
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch_ros.actions import LifecycleNode, Node
@@ -42,6 +42,10 @@ def generate_launch_description() -> LaunchDescription:
     start_voice_stt = LaunchConfiguration("start_voice_stt")
     start_voice_command = LaunchConfiguration("start_voice_command")
     command_input_timeout_sec = LaunchConfiguration("command_input_timeout_sec")
+    # Section: Keep a bounded voice reply window inside the scheduler dialogue deadline.
+    max_clarification_attempts = LaunchConfiguration("max_clarification_attempts")
+    clarification_timeout_sec = LaunchConfiguration("clarification_timeout_sec")
+    clarification_listen_timeout_sec = LaunchConfiguration("clarification_listen_timeout_sec")
     allow_simulated_primitives = LaunchConfiguration("allow_simulated_primitives")
 
     # Section: Shared perception launch-time controls.
@@ -76,6 +80,7 @@ def generate_launch_description() -> LaunchDescription:
     amcl_pose_topic = LaunchConfiguration("amcl_pose_topic")
     amcl_pose_max_age_sec = LaunchConfiguration("amcl_pose_max_age_sec")
     amcl_pose_capture_timeout_sec = LaunchConfiguration("amcl_pose_capture_timeout_sec")
+    max_find_history_records = LaunchConfiguration("max_find_history_records")
     return_fallback_named_location = LaunchConfiguration("return_fallback_named_location")
     enable_error_recovery = LaunchConfiguration("enable_error_recovery")
     error_recovery_max_attempts = LaunchConfiguration("error_recovery_max_attempts")
@@ -84,6 +89,7 @@ def generate_launch_description() -> LaunchDescription:
     navigation_action = LaunchConfiguration("navigation_action")
     navigate_to_pose_action = LaunchConfiguration("navigate_to_pose_action")
     navigate_to_named_pose_action = LaunchConfiguration("navigate_to_named_pose_action")
+    follow_person_action = LaunchConfiguration("follow_person_action")
     find_object_action = LaunchConfiguration("find_object_action")
     find_person_action = LaunchConfiguration("find_person_action")
     lifecycle_transition_timeout_sec = LaunchConfiguration("lifecycle_transition_timeout_sec")
@@ -151,6 +157,8 @@ def generate_launch_description() -> LaunchDescription:
                 "tts_action": tts_action,
                 "default_skill_timeout_sec": default_skill_timeout_sec,
                 "default_skill_retries": default_skill_retries,
+                "max_clarification_attempts": ParameterValue(max_clarification_attempts, value_type=int),
+                "clarification_timeout_sec": ParameterValue(clarification_timeout_sec, value_type=float),
                 "enable_navigation": enable_navigation,
                 "enable_perception": enable_perception,
                 "enable_manipulation": enable_manipulation,
@@ -174,6 +182,7 @@ def generate_launch_description() -> LaunchDescription:
             "allow_simulated_primitives": ParameterValue(allow_simulated_primitives, value_type=bool),
             "navigate_to_pose_action": navigate_to_pose_action,
             "navigate_to_named_pose_action": navigate_to_named_pose_action,
+            "follow_person_action": follow_person_action,
             "find_person_search_config_file": find_person_search_config_file,
             "lifecycle_transition_timeout_sec": ParameterValue(lifecycle_transition_timeout_sec, value_type=float),
             "lifecycle_operation_timeout_margin_sec": ParameterValue(lifecycle_operation_timeout_margin_sec, value_type=float),
@@ -192,6 +201,11 @@ def generate_launch_description() -> LaunchDescription:
             "registry_file": skill_registry_file,
             "allow_simulated_primitives": ParameterValue(allow_simulated_primitives, value_type=bool),
             "transition_timeout_sec": ParameterValue(lifecycle_transition_timeout_sec, value_type=float),
+            # Section: Legacy control is persistent; every other endpoint uses the managed adapter.
+            "manage_follow_person_adapter": ParameterValue(
+                PythonExpression(["'", follow_person_action, "' != '/person_follow/control'"]),
+                value_type=bool,
+            ),
         }],
     )
 
@@ -202,6 +216,12 @@ def generate_launch_description() -> LaunchDescription:
         name="gpsr_guest_memory_node",
         output="screen",
         condition=IfCondition(start_executor),
+        parameters=[{
+            "use_sim_time": use_sim_time,
+            "amcl_pose_topic": amcl_pose_topic,
+            "amcl_pose_max_age_sec": ParameterValue(amcl_pose_max_age_sec, value_type=float),
+            "max_find_records": ParameterValue(max_find_history_records, value_type=int),
+        }],
     )
 
     # Section: GPSR-facing action server that bridges COUNT_PEOPLE skills to CV service calls.
@@ -463,6 +483,10 @@ def generate_launch_description() -> LaunchDescription:
                 command_input_timeout_sec,
                 value_type=float,
             ),
+            "clarification_listen_timeout_sec": ParameterValue(
+                clarification_listen_timeout_sec,
+                value_type=float,
+            ),
         }],
     )
 
@@ -504,7 +528,7 @@ def generate_launch_description() -> LaunchDescription:
         }.items(),
     )
 
-    # Section: Lifecycle gating exposes /person_follow/control only for a prepared FOLLOW_PERSON step.
+    # Section: Lifecycle gating exposes the selected master action only for a prepared FOLLOW_PERSON step.
     follow_person_skill_server = LifecycleNode(
         package="person_follower_master",
         executable="person_follow_action_adapter.py",
@@ -513,7 +537,8 @@ def generate_launch_description() -> LaunchDescription:
         output="screen",
         condition=IfCondition(start_follow_person_pipeline),
         parameters=[{
-            "action_name": "/person_follow/control",
+            # Section: The managed master provider keeps a stable endpoint while the client remains selectable.
+            "action_name": "/person_follow/master",
             "master_topic": "/master_target",
             "enroll_service": "/enroll_master",
             "reset_service": "/reset_master",
@@ -586,6 +611,9 @@ def generate_launch_description() -> LaunchDescription:
             DeclareLaunchArgument("start_voice_stt", default_value="true", description="Start local STT used by verbal FIND_PERSON confirmation."),
             DeclareLaunchArgument("start_voice_command", default_value="true", description="Start bounded spoken GPSR command reception at the current robot position."),
             DeclareLaunchArgument("command_input_timeout_sec", default_value="12.0", description="Seconds in each spoken GPSR command listening window before re-arming."),
+            DeclareLaunchArgument("max_clarification_attempts", default_value="2", description="Maximum spoken clarification replies per incomplete GPSR command."),
+            DeclareLaunchArgument("clarification_timeout_sec", default_value="40.0", description="Seconds allowed for each clarification TTS and STT exchange."),
+            DeclareLaunchArgument("clarification_listen_timeout_sec", default_value="20.0", description="Seconds allowed for one request-scoped STT clarification result."),
             DeclareLaunchArgument("allow_simulated_primitives", default_value="false", description="Test-only opt-in for registry entries explicitly marked simulated."),
             DeclareLaunchArgument("rgb_topic", default_value="/camera/camera/color/image_raw", description="RGB image topic for GPSR perception detectors."),
             DeclareLaunchArgument("enable_depth", default_value="true", description="Enable aligned-depth localization and target approach; false permits RGB-only object and face searches."),
@@ -609,6 +637,7 @@ def generate_launch_description() -> LaunchDescription:
             DeclareLaunchArgument("amcl_pose_topic", default_value="/amcl_pose", description="Localization pose captured when each command begins."),
             DeclareLaunchArgument("amcl_pose_max_age_sec", default_value="1.0", description="Maximum age of an AMCL observation accepted for command-start capture."),
             DeclareLaunchArgument("amcl_pose_capture_timeout_sec", default_value="3.0", description="Maximum wait for a fresh command-start AMCL pose."),
+            DeclareLaunchArgument("max_find_history_records", default_value="32", description="Maximum compact entity observations retained in RAM."),
             DeclareLaunchArgument("return_fallback_named_location", default_value="instruction_point", description="Named later-return target used by explicit named mode or unavailable AMCL capture."),
             DeclareLaunchArgument("enable_error_recovery", default_value="true", description="Retry the frozen command-start return target after scheduler ERROR."),
             DeclareLaunchArgument("error_recovery_max_attempts", default_value="3", description="Maximum automatic recovery returns; zero retries indefinitely."),
@@ -617,6 +646,7 @@ def generate_launch_description() -> LaunchDescription:
             DeclareLaunchArgument("navigation_action", default_value="/nav/navigate_named_pose", description="Existing navigation skill action endpoint."),
             DeclareLaunchArgument("navigate_to_pose_action", default_value="/navigate_to_pose", description="Nav2 action used for captured raw-pose returns."),
             DeclareLaunchArgument("navigate_to_named_pose_action", default_value="/nav/navigate_named_pose", description="Named-pose action used for semantic navigation and fallback return."),
+            DeclareLaunchArgument("follow_person_action", default_value="/person_follow/master", description="PersonFollow provider selected by the executor; use /person_follow/control for legacy."),
             DeclareLaunchArgument("find_object_action", default_value="/perception/find_object", description="Existing object perception action endpoint."),
             DeclareLaunchArgument("find_person_action", default_value="/perception/find_person", description="Existing person perception action endpoint."),
             DeclareLaunchArgument("tts_action", default_value="/voice/tts/say", description="Existing TTS service/action endpoint."),

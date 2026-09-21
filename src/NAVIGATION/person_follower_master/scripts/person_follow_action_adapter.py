@@ -39,7 +39,8 @@ class FollowPersonSkillServer(LifecycleNode):
 
         # Section: Stable endpoints bridge the existing GPSR and master-follow contracts.
         self.cb_group = ReentrantCallbackGroup()
-        self.declare_parameter("action_name", "/person_follow/control")
+        # Section: Keep the master-stack provider distinct from the legacy follow server.
+        self.declare_parameter("action_name", "/person_follow/master")
         self.declare_parameter("master_topic", "/master_target")
         self.declare_parameter("enroll_service", "/enroll_master")
         self.declare_parameter("reset_service", "/reset_master")

@@ -1,14 +1,169 @@
-# Section: Authoritative vocabulary for objects currently supported by GPSR perception.
+# Section: Incheon 2026 RoboCup@Home objects plus four retained local targets.
+# Source: https://github.com/RoboCupAtHome/Incheon2026/blob/main/objects/objects.md
 objects:
+  # Section: Official fabrics and toy objects.
+  white_shirt:
+    aliases: [white shirt]
+    detector_label: white shirt
+    category: fabric
+    probable_locations: [bedroom, living_room]
+  grey_shirt:
+    aliases: [grey shirt, gray shirt]
+    detector_label: grey shirt
+    category: fabric
+    probable_locations: [bedroom, living_room]
+  blue_shirt:
+    aliases: [blue shirt]
+    detector_label: blue shirt
+    category: fabric
+    probable_locations: [bedroom, living_room]
+  black_shirt:
+    aliases: [black shirt]
+    detector_label: black shirt
+    category: fabric
+    probable_locations: [bedroom, living_room]
+  hand_towel:
+    aliases: [hand towel]
+    detector_label: hand towel
+    category: fabric
+    probable_locations: [kitchen, bedroom]
+  rubiks_cube:
+    aliases: [rubiks cube, "rubik's cube"]
+    detector_label: rubiks cube
+    category: toy
+    probable_locations: [living_room, bedroom]
+
+  # Section: Official snacks, fruits, and food objects.
+  pringles:
+    aliases: [pringles, pringles can]
+    detector_label: pringles can
+    category: snack
+    probable_locations: [kitchen, living_room]
+  seaweed:
+    aliases: [seaweed]
+    detector_label: seaweed
+    category: snack
+    probable_locations: [kitchen, dining_room]
   apple:
     aliases: [apple]
     detector_label: apple
+    category: fruit
+    probable_locations: [kitchen, dining_room]
+  peach:
+    aliases: [peach]
+    detector_label: peach
+    category: fruit
+    probable_locations: [kitchen, dining_room]
+  mangostane:
+    aliases: [mangostane, mangosteen]
+    detector_label: mangosteen
+    category: fruit
+    probable_locations: [kitchen, dining_room]
+  lemon:
+    aliases: [lemon]
+    detector_label: lemon
+    category: fruit
+    probable_locations: [kitchen, dining_room]
+  yellow_bellpepper:
+    aliases: [yellow bellpepper, yellow bell pepper]
+    detector_label: yellow bell pepper
+    category: fruit
+    probable_locations: [kitchen, dining_room]
+  red_bellpepper:
+    aliases: [red bellpepper, red bell pepper]
+    detector_label: red bell pepper
+    category: fruit
+    probable_locations: [kitchen, dining_room]
+  instant_noodles:
+    aliases: [instant noodles]
+    detector_label: instant noodles
     category: food
     probable_locations: [kitchen, dining_room]
+  cornflakes:
+    aliases: [cornflakes, corn flakes]
+    detector_label: cornflakes
+    category: food
+    probable_locations: [kitchen, dining_room]
+
+  # Section: Official drinks and cleaning supplies.
+  coke:
+    aliases: [coke, coca cola, cola]
+    detector_label: coke
+    category: drink
+    probable_locations: [kitchen, dining_room, living_room]
+  red_bull:
+    aliases: [red bull, red bull can]
+    detector_label: red bull can
+    category: drink
+    probable_locations: [kitchen, dining_room, living_room]
+  milk:
+    aliases: [milk, milk carton]
+    detector_label: milk
+    category: drink
+    probable_locations: [kitchen, dining_room]
+  soju:
+    aliases: [soju]
+    detector_label: soju bottle
+    category: drink
+    probable_locations: [kitchen, dining_room, living_room]
+  pepsi:
+    aliases: [pepsi, pepsi can]
+    detector_label: pepsi can
+    category: drink
+    probable_locations: [kitchen, dining_room, living_room]
+  dishwasher_tab:
+    aliases: [dishwasher tab, dishwasher tablet]
+    detector_label: dishwasher tablet
+    category: cleaning_supply
+    probable_locations: [kitchen]
+  sponge:
+    aliases: [sponge]
+    detector_label: sponge
+    category: cleaning_supply
+    probable_locations: [kitchen]
+  toothpaste:
+    aliases: [toothpaste]
+    detector_label: toothpaste
+    category: cleaning_supply
+    probable_locations: [bedroom]
+
+  # Section: Official dishes and cutlery.
+  cup:
+    aliases: [cup, drinking cup, mug]
+    detector_label: cup
+    category: dish
+    probable_locations: [kitchen, dining_room, living_room]
+  spoon:
+    aliases: [spoon]
+    detector_label: spoon
+    category: dish
+    probable_locations: [kitchen, dining_room]
+  plate:
+    aliases: [plate]
+    detector_label: plate
+    category: dish
+    probable_locations: [kitchen, dining_room]
+  knife:
+    aliases: [knife]
+    detector_label: knife
+    category: dish
+    probable_locations: [kitchen, dining_room]
+  fork:
+    aliases: [fork]
+    detector_label: fork
+    category: dish
+    probable_locations: [kitchen, dining_room]
+  bowl:
+    aliases: [bowl]
+    detector_label: bowl
+    category: dish
+    probable_locations: [kitchen, dining_room]
+
+  # Section: Preserve local object commands that predate the Incheon list.
   banana:
     aliases: [banana]
     detector_label: banana
-    category: food
+    category: fruit
     probable_locations: [kitchen, dining_room]
   bottle:
     aliases: [bottle, water bottle]
@@ -22,32 +177,43 @@ objects:
   chips:
     aliases: [chips, potato chips]
     detector_label: chips
-    category: food
+    category: snack
     probable_locations: [kitchen, living_room]
-  coke:
-    aliases: [coke, coca cola, cola]
-    detector_label: coke
-    category: drink
-    probable_locations: [kitchen, dining_room, living_room]
-  cup:
-    aliases: [cup, drinking cup]
-    detector_label: cup
-    category: drink
-    probable_locations: [kitchen, dining_room, living_room]
-  milk:
-    aliases: [milk, milk carton]
-    detector_label: milk
-    category: drink
-    probable_locations: [kitchen, dining_room]
 
-# Section: Category membership is explicit and validated in both directions at load time.
+# Section: Singular canonical categories accept official plural class names as aliases.
 categories:
-  drink:
-    members: [bottle, cup, coke, milk]
-    probable_locations: [kitchen, dining_room, living_room, bedroom]
+  fabric:
+    aliases: [fabrics]
+    members: [white shirt, grey shirt, blue shirt, black shirt, hand_towel]
+    probable_locations: [bedroom, living_room, kitchen]
+  toy:
+    aliases: [toys]
+    members: [rubiks_cube]
+    probable_locations: [living_room, bedroom]
+  snack:
+    aliases: [snacks]
+    members: [pringles, seaweed, chips]
+    probable_locations: [kitchen, dining_room, living_room]
+  fruit:
+    aliases: [fruits]
+    members: [apple, peach, mangostane, lemon, yellow_bellpepper, red_bellpepper, banana]
+    probable_locations: [kitchen, dining_room]
   food:
-    members: [apple, banana, chips]
+    aliases: [foods]
+    members: [instant_noodles, cornflakes]
+    probable_locations: [kitchen, dining_room]
+  drink:
+    aliases: [drinks]
+    members: [coke, red_bull, milk, soju, pepsi, bottle]
+    probable_locations: [kitchen, dining_room, living_room, bedroom]
+  cleaning_supply:
+    aliases: [cleaning supplies, cleaning supply]
+    members: [dishwasher_tab, sponge, toothpaste]
+    probable_locations: [kitchen, bedroom]
+  dish:
+    aliases: [dishes]
+    members: [cup, spoon, plate, knife, fork, bowl]
     probable_locations: [kitchen, dining_room, living_room]
 
-# Section: Only these generic targets are permitted to match every configured object.
+# Section: Generic targets may match every configured object.
 wildcards: [object, any_object]

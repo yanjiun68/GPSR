@@ -4,6 +4,8 @@ Section: Deterministic GPSR scheduler front end.
 
 This package parses constrained GPSR commands without an LLM, plans the physical task order, and submits reusable symbolic skills to the existing `robot_yasmin_tasks` executor.
 
+See the [command dictionary](COMMAND_DICTIONARY.md) for spoken aliases, primitive mappings, queue dependency ordering, lifecycle boundaries, and completion feedback.
+
 Section: Canonical language pipeline.
 
 The scheduler retains raw and optional externally normalized text separately. It applies
@@ -316,3 +318,93 @@ The scheduler launch additionally exposes `return_target_mode`, `amcl_pose_topic
 `navigate_to_named_pose_action`, and `navigate_to_instruction_point_on_start`. See
 `gpsr_scheduler.launch.py --show-args` for the complete perception, voice, executor, and
 recovery parameter list.
+
+## Qwen segmented-ROI navigation
+
+Section: Safety boundary and data flow.
+
+Qwen supplies only a semantic target and a two-dimensional image region. The vision
+resolver correlates that region with aligned depth, calibrated `CameraInfo`, and TF;
+it returns an observed entity pose plus a planar stand-off pose in `map`. The bridge
+then publishes a canonical single-step `ActionQueue`. Automatic submission to
+`/execute_action_queue` is disabled by default.
+
+```mermaid
+flowchart LR
+    A[Stamped RGB shown to Qwen] --> B[Qwen bbox_2d]
+    B --> C[Segmentation mask]
+    C --> D[ResolveVisualTarget]
+    E[Aligned depth + CameraInfo + TF] --> D
+    D --> F[Map-frame approach_pose]
+    F --> G[NAVIGATE ActionStep target_pose]
+    G --> H[ExecuteActionQueue]
+    H --> I[Nav2 NavigateToPose]
+```
+
+Section: Build and launch without motion.
+
+```bash
+colcon build --packages-select robot_ai_interfaces vision gpsr_task_scheduler
+source install/setup.bash
+ros2 launch gpsr_task_scheduler qwen_visual_navigation.launch.py auto_execute:=false
+```
+
+For a bbox-only topic-contract test before the segmenter is connected, add
+`default_require_mask:=false`. Keep the production default `true` for navigation.
+
+The Qwen ROS wrapper must copy the source RGB header stamp into the envelope; the
+model must not generate this timestamp. It publishes the envelope on
+`/ai/qwen/grounding_json` and a `mono8` selected-instance mask with the same stamp on
+`/ai/qwen/selected_mask`:
+
+```json
+{
+  "request_id": "visual_nav_001",
+  "image_stamp": {"sec": 1726800000, "nanosec": 120000000},
+  "stand_off_distance": 0.9,
+  "require_mask": true,
+  "selected_entity": {
+    "target_id": "red_cup_7",
+    "label": "red cup",
+    "bbox_2d": [214, 305, 466, 822],
+    "coordinate_width": 1000,
+    "coordinate_height": 1000
+  }
+}
+```
+
+The resolver publishes inspectable poses on `/vision/qwen_target_pose` and
+`/vision/qwen_approach_pose`. The bridge publishes the resulting typed queue on
+`/gpsr/visual_navigation_queue` and decisions on
+`/gpsr/visual_navigation_status`. After RViz and costmap inspection, enable executor
+submission explicitly:
+
+```bash
+ros2 launch gpsr_task_scheduler qwen_visual_navigation.launch.py auto_execute:=true
+```
+
+Section: ActionQueue pose contract.
+
+The bridge writes the resolver-owned stand-off pose into `parameters_json`; it leaves
+`target_location` empty so `Nav2Client` selects its existing raw-pose route:
+
+```json
+{
+  "action_type": "NAVIGATE",
+  "target_location": "",
+  "parameters": {
+    "target_pose": {
+      "frame_id": "map",
+      "position": {"x": 1.2, "y": -0.4, "z": 0.0},
+      "orientation": {"x": 0.0, "y": 0.0, "z": 0.38, "w": 0.92}
+    },
+    "target_reference": "red_cup_7",
+    "target_source": "QWEN_SEGMENTED_ROI_DEPTH"
+  }
+}
+```
+
+Do not insert the entity's measured 3D point as the Nav2 goal: it normally lies on
+the person, object, table, or obstacle. Only the collision-checkable stand-off pose
+is passed to `NAVIGATE`. Nav2 remains responsible for path feasibility and rejects
+an occupied or unreachable goal.

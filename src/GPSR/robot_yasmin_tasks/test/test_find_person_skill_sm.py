@@ -117,6 +117,40 @@ def registered_person_ref() -> dict[str, Any]:
     }
 
 
+def test_live_confirmation_asks_for_the_specific_name_and_returns_the_answer() -> None:
+    """Special function: Verify verbal fallback uses the shared ask-and-listen interface."""
+    class RecordingDialogue:
+        """Special function: Capture the dialogue action without requiring audio hardware."""
+
+        def __init__(self) -> None:
+            """Special function: Initialize an empty recorded dialogue action."""
+            self.action = None
+
+        def ask_and_listen(self, _blackboard: Blackboard, action: ActionStepData) -> Any:
+            """Special function: Record the question and return a confirmed spoken answer."""
+            self.action = action
+            return SimpleNamespace(
+                outcome=SUCCESS,
+                message="heard",
+                result={"answer": "yes"},
+            )
+
+    # Section: Exercise the real client adapter while replacing only external TTS/STT transport.
+    dialogue = RecordingDialogue()
+    client = FindPersonClients(node=None, simulate=False, dialogue=dialogue)
+    answer = client.ask_confirmation(
+        Blackboard(),
+        ActionStepData("FIND_PERSON"),
+        "Alex",
+        {"candidate_id": "track:4"},
+        3.0,
+    )
+
+    assert dialogue.action.action_type == "ASK_AND_LISTEN"
+    assert dialogue.action.parameters["question"] == "Are you Alex?"
+    assert answer == {"status": "answer", "transcript": "yes"}
+
+
 def test_live_enrollment_goal_carries_confirmed_session_and_track() -> None:
     """Special function: The real adapter copies the exact confirmed lock into its action goal."""
     # Section: Minimal action fakes exercise goal construction without a ROS graph.
@@ -302,19 +336,21 @@ def test_registered_failure_falls_back_with_reason() -> None:
     assert result["fallback_reason"] == "PROFILE_NOT_OBSERVED"
 
 
-def test_registered_failure_without_fallback_is_not_found() -> None:
-    """Special function: Disabled fallback preserves registered-profile failure semantics."""
+def test_legacy_disable_flag_cannot_bypass_required_verbal_confirmation() -> None:
+    """Special function: A visual miss always starts conversation for a specifically named person."""
     client = FakeIdentityClient(
         profile={"status": "found", "profile_id": "guest_alex", "usable": True},
         registered={"status": "not_found", "reason": "PROFILE_NOT_OBSERVED"},
+        candidates=[{"candidate_id": "track:9", "tracking_id": 9, "transcript": "yes"}],
     )
 
     outcome, blackboard = run_name_skill(client, {"allow_verbal_fallback": False})
 
-    assert outcome == NOT_FOUND
+    assert outcome == SUCCESS
+    assert blackboard[bb.PERSON_REF]["tracking_id"] == 9
     result = blackboard[bb.LAST_SKILL_RESULT]["result"]
-    assert result["identification_mode_used"] == "REGISTERED_PROFILE"
-    assert result["reason"] == "PROFILE_NOT_FOUND_IN_SEARCH_SCOPE"
+    assert result["identification_mode_used"] == "VERBAL_IDENTIFICATION"
+    assert result["fallback_reason"] == "PROFILE_NOT_OBSERVED"
 
 
 def test_enrollment_failure_keeps_confirmed_person_success() -> None:

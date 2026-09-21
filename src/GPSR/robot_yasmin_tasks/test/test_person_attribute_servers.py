@@ -53,6 +53,22 @@ def test_combined_positive_predicates_use_weakest_confidence() -> None:
     assert match_score(tracked_person(), predicates) == 0.7
 
 
+def test_generic_waving_predicate_accepts_either_arm() -> None:
+    """Special function: The lifecycle matcher treats an unsided wave as either-arm evidence."""
+    # Section: Exercise each side-specific perception label against the generic waving selector.
+    for gesture in ("left_arm_waving", "right_arm_waving", "both_arms_waving"):
+        person = tracked_person()
+        person.gesture = gesture
+        assert match_score(person, [{"type": "gesture", "value": "waving"}]) == 0.8
+
+
+def test_right_raised_arm_predicate_rejects_left_only_evidence() -> None:
+    """Special function: A right-arm request remains side-specific in the lifecycle matcher."""
+    person = tracked_person()
+    person.gesture = "raising_left_arm"
+    assert match_score(person, [{"type": "gesture", "value": "right_hand_raised"}]) < 0.0
+
+
 def test_negative_wearable_selector_is_rejected() -> None:
     """Special function: Missing detection cannot be treated as negative evidence."""
     predicates, error = normalize_selector('{"type":"glasses","value":"no"}')

@@ -26,7 +26,12 @@
   <depend>rclcpp</depend>
   <depend>ament_index_python</depend>
   <depend>sensor_msgs</depend>
+  <exec_depend>sensor_msgs_py</exec_depend>
+  <depend>visualization_msgs</depend>
+  <depend>geometry_msgs</depend>
   <depend>std_msgs</depend>
+  <depend>tf2_ros</depend>
+  <depend>tf2_geometry_msgs</depend>
   <depend>putrabot_interfaces</depend>
   <depend>receptionist_interfaces</depend>
   <depend>robot_ai_interfaces</depend>

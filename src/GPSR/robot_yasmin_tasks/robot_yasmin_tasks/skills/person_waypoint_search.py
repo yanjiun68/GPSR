@@ -127,7 +127,13 @@ class PersonSearchPolicy:
         if scope == "GLOBAL":
             if requested:
                 raise ValueError("GLOBAL person search cannot include target_location.")
-            return list(self.global_waypoints)
+            route = list(self.global_waypoints)
+            # Section: A matching saved location is verified first, then exhaustive search continues.
+            preferred = str(action.parameters.get("preferred_location", "")).strip()
+            if preferred in route:
+                route.remove(preferred)
+                route.insert(0, preferred)
+            return route
         raise ValueError(f"Unsupported person search_scope: {scope or 'empty'}.")
 
 

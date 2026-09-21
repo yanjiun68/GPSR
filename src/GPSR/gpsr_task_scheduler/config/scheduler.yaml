@@ -13,6 +13,17 @@ known_people:
   - operator
   - john
   - mary
+  # Section: Competition names emitted by the bundled GPSR command generator.
+  - adel
+  - angel
+  - axel
+  - charlie
+  - jane
+  - jules
+  - morgan
+  - paris
+  - robin
+  - simone
 supported_object_features:
   shirt_color:
     - red

@@ -30,6 +30,19 @@ ACTION_DOMAINS = {
 }
 
 
+def retained_json_qos():
+    """Special function: Request the latest retained snapshot from optional topic producers."""
+    # Section: Delay ROS imports so the normalization model remains hardware-free in tests.
+    from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
+    # Section: Match reliable transient-local scheduler and executor snapshot publishers.
+    return QoSProfile(
+        history=HistoryPolicy.KEEP_LAST,
+        depth=1,
+        reliability=ReliabilityPolicy.RELIABLE,
+        durability=DurabilityPolicy.TRANSIENT_LOCAL,
+    )
+
+
 def normalize_queue_state(raw_state: Any) -> str:
     """Special function: Normalize structured producer states while retaining raw state separately."""
     value = str(raw_state or "").strip().lower().replace("-", "_").replace(" ", "_")
@@ -37,7 +50,7 @@ def normalize_queue_state(raw_state: Any) -> str:
         return "DONE"
     if value in {"executing", "active", "running", "accepted", "started"}:
         return "RUNNING"
-    if value in {"queued", "waiting", "not_started", "pending"}:
+    if value in {"queued", "waiting", "not_started", "pending", "in_queue"}:
         return "PENDING"
     if value in {"skip", "skipped"}:
         return "SKIPPED"
@@ -57,11 +70,39 @@ def action_domain(action_type: Any) -> str:
 
 def action_target(item: Mapping[str, Any]) -> str:
     """Special function: Select a display target from explicit ActionStep target fields."""
+    # Section: Scheduler plans retain primitive targets inside arguments until ROS conversion.
+    arguments = item.get("arguments", item.get("parameters", {}))
+    arguments = arguments if isinstance(arguments, Mapping) else {}
     for key in ("target_location", "target_object", "target_person", "target_category"):
-        value = str(item.get(key, "") or "").strip()
+        value = str(item.get(key, arguments.get(key, "")) or "").strip()
+        if value:
+            return value
+    # Section: Semantic plan fields use object_name and category before ActionStep conversion.
+    for key in ("object_name", "category"):
+        value = str(arguments.get(key, "") or "").strip()
         if value:
             return value
     return "-"
+
+
+def task_display_status(state: Any, queue_state: Any = "") -> str:
+    """Special function: Map executor states to concise operator-facing task statuses."""
+    normalized = normalize_queue_state(state)
+    terminal_queue = normalize_queue_state(queue_state)
+    if normalized == "DONE":
+        return "COMPLETED"
+    if normalized in {"FAILED", "CANCELED"}:
+        return "ABORTED"
+    # Section: A terminal queue abort means every unstarted remainder can no longer run.
+    if terminal_queue in {"FAILED", "CANCELED"} and normalized in {"PENDING", "UNKNOWN"}:
+        return "ABORTED"
+    if normalized == "RUNNING":
+        return "RUNNING"
+    if normalized == "RETRYING":
+        return "RETRYING"
+    if normalized == "SKIPPED":
+        return "SKIPPED"
+    return "IN QUEUE"
 
 
 class GpsrStateModel:
@@ -104,8 +145,15 @@ class GpsrStateModel:
         source_items = self.executor.get("items") if executor_matches else None
         if not isinstance(source_items, list):
             source_items = context.get("action_queue", [])
+        if not isinstance(source_items, list) or not source_items:
+            # Section: The public plan steps remain a safe fallback for older command contexts.
+            source_items = self.plan.get("steps", [])
         source_items = source_items if isinstance(source_items, list) else []
         current_index = int(self.executor.get("current_index", -1) or 0) if executor_matches else -1
+        queue_state_raw = self.executor.get("queue_state", "IN_QUEUE") if executor_matches else (
+            "IN_QUEUE" if bool(self.plan.get("valid")) and source_items else self.scheduler.get("state", "UNKNOWN")
+        )
+        queue_state = normalize_queue_state(queue_state_raw)
 
         # Section: Normalize each structured queue item and preserve its raw producer state.
         items: list[dict[str, Any]] = []
@@ -119,6 +167,7 @@ class GpsrStateModel:
                 "skill": str(item.get("action_type", item.get("skill_name", ""))),
                 "target": action_target(item),
                 "state": state,
+                "task_status": task_display_status(state, queue_state),
                 "raw_state": str(raw_state),
                 "attempt": int(item.get("attempt", 0) or 0),
                 "max_retries": int(item.get("max_retries", item.get("retry_count", 0)) or 0),
@@ -126,9 +175,13 @@ class GpsrStateModel:
             })
             items.append(item)
 
-        queue_state_raw = self.executor.get("queue_state", self.scheduler.get("state", "UNKNOWN")) if executor_matches else self.scheduler.get("state", "UNKNOWN")
-        queue_state = normalize_queue_state(queue_state_raw)
         current = next((item for item in items if item.get("current")), None)
+        # Section: Counts let the Overview page report the whole sequence at a glance.
+        status_counts = {
+            status: sum(1 for item in items if item.get("task_status") == status)
+            for status in ("IN QUEUE", "RUNNING", "RETRYING", "COMPLETED", "ABORTED", "SKIPPED")
+        }
+        completed_count = int(self.executor.get("completed_count", status_counts["COMPLETED"]) or 0) if executor_matches else status_counts["COMPLETED"]
         return {
             "scheduler_present": self.scheduler_present,
             "executor_present": self.executor_present,
@@ -140,6 +193,8 @@ class GpsrStateModel:
             "raw_queue_state": str(queue_state_raw),
             "current_index": current_index,
             "queue_length": len(items),
+            "completed_count": min(len(items), max(0, completed_count)),
+            "task_status_counts": status_counts,
             "current_domain": str(current.get("domain", "")) if current else "",
             "current_skill": str(current.get("skill", "")) if current else "",
             "retry_attempt": int(self.executor.get("retry_attempt", current.get("attempt", 0) if current else 0) or 0) if executor_matches else 0,
@@ -204,17 +259,22 @@ class GpsrSource:
         self.model = GpsrStateModel()
         self.transition_tracker = GpsrTransitionTracker()
         # Section: Import ROS-only QoS and messages only when constructing the runtime source.
-        from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
         from std_msgs.msg import String
-        self.plan_sub = node.create_subscription(String, plan_topic, self._on_plan, 10)
-        self.state_sub = node.create_subscription(String, state_topic, self._on_scheduler, 10)
-        queue_qos = QoSProfile(
-            history=HistoryPolicy.KEEP_LAST,
-            depth=1,
-            reliability=ReliabilityPolicy.RELIABLE,
-            durability=DurabilityPolicy.TRANSIENT_LOCAL,
+        # Section: Retained plan delivery lets this optional monitor start after command acceptance.
+        self.plan_sub = node.create_subscription(
+            String,
+            plan_topic,
+            self._on_plan,
+            retained_json_qos(),
         )
-        self.queue_sub = node.create_subscription(String, queue_topic, self._on_executor, queue_qos)
+        self.state_sub = node.create_subscription(String, state_topic, self._on_scheduler, 10)
+        # Section: Retained executor delivery restores the latest live queue without a handshake.
+        self.queue_sub = node.create_subscription(
+            String,
+            queue_topic,
+            self._on_executor,
+            retained_json_qos(),
+        )
         self.timer = node.create_timer(1.0 / max(0.1, float(rate_hz)), self.poll)
         self.cache.set("gpsr", self.model.snapshot())
 

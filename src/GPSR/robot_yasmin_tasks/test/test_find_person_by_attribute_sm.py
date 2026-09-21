@@ -110,6 +110,23 @@ class _InfrastructureTimeoutClient:
         return make_skill_result(action.action_type, TIMEOUT, "stream silent", recoverable=True)
 
 
+def test_remembered_person_location_is_searched_first() -> None:
+    """Special function: A matching saved room is prioritized while using the normal route."""
+    navigation = _RecordingNavigation()
+    blackboard = Blackboard()
+    blackboard[bb.CURRENT_ACTION] = ActionStepData(
+        "FIND_PERSON_BY_ATTRIBUTE",
+        parameters={
+            "selector": {"type": "shirt_color", "value": "red"},
+            "preferred_location": "bedroom",
+        },
+        timeout_sec=5.0,
+    )
+    outcome = FindPersonByAttributeSM(_SuccessClient(), navigation)(blackboard)
+    assert outcome == SUCCESS
+    assert navigation.targets == ["bedroom"]
+
+
 class _ThirdWaypointSuccessClient:
     """Special function: Return NOT_FOUND twice, then a deterministic match."""
 
@@ -304,3 +321,16 @@ def test_pose_summary_matcher_distinguishes_left_and_right_arm() -> None:
     }
     assert not client._matches(left_person, {"type": "gesture", "value": "right_hand_raised"})
     assert client._matches(left_person, {"type": "gesture", "value": "left_hand_raised"})
+
+
+def test_pose_summary_generic_waving_accepts_either_arm() -> None:
+    """Special function: An unsided waving selector accepts left-, right-, or both-arm wave evidence."""
+    client = FindPersonAttributeClients(node=None)
+    # Section: Validate every side-specific wave state against the generic parser selector.
+    for wave_state in ("LEFT_ARM_WAVING", "RIGHT_ARM_WAVING", "BOTH_ARMS_WAVING"):
+        person = {
+            "status": "DETECTED",
+            "gesture": "none",
+            "wave_state": wave_state,
+        }
+        assert client._matches(person, {"type": "gesture", "value": "waving"})

@@ -1,0 +1,6 @@
+# Section: Save or update one bounded GPSR find-history record.
+robot_ai_interfaces/FoundEntityRecord record
+---
+bool success
+robot_ai_interfaces/FoundEntityRecord record
+string message

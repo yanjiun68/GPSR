@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S bash -c 'exec "${VISION_PYTHON:-${HOME}/ai/qwen3v1/.venv/bin/python}" "$0" "$@"'
 # Section: ROS 2 external camera publisher entry point.
 
 """Publish frames from an external OpenCV camera as ROS 2 Image messages."""

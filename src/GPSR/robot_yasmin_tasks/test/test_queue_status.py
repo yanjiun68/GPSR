@@ -61,3 +61,24 @@ def test_observer_exception_cannot_change_execution() -> None:
         raise RuntimeError("publisher unavailable")
 
     emit_queue_status(broken_callback, _blackboard(), "QUEUE_STARTED")
+
+
+def test_completion_identifies_finished_step_without_marking_next_running() -> None:
+    """Special function: Keep completion evidence attached to the committed step."""
+    blackboard = _blackboard()  # Model a cursor already advanced past the first step.
+    blackboard[bb.DISPATCH_OUTCOME] = "success"  # The first navigation completed successfully.
+    blackboard[bb.LAST_SKILL_RESULT] = {"action_type": "NAVIGATE", "outcome": "success", "result": {"arrived": True}}  # Preserve returned data.
+    status = build_queue_status(blackboard, "ACTION_FINISHED", "success")  # Publish after cleanup and commit.
+    assert status["current_index"] == status["completed_count"] == 1  # Keep the next cursor distinct from event identity.
+    assert status["event_index"] == 0 and status["event_step_id"] == "s1"  # Attribute completion to the first step.
+    assert status["last_skill_result"]["result"] == {"arrived": True}  # Include the skill's completion data.
+    assert [item["state"] for item in status["items"]] == ["DONE", "PENDING"]  # Do not claim the next action has started.
+
+
+def test_failed_completion_does_not_increment_completed_count() -> None:
+    """Special function: Keep failed feedback attached to the uncommitted step."""
+    blackboard = _blackboard()  # Retain the second step as the active cursor.
+    blackboard[bb.DISPATCH_OUTCOME] = "fatal_failure"  # Model an unrecoverable sub-action failure.
+    status = build_queue_status(blackboard, "ACTION_FINISHED", "fatal_failure")  # Build the failure event.
+    assert status["event_index"] == status["current_index"] == 1  # The failed action does not advance.
+    assert status["event_step_id"] == "s2" and status["completed_count"] == 1  # Only the first step succeeded.

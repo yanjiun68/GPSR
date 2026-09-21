@@ -81,6 +81,15 @@ def test_right_arm_stt_variants_select_attribute_route(phrase: str) -> None:
     assert result.steps[0].skill_name == "FIND_PERSON_BY_ATTRIBUTE"
 
 
+def test_unspecified_waving_selects_arm_agnostic_gesture() -> None:
+    """Special function: Waving without a named side remains one arm-agnostic selector."""
+    result = planned_result("find a person waving in the living room")
+    assert result.task_request.person_selector == {
+        "all": [{"type": "gesture", "operator": "equals", "value": "waving"}]
+    }
+    assert result.steps[0].skill_name == "FIND_PERSON_BY_ATTRIBUTE"
+
+
 def test_named_person_selects_identity_route() -> None:
     """Special function: A configured searched name produces only FIND_PERSON."""
     result = planned_result("find john in the living room")
@@ -164,10 +173,11 @@ def test_unconfigured_hat_model_is_rejected_during_planning() -> None:
 
 
 def test_unresolved_pronoun_is_rejected() -> None:
-    """Special function: Ambiguous pronoun-only commands are rejected deterministically."""
+    """Special function: Unresolved target references request clarification without a queue."""
     result = schedule_command("bad", "find it in the kitchen", default_config())
     assert not result.valid
-    assert "unresolved_pronoun" in {issue.code for issue in result.issues}
+    assert {issue.code for issue in result.issues} == {"CLARIFICATION_REQUIRED"}
+    assert result.command_context.validation["status"] == "MISSING_TARGET"
 
 
 def test_unknown_location_is_rejected() -> None:
@@ -178,10 +188,11 @@ def test_unknown_location_is_rejected() -> None:
 
 
 def test_missing_task_location_is_rejected() -> None:
-    """Special function: Location-dependent tasks require a task location."""
+    """Special function: Location-dependent tasks request a missing room."""
     result = schedule_command("bad", "count people tell me", default_config())
     assert not result.valid
-    assert "missing_task_location" in {issue.code for issue in result.issues}
+    assert {issue.code for issue in result.issues} == {"CLARIFICATION_REQUIRED"}
+    assert result.command_context.validation["status"] == "MISSING_LOCATION"
 
 
 def test_missing_report_location_is_rejected_when_destination_requested() -> None:
@@ -267,7 +278,8 @@ def test_place_acquires_target_before_dependent_place() -> None:
 
 def test_bring_expands_then_rejects_unavailable_manipulation() -> None:
     """Special function: Delivery expansion is centralized in the scheduler compiler."""
-    result = schedule_command("bring", "bring me the coke", default_config())
+    # Section: A specified source satisfies the new semantic completeness gate.
+    result = schedule_command("bring", "bring me the coke from the kitchen", default_config())
     assert not result.valid
     assert [step.skill_name for step in result.steps] == [
         "FIND_OBJECT", "PICK_OBJECT", "NAVIGATE", "HANDOVER_OBJECT",

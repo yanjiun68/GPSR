@@ -22,9 +22,10 @@ def test_text_truncation_wrapping_and_column_fit() -> None:
 def test_queue_rows_use_one_based_display_and_current_marker() -> None:
     """Special function: Queue rows remain aligned and highlight the current index."""
     rows = queue_rows([
-        {"index": 0, "skill": "NAVIGATE", "state": "DONE", "attempt": 0, "max_retries": 1},
-        {"index": 1, "skill": "FIND_OBJECT", "state": "RUNNING", "attempt": 1, "max_retries": 2, "current": True},
+        {"index": 0, "skill": "NAVIGATE", "state": "DONE", "task_status": "COMPLETED", "attempt": 0, "max_retries": 1},
+        {"index": 1, "skill": "FIND_OBJECT", "state": "RUNNING", "task_status": "RUNNING", "attempt": 1, "max_retries": 2, "current": True},
     ])
     assert rows[0]["number"].strip() == "1"
     assert rows[1]["number"] == "> 2"
     assert rows[1]["attempt"] == "1/2"
+    assert [row["state"] for row in rows] == ["COMPLETED", "RUNNING"]

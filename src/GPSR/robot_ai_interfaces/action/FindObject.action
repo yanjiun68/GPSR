@@ -6,6 +6,8 @@ string search_scope
 bool approach_target
 float32 stand_off_distance
 float32 timeout_sec
+# Section: A remembered named viewpoint is searched first, then normal exhaustive fallback continues.
+string preferred_viewpoint
 ---
 # Section: Stable mission result codes.
 uint8 SUCCESS=0

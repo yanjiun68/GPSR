@@ -5,6 +5,7 @@
 from robot_yasmin_tasks.gpsr.action_types import (
     COUNT_PEOPLE,
     FIND_OBJECT,
+    FIND_PERSON_BY_ATTRIBUTE,
     HANDOVER_OBJECT,
     NAVIGATE,
     PICK_OBJECT,
@@ -46,3 +47,18 @@ def test_fallback_say() -> None:
     """Special function: Fallback parser supports simple say command."""
     steps = fallback_parse_transcript("say hello")
     assert steps[0].action_type == SAY
+
+
+def test_fallback_post_noun_right_arm_description_is_side_specific() -> None:
+    """Special function: A post-noun right-arm phrase selects only the right raised-arm gesture."""
+    steps = fallback_parse_transcript("find a person raising right arm in the living room")
+    assert [step.action_type for step in steps] == [FIND_PERSON_BY_ATTRIBUTE]
+    assert steps[0].parameters["selector"] == {"type": "gesture", "value": "right_hand_raised"}
+    assert steps[0].target_location == "living_room"
+
+
+def test_fallback_post_noun_waving_description_is_arm_agnostic() -> None:
+    """Special function: Waving without a side selects the generic either-arm gesture."""
+    steps = fallback_parse_transcript("find a person waving")
+    assert [step.action_type for step in steps] == [FIND_PERSON_BY_ATTRIBUTE]
+    assert steps[0].parameters["selector"] == {"type": "gesture", "value": "waving"}

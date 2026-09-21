@@ -10,6 +10,8 @@ from types import ModuleType
 from launch import LaunchContext
 from launch.actions import DeclareLaunchArgument
 from launch_ros.actions import LifecycleNode, Node
+from launch.actions import IncludeLaunchDescription  # Inspect ownership of the managed runtime stack.
+from launch.utilities import perform_substitutions  # Resolve forwarded controls under launch defaults.
 
 
 def load_scheduler_launch(tmp_path: Path) -> ModuleType:
@@ -81,6 +83,26 @@ def test_all_selectable_perception_pipelines_are_enabled_by_default(tmp_path: Pa
     ):
         node = lifecycle_node(entities, node_name)
         assert node.condition is not None and node.condition.evaluate(context)
+
+
+def test_managed_runtime_reuses_complete_stack_without_initial_navigation(tmp_path: Path) -> None:
+    """Special function: Prevent a partial duplicate skill stack or pre-command movement."""
+    os.environ["ROS_LOG_DIR"] = str(tmp_path / "ros_logs")  # Keep launch logs inside the test directory.
+    path = Path(__file__).parents[3] / "putrabot_bringup/launch/gpsr_managed_runtime.launch.py"  # Load the public managed entrypoint.
+    spec = importlib.util.spec_from_file_location("gpsr_managed_runtime", path)  # Import the launch without starting ROS processes.
+    module = importlib.util.module_from_spec(spec)  # Create an isolated module for launch construction.
+    spec.loader.exec_module(module)  # Evaluate only the launch declarations.
+    entities = list(module.generate_launch_description().entities)  # Inspect the runtime's process ownership.
+    context = LaunchContext()  # Resolve the public launch defaults.
+    for entity in entities:  # Initialize each declared argument before inspecting includes.
+        if isinstance(entity, DeclareLaunchArgument):  # Ignore launch actions that could start processes.
+            entity.execute(context)  # Store only the default argument values.
+    includes = [entity for entity in entities if isinstance(entity, IncludeLaunchDescription)]  # Separate camera and integrated GPSR ownership.
+    assert len(includes) == 2 and not any(isinstance(entity, Node) for entity in entities)  # Avoid duplicate direct scheduler or skill nodes.
+    args = dict(includes[1].launch_arguments)  # Read the authoritative scheduler launch's controls.
+    assert args["navigate_to_instruction_point_on_start"] == "false"  # Prohibit pre-command navigation in managed mode.
+    assert args["start_executor"] == "true" and args["dry_run"] == "false"  # Preserve real execution through one executor.
+    assert perform_substitutions(context, [args["rgb_topic"]]) == "/camera/image_raw"  # Preserve the external camera input.
 
 
 def test_find_object_is_independent_from_count_objects_switch(tmp_path: Path) -> None:
@@ -167,6 +189,7 @@ def test_command_start_amcl_return_defaults_disable_startup_motion(tmp_path: Pat
     assert context.launch_configurations["amcl_pose_topic"] == "/amcl_pose"
     assert context.launch_configurations["amcl_pose_max_age_sec"] == "1.0"
     assert context.launch_configurations["amcl_pose_capture_timeout_sec"] == "3.0"
+    assert context.launch_configurations["max_find_history_records"] == "32"
     assert context.launch_configurations["return_fallback_named_location"] == "instruction_point"
     assert context.launch_configurations["navigate_to_pose_action"] == "/navigate_to_pose"
     assert context.launch_configurations["navigate_to_named_pose_action"] == "/nav/navigate_named_pose"

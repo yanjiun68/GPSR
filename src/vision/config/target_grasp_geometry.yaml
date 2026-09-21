@@ -1,0 +1,78 @@
+# Section: Device-local semantic target, polygon mesh, and grasp-geometry configuration.
+target_grasp_geometry:
+  ros__parameters:
+    # Section: Existing RealSense aligned RGB-D interfaces.
+    target_topic: /vision/target_object
+    rgb_topic: /camera/camera/color/image_raw
+    depth_topic: /camera/camera/aligned_depth_to_color/image_raw
+    camera_info_topic: /camera/camera/color/camera_info
+
+    # Section: Required and optional perception outputs.
+    mask_topic: /vision/target_mask
+    overlay_topic: /vision/target_overlay
+    grasp_pose_topic: /vision/grasp_pose
+    markers_topic: /vision/target_markers
+    status_topic: /vision/target_status
+    debug_cloud_topic: /vision/debug_target_cloud
+
+    # Section: On-demand Qwen semantic grounding configuration.
+    qwen_enabled: true
+    qwen_model_path: /home/yanjiun68/ai/models/Qwen3-VL-4B-Instruct
+    qwen_max_new_tokens: 192
+    qwen_image_size: 448
+    qwen_minimum_confidence: 0.35
+    qwen_instance_confidence_margin: 0.05
+    minimum_bbox_fraction: 0.0005
+    maximum_bbox_fraction: 0.70
+
+    # Section: Replaceable genuine pixel-segmentation backend.
+    segmentation_backend: yoloe
+    segmentation_model_path: /home/yanjiun68/workspace/WS1/PutrabotUPM-project/yoloe-26s-seg.pt
+    segmentation_device: cuda
+    segmentation_confidence: 0.25
+    segmentation_image_size: 640
+    minimum_mask_pixels: 100
+    maximum_mask_fraction: 0.70
+
+    # Section: Frame synchronization and metric-depth validation.
+    max_rgb_depth_time_difference: 0.08
+    max_frame_age: 0.50
+    min_depth_m: 0.15
+    max_depth_m: 2.0
+    minimum_valid_depth_ratio: 0.40
+
+    # Section: Conservative target-only sample cleanup.
+    voxel_leaf_size: 0.005
+    enable_outlier_filter: true
+    outlier_kernel_size: 5
+    outlier_maximum_deviation_m: 0.025
+    enable_plane_removal: false
+    plane_distance_threshold_m: 0.008
+    plane_minimum_samples: 30
+    plane_minimum_inlier_fraction: 0.05
+    plane_maximum_inlier_fraction: 0.45
+    plane_ransac_iterations: 80
+    enable_clustering: true
+
+    # Section: Efficient organized RGB-D polygon reconstruction.
+    mesh_update_rate_hz: 5.0
+    mesh_pixel_stride: 2
+    mesh_max_edge_length: 0.03
+    mesh_max_depth_jump: 0.02
+    mesh_min_triangle_area: 1.0e-7
+    mesh_max_triangle_area: 5.0e-4
+    mesh_max_triangles: 12000
+    normal_search_radius: 0.02
+
+    # Section: Candidate grasp geometry and operator visualization.
+    grasp_boundary_margin_pixels: 4.0
+    grasp_lower_boundary_rejection_fraction: 0.12
+    grasp_minimum_axis_projection: 0.25
+    grasp_marker_size: 0.03
+    approach_marker_length: 0.12
+    closing_axis_length: 0.10
+    output_grasp_frame: ""
+    tf_timeout_sec: 0.25
+    publish_debug_overlay: true
+    publish_debug_cloud: false
+    target_lost_frame_count: 3

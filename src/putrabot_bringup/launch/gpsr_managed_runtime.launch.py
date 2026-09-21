@@ -5,8 +5,6 @@ from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
-from launch_ros.actions import Node
-from launch_ros.parameter_descriptions import ParameterValue
 from launch_ros.substitutions import FindPackageShare
 
 
@@ -22,7 +20,6 @@ def generate_launch_description() -> LaunchDescription:
     skill_show_gui = LaunchConfiguration("skill_show_gui")
     use_local_voice = LaunchConfiguration("use_local_voice")
     use_voice_command = LaunchConfiguration("use_voice_command")
-    use_llm_parser = LaunchConfiguration("use_llm_parser")
     instruction_point = LaunchConfiguration("instruction_point")
     max_commands = LaunchConfiguration("max_commands")
     enable_error_recovery = LaunchConfiguration("enable_error_recovery")
@@ -46,59 +43,37 @@ def generate_launch_description() -> LaunchDescription:
         }.items(),
     )
 
-    # Section: Instantiate all transient skill nodes in UNCONFIGURED state.
-    lifecycle_skills = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
-            PathJoinSubstitution([
-                FindPackageShare("putrabot_bringup"),
-                "launch",
-                "gpsr_lifecycle_skills.launch.py",
-            ])
-        ),
-        launch_arguments={
-            "rgb_topic": rgb_topic,
-            "depth_topic": depth_topic,
-            "camera_info_topic": camera_info_topic,
-            "show_gui": skill_show_gui,
-        }.items(),
-    )
-
-    # Section: Scheduler remains the persistent ActionQueue producer.
-    scheduler = Node(
-        package="gpsr_task_scheduler",
-        executable="gpsr_scheduler",
-        name="gpsr_task_scheduler",
-        output="screen",
-        parameters=[{
-            "dry_run": False,
-            "command_input_mode": "topic",
-            "command_topic": "/gpsr/command",
-            "instruction_point": instruction_point,
-            "max_commands": max_commands,
-            "navigate_to_instruction_point_on_start": True,
-            "enable_error_recovery": ParameterValue(enable_error_recovery, value_type=bool),
-            "error_recovery_max_attempts": ParameterValue(error_recovery_max_attempts, value_type=int),
-            "error_recovery_retry_delay_sec": ParameterValue(error_recovery_retry_delay_sec, value_type=float),
-            "executor_goal_response_timeout_sec": ParameterValue(executor_goal_response_timeout_sec, value_type=float),
-            "reset_state_service": reset_state_service,
-        }],
-    )
-
-    # Section: Executor, command intake, TTS, and STT remain persistent core.
-    executor = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
-            PathJoinSubstitution([
-                FindPackageShare("robot_yasmin_tasks"),
-                "launch",
-                "gpsr_executor.launch.py",
-            ])
-        ),
-        launch_arguments={
-            "use_local_voice": use_local_voice,
-            "use_voice_command": use_voice_command,
-            "use_llm_parser": use_llm_parser,
-        }.items(),
-    )
+    # Section: Reuse the complete scheduler stack so registered person skills are present.
+    scheduler = IncludeLaunchDescription(  # Keep one owner for scheduler, executor, and skill processes.
+        PythonLaunchDescriptionSource(  # Resolve the authoritative integrated launch.
+            PathJoinSubstitution([  # Use installed package paths on the robot.
+                FindPackageShare("gpsr_task_scheduler"),  # Locate the scheduler package.
+                "launch",  # Select its launch directory.
+                "gpsr_scheduler.launch.py",  # Instantiate all default perception skills.
+            ])  # Finish the integrated launch path.
+        ),  # Finish the launch source.
+        launch_arguments={  # Preserve the managed runtime's public controls.
+            "dry_run": "false",  # Execute accepted commands on the robot.
+            "start_executor": "true",  # Start exactly one queue executor and lifecycle manager.
+            "command_input_mode": "topic",  # Receive commands through the existing topic.
+            "command_topic": "/gpsr/command",  # Preserve the established command endpoint.
+            "instruction_point": instruction_point,  # Retain explicit later-return configuration.
+            "max_commands": max_commands,  # Preserve the mission command limit.
+            "navigate_to_instruction_point_on_start": "false",  # Temporarily start at the current location.
+            "rgb_topic": rgb_topic,  # Consume the persistent external camera.
+            "depth_topic": depth_topic,  # Share aligned depth with perception skills.
+            "camera_info_topic": camera_info_topic,  # Share camera calibration with perception skills.
+            "show_gui": skill_show_gui,  # Preserve optional perception displays.
+            "start_voice_tts": use_local_voice,  # Keep local speech output optional.
+            "start_voice_stt": use_local_voice,  # Keep local speech recognition optional.
+            "start_voice_command": use_voice_command,  # Preserve spoken command intake control.
+            "enable_error_recovery": enable_error_recovery,  # Preserve post-command recovery policy.
+            "error_recovery_max_attempts": error_recovery_max_attempts,  # Bound recovery attempts.
+            "error_recovery_retry_delay_sec": error_recovery_retry_delay_sec,  # Preserve recovery pacing.
+            "executor_goal_response_timeout_sec": executor_goal_response_timeout_sec,  # Bound goal admission.
+            "reset_state_service": reset_state_service,  # Preserve the operator reset endpoint.
+        }.items(),  # Forward launch substitutions without converting them to ROS parameters here.
+    )  # Finish the single integrated GPSR stack.
 
     # Section: Launch order declares ownership but does not perform lifecycle transitions.
     return LaunchDescription([
@@ -185,10 +160,8 @@ def generate_launch_description() -> LaunchDescription:
         DeclareLaunchArgument(
             "use_llm_parser",
             default_value="false",
-            description="Use the optional LLM command parser.",
+            description="Legacy compatibility argument; command parsing is deterministic.",
         ),
         camera,
-        lifecycle_skills,
         scheduler,
-        executor,
     ])

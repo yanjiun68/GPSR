@@ -1,0 +1,7 @@
+# Section: Look up the latest matching GPSR entity observation.
+string entity_type
+string target_key
+---
+bool found
+robot_ai_interfaces/FoundEntityRecord record
+string message

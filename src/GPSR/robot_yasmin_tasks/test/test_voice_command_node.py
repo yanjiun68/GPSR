@@ -156,7 +156,9 @@ class _RunHarness:
     def apply_result(self, result: dict) -> None:
         """Special function: Deliver one structured scheduler command verdict."""
         # Section: Build the same JSON String shape published by the scheduler.
-        message = type("ResultMessage", (), {"data": json.dumps(result)})()
+        routed_result = dict(result)
+        routed_result.setdefault("command_id", getattr(self, "active_command_id", ""))
+        message = type("ResultMessage", (), {"data": json.dumps(routed_result)})()
         GpsrVoiceCommandNode._command_result_cb(self, message)
 
 
@@ -238,7 +240,7 @@ def test_valid_command_waits_for_proven_queue_success_before_speaking() -> None:
     # Section: Publishing a transcript alone must not speak command acceptance.
     assert harness.busy is True
     assert harness.awaiting_result is True
-    assert [message.data for message in harness.command_pub.messages] == [
+    assert [json.loads(message.data)["instruction"] for message in harness.command_pub.messages] == [
         "go to the living room"
     ]
     assert harness.spoken == ["Please give me a GPSR command after the beep."]
@@ -269,6 +271,119 @@ def test_invalid_command_speaks_rejection_instead_of_acceptance() -> None:
     assert harness.spoken[-1] == "The command is rejected."
     assert "I received the command." not in harness.spoken
     assert harness.busy is False
+
+
+class _ClarificationHarness(_RunHarness):
+    """Special function: Exercise correlated voice replies without hardware clients."""
+
+    _run_clarification = GpsrVoiceCommandNode._run_clarification
+
+    def __init__(self, transcript: str) -> None:
+        """Special function: Configure one pending task and one STT service reply."""
+        super().__init__(["Bring me the Coke."])
+        self.reply_transcript = transcript
+        self.clarification_response_pub = _Publisher()
+        self.active_command_id = ""
+        self.active_clarification_attempt = 0
+
+    def _listen_clarification(self) -> str:
+        """Special function: Return a request-scoped transcription result."""
+        return self.reply_transcript
+
+
+def test_voice_clarification_speaks_prompt_and_routes_reply(monkeypatch) -> None:
+    """Special function: Use existing TTS and STT while retaining command ownership."""
+    # Section: Run the short background worker synchronously for deterministic assertions.
+    class _ImmediateThread:
+        """Special function: Model a started ROS-safe worker in the test thread."""
+
+        def __init__(self, target, args, daemon):
+            """Special function: Retain the worker call and its arguments."""
+            self.target = target
+            self.args = args
+
+        def start(self) -> None:
+            """Special function: Execute the voice exchange immediately."""
+            self.target(*self.args)
+
+    monkeypatch.setattr(voice_command_module.threading, "Thread", _ImmediateThread)
+    harness = _ClarificationHarness("The kitchen.")
+    harness.run()
+    command_id = json.loads(harness.command_pub.messages[0].data)["command_id"]
+    harness.apply_result({
+        "command_id": command_id, "accepted": False,
+        "clarification": {
+            "command_id": command_id, "attempt": 1,
+            "prompt": "Where should I go or look?",
+        },
+    })
+    assert harness.spoken[-1] == "Where should I go or look?"
+    assert harness.awaiting_result is True
+    assert json.loads(harness.clarification_response_pub.messages[-1].data) == {
+        "attempt": 1, "command_id": command_id, "transcript": "The kitchen.",
+    }
+    # Section: A different command cannot close the pending voice dialogue.
+    harness.apply_result({"command_id": "topic_stale", "accepted": False})
+    assert harness.awaiting_result is True
+    harness.apply_result({"command_id": command_id, "accepted": True, "success": True})
+    assert harness.awaiting_result is False
+    assert harness.busy is False
+
+
+def test_idle_stt_transcript_is_ignored() -> None:
+    """Special function: Keep old topic transcripts out of a future listening window."""
+    harness = _ClarificationHarness("")
+    harness.latest = ""
+    harness.listening = False
+    harness.event = type("Event", (), {"set": lambda self: setattr(self, "was_set", True)})()
+    GpsrVoiceCommandNode._stt_cb(harness, type("Message", (), {"data": "old speech"})())
+    assert harness.latest == ""
+    assert not hasattr(harness.event, "was_set")
+
+
+def test_production_listen_uses_request_scoped_stt_result() -> None:
+    """Special function: A late topic transcript cannot complete a newer service request."""
+    # Section: Build the smallest fake STT service that returns its own transcript.
+    class _Service:
+        """Special function: Model a completed request-scoped STT call."""
+
+        def wait_for_service(self, timeout_sec: float) -> bool:
+            """Special function: Report an available existing STT service."""
+            return True
+
+        def call_async(self, _request):
+            """Special function: Return the transcript tied to this request."""
+            return type("Future", (), {"result": lambda _self: type("Result", (), {"success": True, "transcript": "The kitchen."})()})()
+
+    class _ScopedHarness(_ListenHarness):
+        """Special function: Exercise the production service branch without ROS."""
+
+        _transcribe_once = GpsrVoiceCommandNode._transcribe_once
+
+        def __init__(self):
+            """Special function: Keep a stale topic value separate from the service reply."""
+            super().__init__(_LogicalClock())
+            self.stt_service = _Service()
+            self.latest = "old speech"
+
+        def _wait(self, _future, _timeout: float) -> bool:
+            """Special function: Complete the fake service response immediately."""
+            return True
+
+    harness = _ScopedHarness()
+    assert harness.listen() == "The kitchen."
+    assert harness.stt_pub.messages == []
+    assert harness.latest == "old speech"
+
+
+def test_scheduler_state_message_still_opens_voice_intake() -> None:
+    """Special function: Preserve the existing scheduler readiness subscription."""
+    harness = _RunHarness([])
+    harness.scheduler_state = "INITIALIZING"
+    GpsrVoiceCommandNode._scheduler_state_cb(
+        harness, type("Message", (), {"data": json.dumps({"state": "WAITING_FOR_COMMAND"})})()
+    )
+    assert harness.scheduler_state == "WAITING_FOR_COMMAND"
 
 
 def test_failed_action_queue_speaks_rejection() -> None:
@@ -312,7 +427,7 @@ def test_worker_rearms_three_timeouts_before_later_command() -> None:
     # Section: Verify immediate logical re-arm and exactly one final command publication.
     timeout_log = "No command received within 12.0 s; re-arming command input."
     assert harness.logger.messages.count(timeout_log) == 3
-    assert [message.data for message in harness.command_pub.messages] == [
+    assert [json.loads(message.data)["instruction"] for message in harness.command_pub.messages] == [
         "find the bottle"
     ]
     assert harness.busy is True

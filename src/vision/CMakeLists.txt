@@ -13,6 +13,7 @@ find_package(rclpy REQUIRED)
 find_package(builtin_interfaces REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(sensor_msgs REQUIRED)
+find_package(visualization_msgs REQUIRED)
 find_package(cv_bridge REQUIRED)
 find_package(image_transport REQUIRED)
 find_package(OpenCV REQUIRED)
@@ -41,6 +42,9 @@ rosidl_generate_interfaces(${PROJECT_NAME}
 # vision interfaces. Distinct names avoid duplicate ament Python targets.
 ament_python_install_package(human_identity)
 
+# Section: Install pure target mesh and grasp-geometry helpers for the perception-only node.
+ament_python_install_package(target_geometry)
+
 ament_export_dependencies(rosidl_default_runtime)
 
 
@@ -57,6 +61,8 @@ install(
   scripts/gpsr_human_identity_lifecycle_node.py
   scripts/count_objects_perception_server.py
   scripts/count_people_perception_server.py
+  scripts/qwen_roi_depth_resolver.py
+  scripts/target_grasp_geometry_node.py
   DESTINATION lib/${PROJECT_NAME}
 )
 
@@ -93,6 +99,12 @@ install(
   DESTINATION share/${PROJECT_NAME}
 )
 
+# Section: Install the dedicated polygon-target RViz configuration.
+install(
+  DIRECTORY rviz
+  DESTINATION share/${PROJECT_NAME}
+)
+
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
   find_package(ament_cmake_pytest REQUIRED)
@@ -126,6 +138,19 @@ if(BUILD_TESTING)
   ament_add_pytest_test(
     test_gpsr_count_objects_skill_launch
     test/test_gpsr_count_objects_skill_launch.py
+  )
+
+  # Section: Verify Qwen ROI scaling, robust depth sampling, projection, and stand-off geometry.
+  ament_add_pytest_test(
+    test_qwen_roi_depth_resolver
+    test/test_qwen_roi_depth_resolver.py
+  )
+
+  # Section: Verify grounding, masked projection, mesh validation, OBB, and grasp visualization.
+  ament_add_pytest_test(
+    test_target_grasp_geometry
+    test/test_target_grasp_geometry.py
+    APPEND_ENV PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}
   )
 endif()
 

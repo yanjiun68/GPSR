@@ -1,0 +1,33 @@
+# Section: Resolve one Qwen-grounded image region against an aligned depth observation.
+string target_id
+float32 roi_x_min
+float32 roi_y_min
+float32 roi_x_max
+float32 roi_y_max
+uint32 coordinate_width
+uint32 coordinate_height
+builtin_interfaces/Time image_stamp
+sensor_msgs/Image segmentation_mask
+bool require_mask
+float32 stand_off_distance
+---
+# Section: Stable result codes for perception and geometry failures.
+uint8 SUCCESS=0
+uint8 INVALID_ROI=1
+uint8 DEPTH_UNAVAILABLE=2
+uint8 CALIBRATION_UNAVAILABLE=3
+uint8 MASK_UNAVAILABLE=4
+uint8 DEPTH_QUALITY_FAILED=5
+uint8 TF_FAILED=6
+uint8 CANCELED=7
+bool success
+uint8 result_code
+geometry_msgs/PoseStamped target_pose
+geometry_msgs/PoseStamped approach_pose
+float32 depth_m
+float32 valid_depth_ratio
+string message
+---
+# Section: Bounded action feedback for observation selection and TF resolution.
+string phase
+float32 valid_depth_ratio

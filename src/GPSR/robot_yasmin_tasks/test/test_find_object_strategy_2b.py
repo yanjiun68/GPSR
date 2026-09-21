@@ -122,6 +122,21 @@ def test_unexpected_location_remains_in_exhaustive_fallback() -> None:
     assert any(item.room == "entrance" and item.tier >= 3 for item in plan)
 
 
+def test_remembered_viewpoint_is_verified_before_normal_fallback() -> None:
+    """Special function: A history match changes order without reducing search coverage."""
+    baseline = SearchPlanBuilder.build(search_config(), "bottle", "", "GLOBAL", "")
+    prioritized = SearchPlanBuilder.build(
+        search_config(),
+        "bottle",
+        "",
+        "GLOBAL",
+        "",
+        "entrance_center",
+    )
+    assert prioritized[0].name == "entrance_center"
+    assert {item.name for item in prioritized} == {item.name for item in baseline}
+
+
 def test_candidate_during_navigation_cancels_current_goal() -> None:
     """Special function: Moving perception interrupts rather than confirms navigation."""
     server = object.__new__(FindObjectSkillServer)

@@ -1,0 +1,27 @@
+# Section: Safe default configuration for speech and manual Qwen text planning.
+qwen_text_planner:
+  ros__parameters:
+    # Section: Local model assets used by the original test_text.py program.
+    model_path: /home/yanjiun68/ai/models/Qwen3-VL-4B-Instruct
+    system_prompt_path: /home/yanjiun68/ai/qwen3v1/system_prompt_actionqueue_test.txt
+    max_new_tokens: 256
+    load_in_4bit: true
+    local_files_only: true
+
+    # Section: Accept one-shot STT and debug text while avoiding duplicate VAD routing by default.
+    enable_stt_input: true
+    stt_input_topic: /voice/stt/transcript
+    enable_vad_input: false
+    vad_input_topic: /voice/stt/utterance_transcript
+    enable_debug_input: true
+    debug_input_topic: /ai/model/qwen_vlm/debug/input
+    max_instruction_chars: 4000
+    max_pending_requests: 1
+    stt_dedupe_window_sec: 2.0
+
+    # Section: All outputs are diagnostic or proposed-plan interfaces and never command robot motion.
+    plan_topic: /ai/model/qwen_vlm/plan
+    raw_response_topic: /ai/model/qwen_vlm/raw_response
+    status_topic: /ai/model/qwen_vlm/status
+    result_topic: /ai/model/qwen_vlm/result
+    debug_result_topic: /ai/model/qwen_vlm/debug/result

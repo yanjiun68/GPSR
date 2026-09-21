@@ -15,9 +15,19 @@ from gpsr_task_scheduler.models import (
     TaskRequest,
     ValidationIssue,
 )
-from gpsr_task_scheduler.parser import parse_command
+from gpsr_task_scheduler.parser import (
+    _output_template,
+    _requested_person_fields,
+    parse_command,
+    strip_object_mentions,
+)
 from gpsr_task_scheduler.planner import plan_task
 from robot_yasmin_tasks.gpsr.action_types import CANONICAL_PRIMITIVES
+from robot_yasmin_tasks.gpsr.greetings import DEFAULT_GREETING  # Share neutral wording across single and multi-clause commands.
+
+
+# Section: A bare request to answer a question needs a spoken prompt before STT starts.
+ANSWER_QUESTION_PROMPT = "What is your question?"
 
 
 # Section: Contract for an optional upstream linguistic normalizer; it never names executors.
@@ -103,6 +113,8 @@ def compile_command(
             and not legacy_find_pronoun
         )
         or re.search(r"\btake\b", canonical_text, re.IGNORECASE)
+        # Section: The generated question prompt is not a named-person command.
+        or re.search(r"\banswer question\b", normalized, re.IGNORECASE)
     )
     if not requires_contextual_path:
         return _compile_legacy_single(command_id, canonical_text, config, context)
@@ -155,7 +167,12 @@ def canonicalize_surface_text(text: str, config: SchedulerConfig) -> str:
     # Section: Sorting by token count and length guarantees multi-word precedence.
     aliases = sorted(
         (
-            (alias, replacements[intent])
+            (
+                alias,
+                f"ask {ANSWER_QUESTION_PROMPT}" if alias == "answer question"
+                else "greet" if alias == "greet"
+                else replacements[intent],
+            )  # Keep the question-answer prompt and neutral greeting meanings explicit.
             for intent, values in config.verb_aliases.items()
             for alias in values
             if intent in replacements
@@ -217,7 +234,7 @@ def segment_clauses(text: str, config: SchedulerConfig) -> list[str]:
         return [first.strip(" ,."), later.strip(" ,.")]
 
     action_starts = (
-        "go to|find|pick up|place|deliver|follow|guide|count|say|ask|take"
+        "go to|find|meet|pick up|place|deliver|follow|guide|count|say|greet|ask|take"  # Keep person search and greeting verbs as their own ordered actions.
     )
     splitter = re.compile(
         rf"\s*(?:,\s*|\b(?:and then|then|after that|finally)\b\s*|"
@@ -393,12 +410,22 @@ def _semantic_from_clause(
             arguments["person_selector"] = {"type": "any_person", "value": ""}
         else:
             return None, [ValidationIssue("UNKNOWN_PERSON", f"Unknown person target: {clause}")]
+    # Section: Preserve requested world fields so the planner inserts extraction and reporting.
+    if intent == "FIND_PERSON":
+        requested_fields = _requested_person_fields(clause, "find_person")
+        if requested_fields:
+            arguments["requested_person_fields"] = requested_fields
+            arguments["output_template"] = _output_template(
+                clause,
+                "find_person",
+                requested_fields,
+            )
     if intent == "COUNT_OBJECTS" and not (
         arguments.get("object_name") or arguments.get("category")
     ):
         return None, [ValidationIssue("UNKNOWN_OBJECT", f"Unknown count target: {clause}")]
     if intent == "SAY":
-        arguments["text"] = re.sub(r"^say\s+", "", clause).strip()
+        arguments["text"] = DEFAULT_GREETING if re.search(r"\bgreet\b", clause) else re.sub(r"^say\s+", "", clause).strip()  # Greeting commands supply their own text.
     if intent == "ASK_AND_LISTEN":
         arguments["question"] = re.sub(r"^ask\s+", "", clause).strip()
 
@@ -413,6 +440,14 @@ def _semantic_from_clause(
 
 def _detect_clause_intent(clause: str, entities: dict[str, list[str]]) -> str:
     """Special function: Resolve canonical and ambiguous verbs from entity context."""
+    # Section: A dialogue request for perceived person data is a search mission, not literal speech.
+    if _requested_person_fields(clause, "find_person") and re.search(
+        r"\b(?:person|guest|someone|man|woman)\b", clause
+    ):
+        return "FIND_PERSON"
+    # Section: MEET uses the same identity or generic-person search routes as FIND_PERSON.
+    if re.search(r"^meet\b", clause):
+        return "FIND_PERSON"
     # Section: TAKE changes meaning based on target type and explicit destination.
     if re.search(r"\btake\b", clause):
         has_destination = bool(re.search(r"\bto\b", clause))
@@ -433,7 +468,7 @@ def _detect_clause_intent(clause: str, entities: dict[str, list[str]]) -> str:
         ("FOLLOW_PERSON", r"\bfollow\b"),
         ("GUIDE_PERSON", r"\bguide\b"),
         ("ASK_AND_LISTEN", r"\bask\b"),
-        ("SAY", r"\bsay\b"),
+        ("SAY", r"\b(?:say|greet)\b"),  # GREET remains an executable SAY primitive with neutral wording.
     ]
     for intent, pattern in ordered:
         if re.search(pattern, clause):
@@ -573,6 +608,8 @@ def _request_from_semantic(
         target=target,
         filters=filters,
         person_selector=selector,
+        requested_person_fields=list(arguments.get("requested_person_fields", [])),
+        output_template=arguments.get("output_template"),
         return_after_completion=False,
     )
 
@@ -752,13 +789,15 @@ def _entity_order(text: str, config: SchedulerConfig) -> list[str]:
 def _extract_attributes(text: str, config: SchedulerConfig) -> dict[str, Any]:
     """Special function: Preserve colors, quantities, and size comparisons."""
     attributes: dict[str, Any] = {}
+    # Section: Do not interpret color words inside exact object names as filters.
+    feature_text = strip_object_mentions(text, config)
     colors = sorted({
         value
         for values in config.supported_object_features.values()
         for value in values
     })
     for color in colors:
-        if re.search(rf"\b{re.escape(color.replace('_', ' '))}\b", text):
+        if re.search(rf"\b{re.escape(color.replace('_', ' '))}\b", feature_text):
             attributes["color"] = color
             break
     for relation in ("largest", "smallest", "biggest", "smallest"):

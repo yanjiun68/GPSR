@@ -2,8 +2,13 @@
 
 import os
 import subprocess
+import threading
+import time
+from collections import deque
+from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 
+import numpy as np
 import rclpy
 from diagnostic_msgs.msg import DiagnosticStatus
 from diagnostic_updater import DiagnosticStatusWrapper, Updater
@@ -13,6 +18,13 @@ from rclpy.node import Node
 from std_msgs.msg import Float32, String
 from voice_interfaces.action import TranscribeSpeech
 from voice_interfaces.srv import TranscribeAudio
+
+try:
+    # Section: Import WebRTC VAD only for the optional continuous utterance listener.
+    import webrtcvad
+except ImportError:
+    # Section: Keep the existing on-demand STT APIs usable when the optional dependency is absent.
+    webrtcvad = None
 
 
 class STTNode(Node):
@@ -43,6 +55,18 @@ class STTNode(Node):
         self.declare_parameter("wav_path", "/tmp/voice_stt.wav")
         self.declare_parameter("whisper_model", "base")
         self.declare_parameter("whisper_language", "en")
+        # Section: Keep continuous VAD transcription opt-in so existing launch behavior is unchanged.
+        self.declare_parameter("enable_vad_utterance", False)
+        self.declare_parameter("vad_partial_topic", "/voice/stt/partial_transcript")
+        self.declare_parameter("vad_final_topic", "/voice/stt/utterance_transcript")
+        self.declare_parameter("vad_whisper_model", "small.en")
+        self.declare_parameter("vad_compute_type", "float16")
+        self.declare_parameter("vad_device", "cuda")
+        self.declare_parameter("vad_frame_ms", 100)
+        self.declare_parameter("vad_partial_update_ms", 900)
+        self.declare_parameter("vad_rolling_context_sec", 5.0)
+        self.declare_parameter("vad_end_silence_ms", 600)
+        self.declare_parameter("vad_mode", 2)
 
         self.start_topic = self.get_parameter("start_topic").get_parameter_value().string_value
         self.transcript_topic = (
@@ -62,13 +86,37 @@ class STTNode(Node):
         self.whisper_language = (
             self.get_parameter("whisper_language").get_parameter_value().string_value
         )
+        self.enable_vad_utterance = bool(self.get_parameter("enable_vad_utterance").value)
+        self.vad_partial_topic = self.get_parameter("vad_partial_topic").value
+        self.vad_final_topic = self.get_parameter("vad_final_topic").value
+        self.vad_whisper_model_name = self.get_parameter("vad_whisper_model").value
+        self.vad_compute_type = self.get_parameter("vad_compute_type").value
+        self.vad_device = self.get_parameter("vad_device").value
+        self.vad_frame_ms = int(self.get_parameter("vad_frame_ms").value)
+        self.vad_partial_update_ms = int(self.get_parameter("vad_partial_update_ms").value)
+        self.vad_rolling_context_sec = float(self.get_parameter("vad_rolling_context_sec").value)
+        self.vad_end_silence_ms = int(self.get_parameter("vad_end_silence_ms").value)
+        self.vad_mode = int(self.get_parameter("vad_mode").value)
 
         self._whisper_model = None
         self._whisper_model_name = None
+        # Section: Use an isolated model cache because the VAD feature has its own GPU/precision settings.
+        self._vad_whisper_model = None
+        self._vad_whisper_model_name = None
+        self._vad_whisper_model_config = None
+        self._vad_stop_event = threading.Event()
+        self._vad_thread = None
+        self._vad_process = None
+        self._vad_utterance_active = False
+        self._vad_utterance_id = 0
+        self._vad_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="voice_vad_stt")
 
         # Comm
         self.create_subscription(Float32, self.start_topic, self._start_cb, 10)
         self.pub_transcript = self.create_publisher(String, self.transcript_topic, 10)
+        # Section: Keep VAD partial and final results separate from the legacy one-shot transcript topic.
+        self.pub_vad_partial = self.create_publisher(String, self.vad_partial_topic, 10)
+        self.pub_vad_final = self.create_publisher(String, self.vad_final_topic, 10)
 
         # Section: Expose request/response and long-running action APIs for transcription clients.
         self._transcribe_service = self.create_service(
@@ -91,9 +139,14 @@ class STTNode(Node):
         self._diagnostics.add("Speech-to-text", self._produce_diagnostics)
         self._diagnostics.force_update()
 
+        # Section: Start microphone streaming only when explicitly requested by the launch configuration.
+        if self.enable_vad_utterance:
+            self._start_vad_utterance_listener()
+
         self.get_logger().info(
             f"[voice_stt] Ready. Topic: {self.start_topic}; service: {self.service_name}; "
-            f"action: {self.action_name}; transcript: {self.transcript_topic}"
+            f"action: {self.action_name}; transcript: {self.transcript_topic}; "
+            f"VAD utterance listener: {'enabled' if self.enable_vad_utterance else 'disabled'}"
         )
 
     # --- callbacks ---
@@ -191,6 +244,15 @@ class STTNode(Node):
         wav_path: str,
     ) -> tuple[bool, str, str, str]:
         """Execute one shared record/transcribe operation for every ROS API."""
+        # Section: Prevent two arecord processes from contending for the same microphone device.
+        if self.enable_vad_utterance:
+            return (
+                False,
+                "",
+                "One-shot STT is unavailable while enable_vad_utterance is true.",
+                wav_path,
+            )
+
         # Section: Publish recording state through diagnostics before blocking on ALSA.
         self._request_count += 1
         self._recording = True
@@ -307,6 +369,213 @@ class STTNode(Node):
         except Exception as e:
             self.get_logger().warn(f"[voice_stt] Transcription failed: {e}")
             return ""
+
+    # --- continuous VAD utterance transcription ---
+    def _start_vad_utterance_listener(self) -> None:
+        """Validate and start the optional continuous VAD microphone listener."""
+        # Section: WebRTC VAD accepts 10/20/30 ms input, so each requested 100 ms decision is split below.
+        if webrtcvad is None:
+            self.get_logger().error(
+                "[voice_stt] VAD utterance listener requires the webrtcvad Python package."
+            )
+            self.enable_vad_utterance = False
+            return
+        if self.vad_frame_ms != 100:
+            self.get_logger().error(
+                "[voice_stt] vad_frame_ms must be 100 to preserve the configured utterance timing."
+            )
+            self.enable_vad_utterance = False
+            return
+        if not 0 <= self.vad_mode <= 3:
+            self.get_logger().error("[voice_stt] vad_mode must be in the range 0 through 3.")
+            self.enable_vad_utterance = False
+            return
+
+        # Section: Run blocking ALSA reads outside the ROS executor so subscriptions and actions remain responsive.
+        self._vad_thread = threading.Thread(
+            target=self._vad_capture_loop,
+            name="voice_vad_capture",
+            daemon=True,
+        )
+        self._vad_thread.start()
+
+    def _vad_capture_loop(self) -> None:
+        """Read 16 kHz PCM frames, group speech into utterances, and dispatch transcripts."""
+        # Section: Keep VAD state local to its single capture thread to avoid cross-thread audio races.
+        vad = webrtcvad.Vad(self.vad_mode)
+        frame_bytes = 16000 * self.vad_frame_ms // 1000 * 2
+        context_frames = max(1, round(self.vad_rolling_context_sec * 1000 / self.vad_frame_ms))
+        state = {
+            "active_pcm": bytearray(),
+            "partial_window": deque(maxlen=context_frames),
+            "pre_roll": deque(maxlen=3),
+            "silence_ms": 0,
+            "last_partial_at": 0.0,
+            "utterance_id": 0,
+        }
+        command = [
+            self.arecord_bin,
+            "-q",
+            "-D",
+            self.mic_device,
+            "-t",
+            "raw",
+            "-f",
+            "S16_LE",
+            "-c",
+            "1",
+            "-r",
+            "16000",
+        ]
+
+        try:
+            # Section: Stream raw PCM so utterance boundaries are decided before Whisper runs.
+            self._vad_process = subprocess.Popen(
+                command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+            )
+            pending = b""
+            while not self._vad_stop_event.is_set():
+                chunk = self._vad_process.stdout.read(frame_bytes)
+                if not chunk:
+                    break
+                pending += chunk
+                while len(pending) >= frame_bytes:
+                    frame, pending = pending[:frame_bytes], pending[frame_bytes:]
+                    self._consume_vad_frame(frame, vad, state)
+        except FileNotFoundError:
+            self.get_logger().error(f"[voice_stt] Missing arecord executable: {self.arecord_bin}")
+        except Exception as e:
+            self.get_logger().error(f"[voice_stt] VAD audio capture failed: {e}")
+        finally:
+            # Section: Mark the listener idle before process teardown so queued partials cannot publish stale text.
+            self._vad_utterance_active = False
+            if self._vad_process is not None and self._vad_process.poll() is None:
+                self._vad_process.terminate()
+            self._vad_process = None
+
+    def _consume_vad_frame(self, frame: bytes, vad, state: dict) -> None:
+        """Use one 100 ms VAD decision to update the active utterance state."""
+        # Section: Split the 100 ms policy frame into ten WebRTC-compatible 10 ms subframes.
+        subframe_bytes = 16000 * 10 // 1000 * 2
+        speech = any(
+            vad.is_speech(frame[offset:offset + subframe_bytes], 16000)
+            for offset in range(0, len(frame), subframe_bytes)
+        )
+        now = time.monotonic()
+
+        # Section: Retain a short leading margin to avoid cutting the first phoneme of a new utterance.
+        if not self._vad_utterance_active:
+            if not speech:
+                state["pre_roll"].append(frame)
+                return
+            state["utterance_id"] += 1
+            self._vad_utterance_id = state["utterance_id"]
+            self._vad_utterance_active = True
+            state["active_pcm"] = bytearray(b"".join(state["pre_roll"]))
+            state["active_pcm"].extend(frame)
+            state["partial_window"].clear()
+            state["partial_window"].extend((*state["pre_roll"], frame))
+            state["pre_roll"].clear()
+            state["silence_ms"] = 0
+            state["last_partial_at"] = now
+            self.get_logger().info(
+                f"[voice_stt] VAD detected utterance {state['utterance_id']}."
+            )
+            return
+
+        # Section: Accumulate every active frame so the final result contains the complete utterance.
+        state["active_pcm"].extend(frame)
+        state["partial_window"].append(frame)
+        state["silence_ms"] = 0 if speech else state["silence_ms"] + self.vad_frame_ms
+
+        # Section: Transcribe only the rolling 5-second context at roughly 900 ms intervals for low-latency previews.
+        elapsed_ms = (now - state["last_partial_at"]) * 1000.0
+        if speech and elapsed_ms >= self.vad_partial_update_ms:
+            state["last_partial_at"] = now
+            self._vad_executor.submit(
+                self._publish_vad_partial,
+                state["utterance_id"],
+                b"".join(state["partial_window"]),
+            )
+
+        # Section: Finish only after 600 ms of silence and submit the complete utterance for final transcription.
+        if state["silence_ms"] >= self.vad_end_silence_ms:
+            utterance_id = state["utterance_id"]
+            complete_pcm = bytes(state["active_pcm"])
+            self._vad_utterance_active = False
+            state["pre_roll"].clear()
+            state["silence_ms"] = 0
+            self._vad_executor.submit(self._publish_vad_final, utterance_id, complete_pcm)
+
+    def _load_vad_whisper(self):
+        """Load the exact optional VAD listener model and floating-point compute configuration."""
+        # Section: Cache independently so normal base-model requests cannot replace small.en float16 inference.
+        config = (self.vad_whisper_model_name, self.vad_device, self.vad_compute_type)
+        if self._vad_whisper_model is None or self._vad_whisper_model_config != config:
+            self.get_logger().info(
+                "[voice_stt] Loading VAD faster-whisper model: "
+                f"{self.vad_whisper_model_name} ({self.vad_device}, {self.vad_compute_type})"
+            )
+            self._vad_whisper_model = WhisperModel(
+                self.vad_whisper_model_name,
+                device=self.vad_device,
+                compute_type=self.vad_compute_type,
+            )
+            self._vad_whisper_model_name = self.vad_whisper_model_name
+            self._vad_whisper_model_config = config
+        return self._vad_whisper_model
+
+    def _transcribe_vad_pcm(self, pcm_data: bytes) -> str:
+        """Convert raw utterance PCM into text using the VAD listener's small.en float16 model."""
+        # Section: Convert exactly the 16-bit mono stream supplied by arecord into faster-whisper float audio.
+        audio = np.frombuffer(pcm_data, dtype=np.int16).astype(np.float32) / 32768.0
+        if not audio.size:
+            return ""
+        try:
+            model = self._load_vad_whisper()
+            segments, _ = model.transcribe(
+                audio,
+                language="en",
+                vad_filter=False,
+                beam_size=5,
+                condition_on_previous_text=False,
+            )
+            return " ".join(segment.text.strip() for segment in segments).strip()
+        except Exception as e:
+            self.get_logger().error(f"[voice_stt] VAD transcription failed: {e}")
+            return ""
+
+    def _publish_vad_partial(self, utterance_id: int, pcm_data: bytes) -> None:
+        """Publish a rolling-context preview only while its utterance is still active."""
+        # Section: Drop delayed executor work after a newer utterance or final boundary has superseded it.
+        if not self._vad_utterance_active or utterance_id != self._vad_utterance_id:
+            return
+        transcript = self._transcribe_vad_pcm(pcm_data)
+        if transcript and self._vad_utterance_active and utterance_id == self._vad_utterance_id:
+            self.pub_vad_partial.publish(String(data=transcript))
+
+    def _publish_vad_final(self, utterance_id: int, pcm_data: bytes) -> None:
+        """Publish one completed utterance after its configured end-of-speech silence."""
+        # Section: Final results are never truncated to the preview context window.
+        transcript = self._transcribe_vad_pcm(pcm_data)
+        if transcript:
+            self.pub_vad_final.publish(String(data=transcript))
+            self.get_logger().info(
+                f"[voice_stt] VAD utterance {utterance_id} final: \"{transcript}\""
+            )
+
+    def destroy_node(self):
+        """Stop optional background audio resources before ROS destroys this node."""
+        # Section: Terminate the blocking arecord reader so shutdown does not leave the ALSA device occupied.
+        self._vad_stop_event.set()
+        if self._vad_process is not None and self._vad_process.poll() is None:
+            self._vad_process.terminate()
+        if self._vad_thread is not None:
+            self._vad_thread.join(timeout=2.0)
+        self._vad_executor.shutdown(wait=False, cancel_futures=True)
+        return super().destroy_node()
 
 
 def main(args=None):

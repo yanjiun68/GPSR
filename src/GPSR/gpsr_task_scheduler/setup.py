@@ -16,7 +16,7 @@ setup(
     packages=find_packages(exclude=["test"]),
     data_files=[
         ("share/ament_index/resource_index/packages", [f"resource/{package_name}"]),
-        (f"share/{package_name}", ["package.xml", "README.md"]),
+        (f"share/{package_name}", ["package.xml", "README.md", "COMMAND_DICTIONARY.md"]),  # Install the semantic and completion-feedback dictionary with the scheduler.
         (f"share/{package_name}/config", glob("config/*.yaml")),
         (f"share/{package_name}/launch", glob("launch/*.launch.py")),
     ],
@@ -32,6 +32,7 @@ setup(
             "gpsr_scheduler = gpsr_task_scheduler.scheduler_node:main",
             "gpsr_parse_dry_run = gpsr_task_scheduler.parse_dry_run:main",
             "gpsr_validate_sequences = gpsr_task_scheduler.sequence_validator:main",
+            "qwen_visual_navigation_bridge = gpsr_task_scheduler.visual_navigation_bridge:main",
         ],
     },
 )

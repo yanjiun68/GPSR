@@ -164,7 +164,7 @@ def test_follow_person_uses_real_lifecycle_adapter() -> None:
     assert follow.implementation == "real"
     assert follow.production_enabled is True
     assert follow.lifecycle_nodes == ("/follow_person_skill_server",)
-    assert follow.execution_interface == "/person_follow/control"
+    assert follow.execution_interface == "/person_follow/master"
 
 
 class FakeLogger:
@@ -217,7 +217,7 @@ def make_manager(
             "FOLLOW_PERSON",
             "navigation_motion",
             ("/follow_person",),
-            "/person_follow/control",
+            "/person_follow/master",
         ),
         "SAY": SkillLifecycleSpec("SAY", "", (), "/voice/tts/say"),
     }

@@ -179,7 +179,9 @@ The UI never parses natural-language commands or reconstructs queue state from l
 /putrabot_bringup/managed_process_status_json
 ```
 
-The executor status publisher is event-driven and transient-local. It reports queue start, action selection, retry, action completion, and queue completion. The existing `ExecuteActionQueue` feedback fields receive the same cursor/action/status values.
+The scheduler plan and executor status publishers are event-driven and transient-local. They publish without checking for UI subscribers and retain their latest snapshots, so the scheduler and executor run normally when `monitor_core` and the TUI are stopped. A monitor started after command acceptance receives the latest plan and queue status. The executor reports queue start, action selection, retry, action completion, and queue completion. The existing `ExecuteActionQueue` feedback fields receive the same cursor/action/status values.
+
+The Overview page shows the accepted ActionQueue as an ordered live task table, and the GPSR page shows the complete sequence with domain and retry details. Operator-facing task statuses are `IN QUEUE`, `RUNNING`, `RETRYING`, `COMPLETED`, `ABORTED`, and `SKIPPED`. When a queue aborts, the failed task and every unstarted remainder are marked `ABORTED` because none of them can continue.
 
 ```text
 Scheduler plan/state ─┐
@@ -187,6 +189,8 @@ Scheduler plan/state ─┐
 Executor queue status ┤
 Voice transcript/diag ┘
 ```
+
+The arrows are one-way ROS topic subscriptions. Neither the scheduler nor the executor imports, launches, calls, or waits for `gpsr_sys_ui`.
 
 STT and TTS are ordinary ROS nodes, not lifecycle nodes. Their verified graph names are `/voice_stt` and `/voice_tts`. Voice diagnostics distinguish `LISTENING`, `PROCESSING` (when an owner reports it), `SPEAKING`, and `IDLE`. Transcript age is display metadata only and never creates a stale-health failure.
 

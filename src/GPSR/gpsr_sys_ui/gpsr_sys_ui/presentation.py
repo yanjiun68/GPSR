@@ -132,7 +132,7 @@ def queue_rows(queue: Any) -> List[Dict[str, Any]]:
             "domain": raw.get("domain", "OTHER"),
             "skill": raw.get("skill", raw.get("action_type", "-")),
             "target": raw.get("target", "-"),
-            "state": raw.get("state", "UNKNOWN"),
+            "state": raw.get("task_status", raw.get("state", "IN QUEUE")),
             "attempt": f"{attempt}/{retry_limit}",
             "current": bool(raw.get("current", False)),
         })
