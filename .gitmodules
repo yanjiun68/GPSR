@@ -5,3 +5,6 @@
 	path = src/ThirdParty/rplidar_ros
 	url = https://github.com/Juancams/rplidar_ros.git
 	branch = ros2
+[submodule "src/arm-lifting-piper"]
+	path = src/arm-lifting-piper
+	url = https://github.com/Putrabot-UPM/arm-lifting-piper.git
