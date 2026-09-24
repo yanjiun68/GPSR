@@ -95,6 +95,102 @@ Main monitoring options:
 - `wave_window_seconds:=1.5`, `wave_min_horizontal_range:=0.12`, `wave_min_direction_changes:=2`: configure temporal horizontal oscillation.
 - `wave_max_vertical_drift:=0.15`, `wave_history_timeout_seconds:=2.0`: reject excessive vertical motion and expire missing-person histories.
 
+## GPSR Qwen World Sensing
+
+The GPSR object detector uses the model-loading and camera-inference pattern from
+`/home/yanjiun68/ai/qwen3v1/test_camera.py` through the lifecycle-managed
+`gpsr_object_detection_node`. The node is inactive until the GPSR lifecycle
+manager starts an object skill such as `FIND_OBJECT` or `COUNT_OBJECTS`.
+
+```text
+GPSR planner
+    |
+    v
+FIND_OBJECT / COUNT_OBJECTS lifecycle activation
+    |
+    v
+UnifoLM-ER-1 world sensing
+    |
+    v
+/perception/raw_object_detections
+    |
+    v
+existing GPSR perception and YASMIN skill servers
+```
+
+Qwen publishes structured semantic object names and image ROIs through the
+existing `putrabot_interfaces/msg/ObjectDetections` contract. The human detector
+remains on YOLO and does not share the Qwen object backend.
+
+Build the integrated backend with:
+
+```bash
+colcon build --packages-select putrabot_interfaces vision gpsr_task_scheduler
+source install/setup.bash
+```
+
+The GPSR scheduler launches Qwen object sensing by default. To inspect the
+resulting detections during a GPSR skill:
+
+```bash
+ros2 topic echo /perception/raw_object_detections
+ros2 topic echo /perception/object_detector_ready
+```
+
+The Qwen prompt and output contract are installed from
+`src/vision/config/qwen_world_prompt.txt`. YOLO remains available by setting the
+object detector's `inference_backend` parameter to `yolo` for deployments that
+explicitly require that fallback.
+
+### Unified Object Query for FIND_OBJECT and COUNT_OBJECTS
+
+Object characteristics and relations do not create additional GPSR skills. The
+planner sends one typed filter list with either `FIND_OBJECT` or
+`COUNT_OBJECTS`. `FIND_OBJECT` transports it as `query_json`; `COUNT_OBJECTS`
+transports it inside `filter_json`. Each skill publishes the same validated
+query on `/perception/object_detector_query`, and the Qwen detector uses it only
+to prioritize visible candidates.
+
+```text
+FIND_OBJECT(query_json) -----------+
+                                   |
+COUNT_OBJECTS(filter_json) --------+
+        |
+        v
+/perception/object_detector_query
+        |
+        v
+Qwen candidates + ROI attributes
+        |
+        +-------------------------------+
+        |                               |
+        v                               v
+local FIND candidate filter/ranker   local COUNT candidate filter/count
+        |                               |
+        v                               v
+FindObject.selection_json            CountObjects.result_json
+```
+
+Supported query filters are `object_color`, `shape`, `orientation`,
+`size_relation` (`smallest` or `largest`), and image-space
+`spatial_relation` (`left_of`, `right_of`, `above`, `below`, `near`, or
+`far_from`) with a configured `reference_object`. The local server verifies
+relations from ROIs and calculates a 3-by-3 `image_position`; Qwen does not
+provide metric distance or final action decisions.
+
+For a count command such as “count the red cups” or “count bottles to the left
+of the cup,” the count service dispatches the typed Qwen query and production
+launches wait up to `qwen_query_wait_timeout_sec` for the next detector frame.
+It counts only temporally confirmed candidates that pass the local label,
+attribute, and image-relation checks. `near` and `far_from` use the configurable
+`near_relation_distance_ratio` of the image diagonal. The count result includes
+the dispatched query, whether a fresh frame arrived, matched ROI attributes, and
+their image-relative positions for traceability.
+
+`smallest` and `largest` currently compare image bounding-box area. Use the
+RGB-D target-geometry pipeline when a physical-size or metric-distance decision
+is required.
+
 ## Semantic Target Mesh and Grasp Geometry
 
 The target geometry node is perception-only. It does not create Nav2, MoveIt, IK,

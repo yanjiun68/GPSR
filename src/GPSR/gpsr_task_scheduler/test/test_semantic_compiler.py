@@ -221,6 +221,56 @@ def test_size_relation_is_preserved(relation: str) -> None:
     } >= {("size_relation", relation)}
 
 
+def test_spatial_relation_is_a_find_object_constraint_not_a_new_skill() -> None:
+    """Special function: Keep object-reference wording inside the one FIND_OBJECT query contract."""
+    result = schedule_command(
+        "relation",
+        "Find the bottle to the left of the cup.",
+        default_config(),
+    )
+
+    assert result.valid
+    assert [step.skill_name for step in result.steps] == ["FIND_OBJECT"]
+    assert {
+        (item["feature"], item["value"])
+        for item in result.steps[0].arguments["filters"]
+    } >= {("spatial_relation", "left_of"), ("reference_object", "cup")}
+    assert result.steps[0].arguments["query"]["requested_fields"] == ["image_position"]
+
+
+def test_count_object_attributes_remain_a_qwen_perception_filter() -> None:
+    """Special function: Route a randomized descriptive count through COUNT_OBJECTS rather than label-only matching."""
+    # Section: COUNT_OBJECTS keeps the original aggregate primitive while sharing Qwen ROI semantics with FIND_OBJECT.
+    result = schedule_command(
+        "count_red_cups",
+        "Count the red cups in the kitchen.",
+        default_config(),
+    )
+
+    assert result.valid, result.issues
+    assert [step.skill_name for step in result.steps] == ["NAVIGATE", "COUNT_OBJECTS"]
+    assert result.steps[-1].arguments["object_name"] == "cup"
+    assert result.steps[-1].arguments["filters"] == [
+        {"feature": "object_color", "operator": "equals", "value": "red"},
+    ]
+
+
+def test_count_shape_and_orientation_remain_qwen_roi_constraints() -> None:
+    """Special function: Preserve non-color object descriptions for randomized COUNT_OBJECTS commands."""
+    # Section: Qwen receives schema-normalized cylinder/upright evidence while local count logic verifies it.
+    result = schedule_command(
+        "count_cylindrical_cups",
+        "Count the upright cylindrical cups in the kitchen.",
+        default_config(),
+    )
+
+    assert result.valid, result.issues
+    assert {
+        (item["feature"], item["value"])
+        for item in result.steps[-1].arguments["filters"]
+    } >= {("shape", "cylinder"), ("orientation", "upright")}
+
+
 def test_find_disambiguates_person_and_object_registries() -> None:
     """Special function: Resolve FIND from the authoritative entity type."""
     assert _semantic_signature("Find John.")[0][0] == "FIND_PERSON"

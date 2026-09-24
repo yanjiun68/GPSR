@@ -156,13 +156,14 @@ def _validated_capability_result(
 def _acquire_steps(request: TaskRequest, config: SchedulerConfig) -> list[SkillStep]:
     """Special function: Expand object acquisition into find then pick primitives."""
     target = str(request.target.get("object_name", ""))
-    return _object_acquisition_steps(target, request.task_location, config)
+    return _object_acquisition_steps(target, request.task_location, config, request.filters)
 
 
 def _object_acquisition_steps(
     target: str,
     search_location: str | None,
     config: SchedulerConfig,
+    filters: list[dict[str, Any]] | None = None,
 ) -> list[SkillStep]:
     """Special function: Build dependency-linked find and pick steps for one target item."""
     # Section: A source location constrains the search; otherwise FIND_OBJECT performs global search.
@@ -172,6 +173,9 @@ def _object_acquisition_steps(
         "target_location": search_location,
         "search_scope": "STRICT_LOCATION" if search_location else "GLOBAL",
         "approach_target": True,
+        # Section: One query carries every characteristic and relation into the single find skill.
+        "filters": list(filters or []),
+        "query": _find_object_query(filters),
     }
     find_step = _step("find_object", "FIND_OBJECT", find_arguments, [], config, "found_object")
     pick_step = _step(
@@ -189,7 +193,7 @@ def _place_steps(request: TaskRequest, config: SchedulerConfig) -> list[SkillSte
     """Special function: Expand placement into global acquisition followed by dependent placement."""
     target = str(request.target.get("object_name", ""))
     # Section: The parsed location is the placement destination, not an assumed pickup location.
-    steps = _object_acquisition_steps(target, None, config)
+    steps = _object_acquisition_steps(target, None, config, request.filters)
     pick_step = steps[-1]
     # Section: PLACE_OBJECT may execute only after PICK_OBJECT produced the held-item result.
     place_step = _step(
@@ -283,9 +287,21 @@ def _execute_step(request: TaskRequest, dependency: str | None, config: Schedule
     if request.task_type == "find_object":
         arguments["location"] = request.task_location or ""
         arguments["search_scope"] = "STRICT_LOCATION" if request.task_location else "GLOBAL"
-        arguments["approach_target"] = True
+        # Section: Inspection searches succeed on verified visual evidence; acquisition explicitly requests approach.
+        arguments["approach_target"] = False
+        # Section: The action goal transports all modifiers as one structured find query.
+        arguments["query"] = _find_object_query(request.filters)
     dependencies = [dependency] if dependency else []
     return _step("execute_task", skill_name, arguments, dependencies, config, "task_result")
+
+
+def _find_object_query(filters: list[dict[str, Any]] | None) -> dict[str, Any]:
+    """Special function: Create the transport-safe constraint object consumed by FIND_OBJECT perception."""
+    # Section: Image position is available for reporting without requiring model-generated prose.
+    return {
+        "filters": list(filters or []),
+        "requested_fields": ["image_position"],
+    }
 
 
 def _step(step_id: str, skill_name: str, arguments: dict[str, Any], dependencies: list[str], config: SchedulerConfig, result_variable: str | None = None) -> SkillStep:

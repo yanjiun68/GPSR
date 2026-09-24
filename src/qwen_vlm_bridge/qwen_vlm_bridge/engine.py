@@ -52,12 +52,16 @@ class QwenPlannerEngine:
 
         # Section: Delay optional CUDA dependencies so contract tests run without Transformers installed.
         import torch
-        from transformers import AutoModelForImageTextToText, AutoProcessor, BitsAndBytesConfig
+        from transformers import (
+            AutoProcessor,
+            BitsAndBytesConfig,
+            Qwen3VLForConditionalGeneration,
+        )
 
         # Section: Match the proven test_text.py NF4 configuration when 4-bit loading is enabled.
         model_kwargs: dict[str, Any] = {
             "device_map": "auto",
-            "attn_implementation": "sdpa",
+            "low_cpu_mem_usage": True,
             "local_files_only": self.local_files_only,
         }
         if self.load_in_4bit:
@@ -73,10 +77,12 @@ class QwenPlannerEngine:
             str(self.model_path),
             local_files_only=self.local_files_only,
         )
-        self.model = AutoModelForImageTextToText.from_pretrained(
+        self.model = Qwen3VLForConditionalGeneration.from_pretrained(
             str(self.model_path),
             **model_kwargs,
         )
+        # Section: Disable training behavior because the persistent engine only generates plans.
+        self.model.eval()
         self._torch = torch
 
     def generate_plan(self, instruction: str) -> tuple[dict[str, Any], str]:

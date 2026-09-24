@@ -2,7 +2,7 @@
 qwen_text_planner:
   ros__parameters:
     # Section: Local model assets used by the original test_text.py program.
-    model_path: /home/yanjiun68/ai/models/Qwen3-VL-4B-Instruct
+    model_path: /home/yanjiun68/ai/models/UnifoLM-ER-1
     system_prompt_path: /home/yanjiun68/ai/qwen3v1/system_prompt_actionqueue_test.txt
     max_new_tokens: 256
     load_in_4bit: true

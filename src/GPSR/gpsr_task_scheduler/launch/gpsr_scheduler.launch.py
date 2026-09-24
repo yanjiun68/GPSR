@@ -3,7 +3,11 @@
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
 from launch.conditions import IfCondition
-from launch.substitutions import LaunchConfiguration, OrSubstitution, PythonExpression
+from launch.substitutions import (
+    LaunchConfiguration,
+    NotEqualsSubstitution,
+    OrSubstitution,
+)
 from launch.substitutions import PathJoinSubstitution
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch_ros.actions import LifecycleNode, Node
@@ -201,9 +205,9 @@ def generate_launch_description() -> LaunchDescription:
             "registry_file": skill_registry_file,
             "allow_simulated_primitives": ParameterValue(allow_simulated_primitives, value_type=bool),
             "transition_timeout_sec": ParameterValue(lifecycle_transition_timeout_sec, value_type=float),
-            # Section: Legacy control is persistent; every other endpoint uses the managed adapter.
+            # Section: Only non-legacy providers use the managed lifecycle adapter.
             "manage_follow_person_adapter": ParameterValue(
-                PythonExpression(["'", follow_person_action, "' != '/person_follow/control'"]),
+                NotEqualsSubstitution(follow_person_action, "/person_follow/control"),
                 value_type=bool,
             ),
         }],
@@ -266,6 +270,8 @@ def generate_launch_description() -> LaunchDescription:
             "rgb_topic": rgb_topic,
             "detections_topic": "/perception/raw_human_detections",
             "annotated_image_topic": "/perception/human_detections_image",
+            # Section: Human tracking keeps its dedicated YOLO backend and does not consume Qwen world sensing.
+            "inference_backend": "yolo",
             "yolo_model_path": human_yolo_model_path,
             "confidence_threshold": 0.35,
             "include_classes": ["person"],
@@ -312,6 +318,10 @@ def generate_launch_description() -> LaunchDescription:
             "rgb_topic": rgb_topic,
             "detections_topic": "/perception/raw_object_detections",
             "annotated_image_topic": "/perception/object_detections_image",
+            # Section: GPSR object skills use the integrated test_camera-derived Qwen backend by default.
+            "inference_backend": "qwen",
+            # Section: The shared topic carries FIND_OBJECT constraints to the Qwen world-sensing backend.
+            "qwen_query_topic": "/perception/object_detector_query",
             "yolo_model_path": yolo_model_path,
             "confidence_threshold": 0.35,
             "exclude_classes": ["person"],
@@ -334,6 +344,9 @@ def generate_launch_description() -> LaunchDescription:
         parameters=[{
             "detections_topic": "/perception/raw_object_detections",
             "service_name": "/perception/count_objects",
+            # Section: COUNT_OBJECTS sends its target/filter query to the shared Qwen object detector.
+            "detector_query_topic": "/perception/object_detector_query",
+            "qwen_query_wait_timeout_sec": 1.5,
             "object_quantities_topic": "/perception/object_quantities",
             "raw_object_quantities_topic": "/perception/object_quantities_raw",
             "stale_timeout_sec": 5.0,
@@ -446,6 +459,8 @@ def generate_launch_description() -> LaunchDescription:
             "action_name": "/gpsr/find_object",
             "target_status_topic": "/gpsr/find_object/target_status",
             "detector_ready_topic": "/perception/object_detector_ready",
+            # Section: Keep the C++ selector and Qwen detector on one explicit query transport.
+            "detector_query_topic": "/perception/object_detector_query",
         }],
     )
 
@@ -537,7 +552,7 @@ def generate_launch_description() -> LaunchDescription:
         output="screen",
         condition=IfCondition(start_follow_person_pipeline),
         parameters=[{
-            # Section: The managed master provider keeps a stable endpoint while the client remains selectable.
+            # Section: Keep the managed provider stable while its client is selectable.
             "action_name": "/person_follow/master",
             "master_topic": "/master_target",
             "enroll_service": "/enroll_master",
@@ -646,7 +661,14 @@ def generate_launch_description() -> LaunchDescription:
             DeclareLaunchArgument("navigation_action", default_value="/nav/navigate_named_pose", description="Existing navigation skill action endpoint."),
             DeclareLaunchArgument("navigate_to_pose_action", default_value="/navigate_to_pose", description="Nav2 action used for captured raw-pose returns."),
             DeclareLaunchArgument("navigate_to_named_pose_action", default_value="/nav/navigate_named_pose", description="Named-pose action used for semantic navigation and fallback return."),
-            DeclareLaunchArgument("follow_person_action", default_value="/person_follow/master", description="PersonFollow provider selected by the executor; use /person_follow/control for legacy."),
+            DeclareLaunchArgument(
+                "follow_person_action",
+                default_value="/person_follow/master",
+                description=(
+                    "PersonFollow provider selected by the executor; use "
+                    "/person_follow/control for legacy."
+                ),
+            ),
             DeclareLaunchArgument("find_object_action", default_value="/perception/find_object", description="Existing object perception action endpoint."),
             DeclareLaunchArgument("find_person_action", default_value="/perception/find_person", description="Existing person perception action endpoint."),
             DeclareLaunchArgument("tts_action", default_value="/voice/tts/say", description="Existing TTS service/action endpoint."),

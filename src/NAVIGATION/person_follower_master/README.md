@@ -66,11 +66,19 @@ source install/setup.bash
 
 ## Run
 
+The default launch mode expects the robot drivers, camera, and any Nav2
+bringup to be started separately. This prevents `person_follower_master` from
+owning the robot/navigation stack.
+
 ```bash
-bash src/person_follower_master/scripts/deploy/clean_launch_follow.sh
+# Start the external robot/Nav2 bringup first, then launch the follower.
+bash src/NAVIGATION/person_follower_master/scripts/deploy/clean_launch_follow.sh
 # common overrides
-bash src/person_follower_master/scripts/deploy/clean_launch_follow.sh rviz:=false
-bash src/person_follower_master/scripts/deploy/clean_launch_follow.sh camera:=false  # camera already launched elsewhere
+bash src/NAVIGATION/person_follower_master/scripts/deploy/clean_launch_follow.sh rviz:=false
+bash src/NAVIGATION/person_follower_master/scripts/deploy/clean_launch_follow.sh camera:=false  # camera already launched elsewhere
+
+# Standalone compatibility mode: embed my_robot_nav drivers and camera.
+bash src/NAVIGATION/person_follower_master/scripts/deploy/clean_launch_follow.sh use_external_drivers:=false
 ```
 
 ## Follow-then-return-home (industrial mode)
@@ -83,9 +91,14 @@ source scripts/deploy/setup_env.sh
 ros2 launch person_follower_master person_follow_return.launch.py
 ```
 
+The return launch uses the same external-bringup default. Use
+`use_external_drivers:=false` when the return launch must start the local
+hardware drivers itself.
+
 This wires up (see [launch/person_follow_return.launch.py](launch/person_follow_return.launch.py)):
 
-- drivers + RealSense + scan_self_filter (`/scan` → `/scan_filtered`)
+- external robot/Nav2 bringup by default, or embedded drivers + RealSense when
+  `use_external_drivers:=false`, plus scan_self_filter (`/scan` → `/scan_filtered`)
 - the stock follow stack (vision + reid + master_tracker + follow_controller),
   with `follow_controller` retargeted to `/cmd_vel_follow`
 - `breadcrumb_teach_repeat` (my_robot_nav) recording the path during

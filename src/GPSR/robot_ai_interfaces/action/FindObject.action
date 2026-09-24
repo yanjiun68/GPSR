@@ -8,6 +8,8 @@ float32 stand_off_distance
 float32 timeout_sec
 # Section: A remembered named viewpoint is searched first, then normal exhaustive fallback continues.
 string preferred_viewpoint
+# Section: Normalized target attributes, relations, and requested result fields for one FIND_OBJECT mission.
+string query_json
 ---
 # Section: Stable mission result codes.
 uint8 SUCCESS=0
@@ -29,6 +31,8 @@ string found_viewpoint
 string[] viewpoints_searched
 uint32 navigation_failures
 string message
+# Section: Validated selected-candidate evidence used by reporting and downstream skills.
+string selection_json
 ---
 string phase
 string current_room

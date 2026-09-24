@@ -42,7 +42,7 @@ class QwenTextPlannerNode(Node):
         super().__init__("qwen_text_planner")
 
         # Section: Declare model and prompt settings compatible with the original test_text.py paths.
-        self.declare_parameter("model_path", "/home/yanjiun68/ai/models/Qwen3-VL-4B-Instruct")
+        self.declare_parameter("model_path", "/home/yanjiun68/ai/models/UnifoLM-ER-1")
         self.declare_parameter(
             "system_prompt_path",
             "/home/yanjiun68/ai/qwen3v1/system_prompt_actionqueue_test.txt",

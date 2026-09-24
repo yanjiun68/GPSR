@@ -1,4 +1,5 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S bash -c 'exec "${VISION_PYTHON:-${HOME}/ai/qwen3v1/.venv/bin/python}" "$0" "$@"'
+# -*- coding: utf-8 -*-
 # flake8: noqa: E501
 """Section: Resolve a Qwen-grounded ROI into map-frame target and approach poses."""
 
@@ -62,6 +63,31 @@ class DepthSample:
     valid_count: int
 
 
+@dataclass(frozen=True)
+class DepthWaitPolicy:
+    """Special function: Hold validated per-goal rules for persistent ROI-depth tracking."""
+
+    # Section: The target and tolerance define the inclusive metric completion band.
+    target_depth_m: float
+    tolerance_m: float
+    # Section: The deadline bounds a goal that never receives an acceptable depth observation.
+    timeout_sec: float
+    # Section: Consecutive confirmations suppress one-frame depth noise before success.
+    required_consecutive_samples: int
+
+
+@dataclass(frozen=True)
+class DepthWaitProgress:
+    """Special function: Describe one deterministic persistent-depth decision for feedback and control flow."""
+
+    # Section: The phase is a stable, human-readable action-feedback state.
+    phase: str
+    # Section: The counter contains only immediately consecutive in-band observations.
+    consecutive_samples: int
+    # Section: A terminal outcome is absent until success, timeout, or overshoot is reached.
+    terminal_outcome: str | None
+
+
 def stamp_to_seconds(stamp: Any) -> float:
     """Special function: Convert a ROS stamp-like object to floating-point seconds."""
     # Section: Explicit conversion avoids depending on a live ROS clock in geometry tests.
@@ -72,6 +98,67 @@ def stamp_is_zero(stamp: Any) -> bool:
     """Special function: Detect a caller that intentionally requests the latest observation."""
     # Section: A zero stamp is the documented opt-in to latest-depth behavior.
     return int(getattr(stamp, "sec", 0)) == 0 and int(getattr(stamp, "nanosec", 0)) == 0
+
+
+def validate_depth_wait_policy(
+    wait_for_target_depth: bool,
+    target_depth_m: float,
+    tolerance_m: float,
+    timeout_sec: float,
+    required_consecutive_samples: int,
+) -> DepthWaitPolicy | None:
+    """Special function: Validate optional persistent-depth inputs without changing legacy one-shot goals."""
+    # Section: Existing action clients opt out by default and retain their one-observation behavior.
+    if not bool(wait_for_target_depth):
+        return None
+    # Section: A positive finite target, tolerance, timeout, and confirmation count make waiting bounded.
+    values = (float(target_depth_m), float(tolerance_m), float(timeout_sec))
+    if not all(math.isfinite(value) for value in values):
+        raise ValueError("Persistent depth settings must be finite.")
+    if float(target_depth_m) <= 0.0:
+        raise ValueError("target_depth_m must be positive.")
+    if float(tolerance_m) < 0.0:
+        raise ValueError("target_depth_tolerance_m must be non-negative.")
+    if float(timeout_sec) <= 0.0:
+        raise ValueError("wait_timeout_sec must be positive.")
+    if int(required_consecutive_samples) < 1:
+        raise ValueError("required_consecutive_samples must be at least one.")
+    return DepthWaitPolicy(
+        target_depth_m=float(target_depth_m),
+        tolerance_m=float(tolerance_m),
+        timeout_sec=float(timeout_sec),
+        required_consecutive_samples=int(required_consecutive_samples),
+    )
+
+
+def advance_depth_wait_progress(
+    depth_m: float | None,
+    policy: DepthWaitPolicy,
+    consecutive_samples: int,
+    now_monotonic: float,
+    deadline_monotonic: float,
+) -> DepthWaitProgress:
+    """Special function: Classify one newest ROI depth observation for a persistent action goal."""
+    # Section: Timeout wins once the configured action deadline has elapsed.
+    if float(now_monotonic) >= float(deadline_monotonic):
+        return DepthWaitProgress("TIMEOUT", 0, "TIMEOUT")
+    # Section: Invalid or absent frames remain pending but reset strict consecutive confirmation.
+    if depth_m is None or not math.isfinite(float(depth_m)):
+        return DepthWaitProgress("WAITING_FOR_VALID_DEPTH", 0, None)
+    lower_bound = policy.target_depth_m - policy.tolerance_m
+    upper_bound = policy.target_depth_m + policy.tolerance_m
+    observed_depth_m = float(depth_m)
+    # Section: Crossing the lower bound is a terminal overshoot rather than an unbounded wait.
+    if observed_depth_m < lower_bound:
+        return DepthWaitProgress("OVERSHOT", 0, "OVERSHOT")
+    # Section: Inclusive tolerance bounds accept the configured target and either exact boundary value.
+    if observed_depth_m <= upper_bound:
+        updated_count = int(consecutive_samples) + 1
+        if updated_count >= policy.required_consecutive_samples:
+            return DepthWaitProgress("TARGET_DEPTH_REACHED", updated_count, "SUCCESS")
+        return DepthWaitProgress("WAITING_FOR_CONFIRMATION", updated_count, None)
+    # Section: A too-distant observation resets confirmation because samples must be consecutive.
+    return DepthWaitProgress("WAITING_FOR_TARGET_DEPTH", 0, None)
 
 
 def scale_and_clip_roi(
@@ -105,6 +192,29 @@ def scale_and_clip_roi(
     right = max(left + 1, min(image_width, right))
     bottom = max(top + 1, min(image_height, bottom))
     return left, top, right, bottom
+
+
+def render_roi_depth_debug(
+    depth_m: np.ndarray,
+    roi: tuple[int, int, int, int],
+    sample: DepthSample,
+    target_id: str,
+) -> np.ndarray:
+    """Special function: Render a human-readable depth frame with the selected Qwen ROI."""
+    # Section: Convert finite metric depth into an 8-bit image while keeping invalid pixels black.
+    display_depth = np.asarray(depth_m, dtype=np.float32).copy()
+    finite_depth = display_depth[np.isfinite(display_depth) & (display_depth > 0.0)]
+    maximum_depth = max(1.0, float(np.percentile(finite_depth, 99.0))) if finite_depth.size else 1.0
+    display_depth[~np.isfinite(display_depth) | (display_depth <= 0.0)] = 0.0
+    display_u8 = np.clip(display_depth * 255.0 / maximum_depth, 0.0, 255.0).astype(np.uint8)
+    debug_image = cv2.applyColorMap(display_u8, cv2.COLORMAP_TURBO)
+    # Section: Overlay the scaled ROI and robust sample point that produced the reported distance.
+    left, top, right, bottom = roi
+    cv2.rectangle(debug_image, (left, top), (right - 1, bottom - 1), (0, 255, 0), 2)
+    cv2.circle(debug_image, (round(sample.pixel_u), round(sample.pixel_v)), 5, (255, 255, 255), -1)
+    label = f"{target_id}: {sample.depth_m:.2f} m ({sample.valid_ratio:.0%} valid)"
+    cv2.putText(debug_image, label, (left, max(24, top - 8)), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 0), 2)
+    return debug_image
 
 
 def depth_to_meters(depth_image: np.ndarray, encoding: str) -> np.ndarray:
@@ -278,6 +388,7 @@ def compute_standoff_geometry(
     if distance <= stand_off:
         approach_x, approach_y = robot_x, robot_y
     else:
+        # Section: Move from the target toward the robot by the requested stand-off distance.
         approach_x = target_x - delta_x * stand_off / distance
         approach_y = target_y - delta_y * stand_off / distance
     heading = math.atan2(target_y - approach_y, target_x - approach_x)
@@ -304,6 +415,11 @@ class QwenRoiDepthResolver(Node):
         self.declare_parameter("action_name", "/vision/resolve_qwen_roi")
         self.declare_parameter("map_frame", "map")
         self.declare_parameter("base_frame", "base_link")
+        # Section: Depth-only inspection can bypass map/base TF while preserving map-pose behavior by default.
+        self.declare_parameter("enable_tf", True)
+        # Section: Optional desktop visualization displays the exact depth ROI used by one action goal.
+        self.declare_parameter("show_gui", False)
+        self.declare_parameter("gui_window_name", "Qwen ROI Depth")
 
         # Section: Depth-cache policy accommodates bounded local Qwen inference latency.
         self.declare_parameter("depth_cache_frames", 120)
@@ -328,6 +444,9 @@ class QwenRoiDepthResolver(Node):
         self._latest_camera_info: CameraInfo | None = None
         self._last_cached_depth_stamp = -math.inf
         self._cache_lock = threading.Lock()
+        # Section: Persistent goals wait on this condition instead of polling the same depth frame.
+        self._depth_condition = threading.Condition(self._cache_lock)
+        self._depth_sequence = 0
         self._bridge = CvBridge()
 
         # Section: Sensor and action callbacks may overlap while TF uses the node's default group.
@@ -381,12 +500,14 @@ class QwenRoiDepthResolver(Node):
         # Section: A bounded sampling period controls memory without changing the camera publisher.
         stamp_sec = stamp_to_seconds(message.header.stamp)
         sample_period = max(0.0, float(self.get_parameter("depth_cache_sample_period_sec").value))
-        with self._cache_lock:
+        with self._depth_condition:
             if stamp_sec > 0.0 and stamp_sec - self._last_cached_depth_stamp < sample_period:
                 return
             self._depth_cache.append(DepthObservation(stamp_sec, time.monotonic(), message))
+            self._depth_sequence += 1
             if stamp_sec > 0.0:
                 self._last_cached_depth_stamp = stamp_sec
+            self._depth_condition.notify_all()
 
     def _camera_info_callback(self, message: CameraInfo) -> None:
         """Special function: Cache the latest static colour calibration used by aligned depth."""
@@ -406,6 +527,13 @@ class QwenRoiDepthResolver(Node):
             stand_off = float(goal.stand_off_distance)
             if stand_off < 0.0 or not math.isfinite(stand_off):
                 raise ValueError("Invalid stand-off distance.")
+            validate_depth_wait_policy(
+                bool(goal.wait_for_target_depth),
+                float(goal.target_depth_m),
+                float(goal.target_depth_tolerance_m),
+                float(goal.wait_timeout_sec),
+                int(goal.required_consecutive_samples),
+            )
         except (TypeError, ValueError):
             return GoalResponse.REJECT
         return GoalResponse.ACCEPT
@@ -416,12 +544,24 @@ class QwenRoiDepthResolver(Node):
         # Section: Resolution has no irreversible actuation and is always safe to cancel.
         return CancelResponse.ACCEPT
 
-    def _feedback(self, goal_handle: Any, phase: str, valid_ratio: float = 0.0) -> None:
+    def _feedback(
+        self,
+        goal_handle: Any,
+        phase: str,
+        valid_ratio: float = 0.0,
+        depth_m: float = 0.0,
+        consecutive_samples: int = 0,
+        remaining_time_sec: float = 0.0,
+    ) -> None:
         """Special function: Publish compact phase feedback during depth and TF processing."""
         # Section: Feedback intentionally excludes raw images and model-generated free text.
         feedback = ResolveVisualTarget.Feedback()
         feedback.phase = str(phase)
         feedback.valid_depth_ratio = float(valid_ratio)
+        # Section: Persistent goals expose measurement progress without requiring a separate topic subscription.
+        feedback.depth_m = float(depth_m)
+        feedback.consecutive_samples = max(0, int(consecutive_samples))
+        feedback.remaining_time_sec = max(0.0, float(remaining_time_sec))
         goal_handle.publish_feedback(feedback)
 
     def _result(
@@ -482,6 +622,73 @@ class QwenRoiDepthResolver(Node):
             return None, f"Qwen observation is stale ({age:.3f}s)."
         return selected, ""
 
+    def _wait_for_fresh_depth(
+        self,
+        previous_sequence: int,
+        deadline_monotonic: float,
+    ) -> tuple[DepthObservation | None, int]:
+        """Special function: Wait for one newer cached depth observation without busy polling ROS topics."""
+        # Section: A bounded condition wait keeps cancellation checks responsive while camera callbacks run.
+        observed_sequence = int(previous_sequence)
+        while time.monotonic() < float(deadline_monotonic):
+            with self._depth_condition:
+                if self._depth_cache and self._depth_sequence > observed_sequence:
+                    observation = self._depth_cache[-1]
+                    observed_sequence = self._depth_sequence
+                else:
+                    remaining = max(0.0, float(deadline_monotonic) - time.monotonic())
+                    self._depth_condition.wait(timeout=min(0.10, remaining))
+                    continue
+            # Section: Ignore an already stale cache entry and wait for the next incoming frame.
+            age = time.monotonic() - observation.received_monotonic
+            maximum_age = float(self.get_parameter("max_latest_depth_age_sec").value)
+            if age <= maximum_age:
+                return observation, observed_sequence
+        return None, observed_sequence
+
+    def _resolve_depth_observation(
+        self,
+        goal: ResolveVisualTarget.Goal,
+        depth_observation: DepthObservation,
+        camera_info: CameraInfo,
+        mask_native: np.ndarray | None,
+    ) -> tuple[np.ndarray, tuple[int, int, int, int], DepthSample, tuple[float, float, float]]:
+        """Special function: Convert one depth observation into robust ROI depth and camera-frame coordinates."""
+        # Section: Decode the sensor image and scale the caller's Qwen coordinate system into depth pixels.
+        depth_native = self._bridge.imgmsg_to_cv2(depth_observation.message, desired_encoding="passthrough")
+        depth_m = depth_to_meters(depth_native, depth_observation.message.encoding)
+        image_height, image_width = depth_m.shape[:2]
+        scaled_roi = scale_and_clip_roi(
+            (goal.roi_x_min, goal.roi_y_min, goal.roi_x_max, goal.roi_y_max),
+            (int(goal.coordinate_width), int(goal.coordinate_height)),
+            (int(image_width), int(image_height)),
+        )
+        # Section: Masks are resized for each observation so a camera-resolution change remains safe.
+        mask = prepare_mask(mask_native, (image_width, image_height))
+        sample = sample_roi_depth(
+            depth_m,
+            scaled_roi,
+            mask,
+            float(self.get_parameter("min_depth_m").value),
+            float(self.get_parameter("max_depth_m").value),
+            float(self.get_parameter("min_valid_depth_ratio").value),
+            int(self.get_parameter("min_valid_depth_pixels").value),
+            float(self.get_parameter("bbox_inset_ratio").value),
+            float(self.get_parameter("depth_outlier_distance_m").value),
+        )
+        scaled_camera_matrix = scale_camera_matrix(
+            list(camera_info.k),
+            (int(camera_info.width), int(camera_info.height)),
+            (int(image_width), int(image_height)),
+        )
+        camera_xyz = project_pixel_to_camera(
+            sample.pixel_u,
+            sample.pixel_v,
+            sample.depth_m,
+            scaled_camera_matrix,
+        )
+        return depth_m, scaled_roi, sample, camera_xyz
+
     def _mask_from_goal(self, goal: ResolveVisualTarget.Goal) -> tuple[np.ndarray | None, str]:
         """Special function: Decode the optional segmentation mask carried with the grounding result."""
         # Section: An empty Image means the caller supplied a bounding box without segmentation.
@@ -500,86 +707,201 @@ class QwenRoiDepthResolver(Node):
         except Exception as exc:
             return None, f"Segmentation mask conversion failed: {exc}"
 
+    def _show_roi_debug(
+        self,
+        depth_m: np.ndarray,
+        roi: tuple[int, int, int, int],
+        sample: DepthSample,
+        target_id: str,
+    ) -> None:
+        """Special function: Update the optional operator GUI without changing action behavior."""
+        # Section: Headless deployments avoid all HighGUI calls unless an operator explicitly enables them.
+        if not bool(self.get_parameter("show_gui").value):
+            return
+        try:
+            debug_image = render_roi_depth_debug(depth_m, roi, sample, target_id)
+            window_name = str(self.get_parameter("gui_window_name").value)
+            cv2.imshow(window_name, debug_image)
+            cv2.waitKey(1)
+        except cv2.error as exc:
+            self.get_logger().error(f"Unable to display Qwen ROI debug window: {exc}")
+
     def _execute(self, goal_handle: Any) -> ResolveVisualTarget.Result:
         """Special function: Resolve one grounded ROI without directly commanding robot motion."""
         # Section: Cancellation before sensor access produces a distinct non-motion outcome.
         if goal_handle.is_cancel_requested:
             goal_handle.canceled()
             return self._result(ResolveVisualTarget.Result.CANCELED, "Visual target resolution canceled.")
-        self._feedback(goal_handle, "SELECT_DEPTH")
-
-        # Section: Select the depth frame tied to the exact RGB observation seen by Qwen.
-        depth_observation, depth_error = self._select_depth(goal_handle.request.image_stamp)
-        if depth_observation is None:
-            goal_handle.abort()
-            return self._result(ResolveVisualTarget.Result.DEPTH_UNAVAILABLE, depth_error)
-        with self._cache_lock:
-            camera_info = self._latest_camera_info
-        if camera_info is None or len(camera_info.k) != 9 or float(camera_info.k[0]) <= 0.0:
-            goal_handle.abort()
-            return self._result(
-                ResolveVisualTarget.Result.CALIBRATION_UNAVAILABLE,
-                "Calibrated CameraInfo is unavailable; uncalibrated external-camera data is rejected.",
-            )
-
-        # Section: Decode the depth snapshot and map the Qwen coordinate space into depth pixels.
-        try:
-            depth_native = self._bridge.imgmsg_to_cv2(depth_observation.message, desired_encoding="passthrough")
-            depth_m = depth_to_meters(depth_native, depth_observation.message.encoding)
-            image_height, image_width = depth_m.shape[:2]
-            scaled_roi = scale_and_clip_roi(
-                (
-                    goal_handle.request.roi_x_min,
-                    goal_handle.request.roi_y_min,
-                    goal_handle.request.roi_x_max,
-                    goal_handle.request.roi_y_max,
-                ),
-                (int(goal_handle.request.coordinate_width), int(goal_handle.request.coordinate_height)),
-                (int(image_width), int(image_height)),
-            )
-        except Exception as exc:
-            goal_handle.abort()
-            return self._result(ResolveVisualTarget.Result.INVALID_ROI, f"Depth or ROI conversion failed: {exc}")
-
-        # Section: Decode and align Qwen/SAM segmentation before sampling any target depth.
+        # Section: Decode an optional static segmentation mask once; persistent sampling resizes it per depth frame.
         mask_native, mask_error = self._mask_from_goal(goal_handle.request)
         if mask_error:
             goal_handle.abort()
             return self._result(ResolveVisualTarget.Result.MASK_UNAVAILABLE, mask_error)
         try:
-            mask = prepare_mask(mask_native, (image_width, image_height))
+            wait_policy = validate_depth_wait_policy(
+                bool(goal_handle.request.wait_for_target_depth),
+                float(goal_handle.request.target_depth_m),
+                float(goal_handle.request.target_depth_tolerance_m),
+                float(goal_handle.request.wait_timeout_sec),
+                int(goal_handle.request.required_consecutive_samples),
+            )
         except ValueError as exc:
             goal_handle.abort()
-            return self._result(ResolveVisualTarget.Result.MASK_UNAVAILABLE, str(exc))
+            return self._result(ResolveVisualTarget.Result.INVALID_ROI, str(exc))
 
-        # Section: Robust depth quality gates prevent Qwen's ROI from becoming an unchecked map target.
-        self._feedback(goal_handle, "SAMPLE_DEPTH")
-        try:
-            sample = sample_roi_depth(
-                depth_m,
-                scaled_roi,
-                mask,
-                float(self.get_parameter("min_depth_m").value),
-                float(self.get_parameter("max_depth_m").value),
-                float(self.get_parameter("min_valid_depth_ratio").value),
-                int(self.get_parameter("min_valid_depth_pixels").value),
-                float(self.get_parameter("bbox_inset_ratio").value),
-                float(self.get_parameter("depth_outlier_distance_m").value),
-            )
-            scaled_camera_matrix = scale_camera_matrix(
-                list(camera_info.k),
-                (int(camera_info.width), int(camera_info.height)),
-                (int(image_width), int(image_height)),
-            )
-            camera_xyz = project_pixel_to_camera(
-                sample.pixel_u,
-                sample.pixel_v,
-                sample.depth_m,
-                scaled_camera_matrix,
-            )
-        except ValueError as exc:
-            goal_handle.abort()
-            return self._result(ResolveVisualTarget.Result.DEPTH_QUALITY_FAILED, str(exc))
+        # Section: Legacy clients still select one Qwen-correlated frame and resolve it immediately.
+        if wait_policy is None:
+            self._feedback(goal_handle, "SELECT_DEPTH")
+            depth_observation, depth_error = self._select_depth(goal_handle.request.image_stamp)
+            if depth_observation is None:
+                goal_handle.abort()
+                return self._result(ResolveVisualTarget.Result.DEPTH_UNAVAILABLE, depth_error)
+            with self._cache_lock:
+                camera_info = self._latest_camera_info
+            if camera_info is None or len(camera_info.k) != 9 or float(camera_info.k[0]) <= 0.0:
+                goal_handle.abort()
+                return self._result(
+                    ResolveVisualTarget.Result.CALIBRATION_UNAVAILABLE,
+                    "Calibrated CameraInfo is unavailable; uncalibrated external-camera data is rejected.",
+                )
+            self._feedback(goal_handle, "SAMPLE_DEPTH")
+            try:
+                depth_m, scaled_roi, sample, camera_xyz = self._resolve_depth_observation(
+                    goal_handle.request,
+                    depth_observation,
+                    camera_info,
+                    mask_native,
+                )
+            except Exception as exc:
+                goal_handle.abort()
+                return self._result(ResolveVisualTarget.Result.DEPTH_QUALITY_FAILED, str(exc))
+            # Section: Show the exact scaled ROI and sampled target depth before optional TF processing.
+            self._show_roi_debug(depth_m, scaled_roi, sample, str(goal_handle.request.target_id))
+        else:
+            # Section: Persistent goals use only fresh depth frames so a stamped Qwen ROI cannot reuse one historical image.
+            deadline_monotonic = time.monotonic() + wait_policy.timeout_sec
+            # Section: Snapshot the cache so the first sample arrives after this action goal was accepted.
+            with self._cache_lock:
+                depth_sequence = self._depth_sequence
+            consecutive_samples = 0
+            last_depth_m = 0.0
+            last_valid_ratio = 0.0
+            while True:
+                if goal_handle.is_cancel_requested:
+                    goal_handle.canceled()
+                    return self._result(
+                        ResolveVisualTarget.Result.CANCELED,
+                        "Persistent ROI-depth tracking canceled.",
+                        depth_m=last_depth_m,
+                        valid_ratio=last_valid_ratio,
+                    )
+                now_monotonic = time.monotonic()
+                remaining_time_sec = max(0.0, deadline_monotonic - now_monotonic)
+                if remaining_time_sec <= 0.0:
+                    goal_handle.abort()
+                    return self._result(
+                        ResolveVisualTarget.Result.TIMEOUT,
+                        "Timed out before the ROI reached the requested depth band.",
+                        depth_m=last_depth_m,
+                        valid_ratio=last_valid_ratio,
+                    )
+                self._feedback(
+                    goal_handle,
+                    "WAITING_FOR_FRESH_DEPTH",
+                    last_valid_ratio,
+                    last_depth_m,
+                    consecutive_samples,
+                    remaining_time_sec,
+                )
+                depth_observation, depth_sequence = self._wait_for_fresh_depth(depth_sequence, deadline_monotonic)
+                if depth_observation is None:
+                    goal_handle.abort()
+                    return self._result(
+                        ResolveVisualTarget.Result.TIMEOUT,
+                        "Timed out waiting for a fresh ROI depth observation.",
+                        depth_m=last_depth_m,
+                        valid_ratio=last_valid_ratio,
+                    )
+                with self._cache_lock:
+                    camera_info = self._latest_camera_info
+                if camera_info is None or len(camera_info.k) != 9 or float(camera_info.k[0]) <= 0.0:
+                    goal_handle.abort()
+                    return self._result(
+                        ResolveVisualTarget.Result.CALIBRATION_UNAVAILABLE,
+                        "Calibrated CameraInfo is unavailable; uncalibrated external-camera data is rejected.",
+                    )
+                try:
+                    depth_m, scaled_roi, sample, camera_xyz = self._resolve_depth_observation(
+                        goal_handle.request,
+                        depth_observation,
+                        camera_info,
+                        mask_native,
+                    )
+                except Exception as exc:
+                    progress = advance_depth_wait_progress(
+                        None,
+                        wait_policy,
+                        consecutive_samples,
+                        time.monotonic(),
+                        deadline_monotonic,
+                    )
+                    consecutive_samples = progress.consecutive_samples
+                    self._feedback(
+                        goal_handle,
+                        progress.phase,
+                        last_valid_ratio,
+                        last_depth_m,
+                        consecutive_samples,
+                        max(0.0, deadline_monotonic - time.monotonic()),
+                    )
+                    if progress.terminal_outcome == "TIMEOUT":
+                        goal_handle.abort()
+                        return self._result(
+                            ResolveVisualTarget.Result.TIMEOUT,
+                            f"Timed out while waiting for valid ROI depth: {exc}",
+                            depth_m=last_depth_m,
+                            valid_ratio=last_valid_ratio,
+                        )
+                    continue
+                # Section: Every valid fresh sample updates the GUI and depth-threshold feedback before terminal decisions.
+                self._show_roi_debug(depth_m, scaled_roi, sample, str(goal_handle.request.target_id))
+                last_depth_m = sample.depth_m
+                last_valid_ratio = sample.valid_ratio
+                progress = advance_depth_wait_progress(
+                    sample.depth_m,
+                    wait_policy,
+                    consecutive_samples,
+                    time.monotonic(),
+                    deadline_monotonic,
+                )
+                consecutive_samples = progress.consecutive_samples
+                self._feedback(
+                    goal_handle,
+                    progress.phase,
+                    sample.valid_ratio,
+                    sample.depth_m,
+                    consecutive_samples,
+                    max(0.0, deadline_monotonic - time.monotonic()),
+                )
+                if progress.terminal_outcome == "OVERSHOT":
+                    goal_handle.abort()
+                    return self._result(
+                        ResolveVisualTarget.Result.OVERSHOT,
+                        "ROI depth crossed below the requested lower tolerance bound.",
+                        depth_m=sample.depth_m,
+                        valid_ratio=sample.valid_ratio,
+                    )
+                if progress.terminal_outcome == "TIMEOUT":
+                    goal_handle.abort()
+                    return self._result(
+                        ResolveVisualTarget.Result.TIMEOUT,
+                        "Timed out before the ROI reached the requested depth band.",
+                        depth_m=sample.depth_m,
+                        valid_ratio=sample.valid_ratio,
+                    )
+                if progress.terminal_outcome == "SUCCESS":
+                    break
+        # Section: A one-shot or confirmed persistent sample now owns the final projection and optional TF result.
         self._feedback(goal_handle, "TRANSFORM_TARGET", sample.valid_ratio)
 
         # Section: The aligned depth header owns the observation timestamp and optical frame.
@@ -591,6 +913,23 @@ class QwenRoiDepthResolver(Node):
         camera_point.header.stamp = depth_observation.message.header.stamp
         camera_point.header.frame_id = source_frame
         camera_point.point.x, camera_point.point.y, camera_point.point.z = camera_xyz
+
+        # Section: Return a camera-frame target and metric depth when an operator intentionally disables TF.
+        if not bool(self.get_parameter("enable_tf").value):
+            target_pose = PoseStamped()
+            target_pose.header = camera_point.header
+            target_pose.pose.position = camera_point.point
+            target_pose.pose.orientation.w = 1.0
+            self._target_pose_pub.publish(target_pose)
+            self._feedback(goal_handle, "RESOLVED_DEPTH_ONLY", sample.valid_ratio)
+            goal_handle.succeed()
+            return self._result(
+                ResolveVisualTarget.Result.SUCCESS,
+                f"Resolved target '{goal_handle.request.target_id}' to camera-frame depth without TF.",
+                target_pose=target_pose,
+                depth_m=sample.depth_m,
+                valid_ratio=sample.valid_ratio,
+            )
 
         # Section: Transform the measured target and current base origin independently into map coordinates.
         map_frame = str(self.get_parameter("map_frame").value).strip().lstrip("/")

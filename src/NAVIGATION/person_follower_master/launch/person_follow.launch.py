@@ -1,7 +1,11 @@
-"""Launch the full single-master person-following stack.
+"""Launch the single-master person-following stack.
 
-Layers (composed with TimerAction to allow driver/camera/vision warm-up):
-  t=0  drivers_only (lidar + base + odom + TF) + RealSense D435i
+Default mode expects the robot/base/camera/Nav2 bringup to be launched
+separately. Set ``use_external_drivers:=false`` to restore embedded hardware
+and camera launch for standalone testing.
+
+Layers (composed with TimerAction to allow camera/vision warm-up):
+  t=0  external robot bringup (default) or drivers_only + RealSense D435i
        (+ optional static map→odom TF)
   t=3  vision_node   (YOLO11n, CPU, bbox-enriched detections)
   t=5  reid_enricher_node
@@ -22,7 +26,7 @@ from launch.actions import (
 )
 from launch.conditions import IfCondition, UnlessCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
+from launch.substitutions import LaunchConfiguration, PathJoinSubstitution, PythonExpression
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
 
@@ -39,9 +43,22 @@ def generate_launch_description() -> LaunchDescription:
     camera_enable = LaunchConfiguration("camera", default="true")
     yolo_device = LaunchConfiguration("yolo_device", default="cuda")
     yolo_stride = LaunchConfiguration("yolo_stride", default="1")
-    use_external_drivers = LaunchConfiguration("use_external_drivers", default="false")
+    # Section: Default to the separated robot/Nav2 bringup contract.
+    use_external_drivers = LaunchConfiguration("use_external_drivers", default="true")
     auto_enroll = LaunchConfiguration("auto_enroll", default="true")
-    cmd_vel_topic = LaunchConfiguration("cmd_vel_topic", default="/cmd_vel")
+    # Section: Match drivers_only.launch.py's final safe velocity input by default.
+    cmd_vel_topic = LaunchConfiguration("cmd_vel_topic", default="/cmd_vel_safe")
+
+    # Section: Allow the internal camera to be explicitly enabled only in embedded mode.
+    camera_enabled_condition = IfCondition(
+        PythonExpression([
+            "'",
+            camera_enable,
+            "' == 'true' and '",
+            use_external_drivers,
+            "' == 'false'",
+        ])
+    )
 
 
     # --- Drivers (lidar + base + odom + TF) ---
@@ -75,7 +92,7 @@ def generate_launch_description() -> LaunchDescription:
             "depth_module.profile": "640x480x30",
             "pointcloud.enable": "false",
         }.items(),
-        condition=UnlessCondition(use_external_drivers)
+        condition=camera_enabled_condition
 
     )
 
@@ -146,7 +163,8 @@ def generate_launch_description() -> LaunchDescription:
         DeclareLaunchArgument("camera", default_value="true"),
         DeclareLaunchArgument("yolo_device", default_value="cuda"),
         DeclareLaunchArgument("yolo_stride", default_value="1"),
-        DeclareLaunchArgument("use_external_drivers", default_value="false"),
+        # Section: External drivers/Nav2 are the default separate-launch mode.
+        DeclareLaunchArgument("use_external_drivers", default_value="true"),
         DeclareLaunchArgument(
             "auto_enroll",
             default_value="true",
@@ -154,8 +172,11 @@ def generate_launch_description() -> LaunchDescription:
         ),
         DeclareLaunchArgument(
             "cmd_vel_topic",
-            default_value="/cmd_vel",
-            description="Velocity output used by the direct follow controller.",
+            default_value="/cmd_vel_safe",
+            description=(
+                "Velocity output used by the direct follow controller; override "
+                "when an external velocity arbiter exposes another topic."
+            ),
         ),
 
         drivers,

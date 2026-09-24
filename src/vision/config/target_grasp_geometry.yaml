@@ -17,7 +17,7 @@ target_grasp_geometry:
 
     # Section: On-demand Qwen semantic grounding configuration.
     qwen_enabled: true
-    qwen_model_path: /home/yanjiun68/ai/models/Qwen3-VL-4B-Instruct
+    qwen_model_path: /home/yanjiun68/ai/models/UnifoLM-ER-1
     qwen_max_new_tokens: 192
     qwen_image_size: 448
     qwen_minimum_confidence: 0.35

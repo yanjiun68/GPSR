@@ -33,6 +33,7 @@ setup(
             "gpsr_parse_dry_run = gpsr_task_scheduler.parse_dry_run:main",
             "gpsr_validate_sequences = gpsr_task_scheduler.sequence_validator:main",
             "qwen_visual_navigation_bridge = gpsr_task_scheduler.visual_navigation_bridge:main",
+            "qwen_action_queue_bridge = gpsr_task_scheduler.qwen_action_queue_bridge:main",
         ],
     },
 )

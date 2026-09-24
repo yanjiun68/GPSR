@@ -1,8 +1,8 @@
 # Qwen VLM ROS 2 text bridge
 
-This package keeps the local Qwen3-VL model loaded and replaces the original
-`message.txt` input with either a final STT transcript or a dedicated manual
-debug command.
+This package keeps the local Qwen3-VL-compatible UnifoLM-ER-1 model loaded and
+replaces the original `message.txt` input with either a final STT transcript or
+a dedicated manual debug command.
 
 ```text
 /voice/stt/transcript ---------\

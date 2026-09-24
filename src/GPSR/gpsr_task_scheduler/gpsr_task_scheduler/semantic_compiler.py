@@ -30,6 +30,25 @@ from robot_yasmin_tasks.gpsr.greetings import DEFAULT_GREETING  # Share neutral 
 ANSWER_QUESTION_PROMPT = "What is your question?"
 
 
+# Section: Common visual descriptions that Qwen can verify from a requested object ROI.
+OBJECT_QUERY_SHAPE_ALIASES = {
+    "cylinder": ("cylinder", "cylindrical"),
+    "round": ("round", "circular"),
+    "square": ("square",),
+    "rectangular": ("rectangle", "rectangular"),
+    "flat": ("flat",),
+}
+
+
+# Section: Orientation wording remains separate from human pose and robot navigation semantics.
+OBJECT_QUERY_ORIENTATION_ALIASES = {
+    "upright": ("upright", "standing up"),
+    "horizontal": ("horizontal",),
+    "vertical": ("vertical",),
+    "lying_down": ("lying down",),
+}
+
+
 # Section: Contract for an optional upstream linguistic normalizer; it never names executors.
 LLM_NORMALIZATION_CONTRACT = """Normalize grammar and remove filler words only.
 Preserve every person, object, location, attribute, quantity, comparison, ordering relation,
@@ -113,6 +132,8 @@ def compile_command(
             and not legacy_find_pronoun
         )
         or re.search(r"\btake\b", canonical_text, re.IGNORECASE)
+        # Section: A visual object relation requires the unified semantic path rather than legacy location parsing.
+        or bool(_extract_image_relation(canonical_text.casefold(), config)[0])
         # Section: The generated question prompt is not a named-person command.
         or re.search(r"\banswer question\b", normalized, re.IGNORECASE)
     )
@@ -787,7 +808,7 @@ def _entity_order(text: str, config: SchedulerConfig) -> list[str]:
 
 
 def _extract_attributes(text: str, config: SchedulerConfig) -> dict[str, Any]:
-    """Special function: Preserve colors, quantities, and size comparisons."""
+    """Special function: Preserve object characteristics and image-space selection relations."""
     attributes: dict[str, Any] = {}
     # Section: Do not interpret color words inside exact object names as filters.
     feature_text = strip_object_mentions(text, config)
@@ -800,16 +821,58 @@ def _extract_attributes(text: str, config: SchedulerConfig) -> dict[str, Any]:
         if re.search(rf"\b{re.escape(color.replace('_', ' '))}\b", feature_text):
             attributes["color"] = color
             break
-    for relation in ("largest", "smallest", "biggest", "smallest"):
+    # Section: Shapes normalize inflected words so Qwen receives its schema's stable values.
+    for shape, aliases in OBJECT_QUERY_SHAPE_ALIASES.items():
+        if any(re.search(rf"\b{re.escape(alias)}\b", feature_text) for alias in aliases):
+            attributes["shape"] = shape
+            break
+    # Section: Object orientation is a visual constraint, not a human-pose selector.
+    for orientation, aliases in OBJECT_QUERY_ORIENTATION_ALIASES.items():
+        if any(re.search(rf"\b{re.escape(alias)}\b", feature_text) for alias in aliases):
+            attributes["orientation"] = orientation
+            break
+    # Section: Superlatives select one candidate inside the unified FIND_OBJECT skill.
+    for relation in ("largest", "smallest", "biggest"):
         if re.search(rf"\b{relation}\b", text):
             attributes["size_relation"] = {
                 "biggest": "largest",
             }.get(relation, relation)
             break
+    # Section: Spatial wording is retained as a target/reference relation, never a new skill name.
+    spatial_relation, reference_object = _extract_image_relation(text, config)
+    if spatial_relation and reference_object:
+        attributes["spatial_relation"] = spatial_relation
+        attributes["reference_object"] = reference_object
     quantity = re.search(r"\b(\d+)\b", text)
     if quantity:
         attributes["quantity"] = int(quantity.group(1))
     return attributes
+
+
+def _extract_image_relation(
+    text: str,
+    config: SchedulerConfig,
+) -> tuple[str, str]:
+    """Special function: Resolve a supported image-space relation and its configured reference entity."""
+    # Section: Relations remain limited to view-verifiable geometry; metric distance stays a depth task.
+    patterns = (
+        ("left_of", r"\b(?:on\s+|to\s+)?(?:the\s+)?left\s+of\s+(?:the\s+)?(?P<reference>.+)$"),
+        ("right_of", r"\b(?:on\s+|to\s+)?(?:the\s+)?right\s+of\s+(?:the\s+)?(?P<reference>.+)$"),
+        ("above", r"\b(?:above|over)\s+(?:the\s+)?(?P<reference>.+)$"),
+        ("below", r"\b(?:below|under)\s+(?:the\s+)?(?P<reference>.+)$"),
+        ("near", r"\b(?:near|next\s+to|beside)\s+(?:the\s+)?(?P<reference>.+)$"),
+        ("far_from", r"\b(?:far\s+from|away\s+from)\s+(?:the\s+)?(?P<reference>.+)$"),
+    )
+    for relation, pattern in patterns:
+        match = re.search(pattern, text)
+        if not match:
+            continue
+        # Section: Reuse only configured object/category names as reference targets.
+        entities = _collect_entities(match.group("reference"), config)
+        reference_candidates = [*entities["objects"], *entities["categories"]]
+        if reference_candidates:
+            return relation, reference_candidates[0]
+    return "", ""
 
 
 def _location_after_marker(

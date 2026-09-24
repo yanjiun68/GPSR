@@ -1,6 +1,7 @@
 #include "robot_yasmin_tasks/clients.hpp"
 
 #include <action_msgs/msg/goal_status.hpp>
+#include <algorithm>
 #include <regex>
 #include <thread>
 
@@ -24,19 +25,74 @@ T json_value(const Json &object, const std::string &key, const T &fallback) {
 std::string build_filter_json(const ActionStepData &action) {
   // Section: An explicitly serialized filter remains authoritative.
   if (action.parameters.contains("filter_json")) {
-    return json_value<std::string>(action.parameters, "filter_json", "{}");
+    const auto &raw_filter = action.parameters.at("filter_json");
+    if (raw_filter.is_string()) return raw_filter.get<std::string>();
+    if (raw_filter.is_object()) return dump_json(raw_filter);
+    return "{}";
   }
-  Json filters = action.parameters.value("filters", Json::object());
-  if (!filters.is_object()) {
-    filters = Json::object();
+  // Section: Semantic compiler filters are an array; preserve it inside the service's JSON envelope.
+  Json payload = Json::object();
+  const Json filters = action.parameters.value("filters", Json::array());
+  if (filters.is_array()) {
+    payload["filters"] = filters;
+  } else if (filters.is_object()) {
+    payload = filters;
   }
+  // Section: Legacy count-control fields remain top-level and coexist with semantic ROI constraints.
   for (const auto *key : {"min_confidence", "stale_timeout_sec",
                           "enforce_location_filter"}) {
     if (action.parameters.contains(key)) {
-      filters[key] = action.parameters.at(key);
+      payload[key] = action.parameters.at(key);
     }
   }
-  return dump_json(filters);
+  return dump_json(payload);
+}
+
+// Special function: Build one typed object-query envelope from generic ActionStep parameters.
+Json build_find_query(const ActionStepData &action, const std::string &object_name,
+                      const std::string &category) {
+  // Section: Accept an explicit serialized query first, then the scheduler's native query object.
+  Json query = Json::object();
+  if (action.parameters.contains("query_json")) {
+    const auto raw = action.parameters.at("query_json");
+    if (raw.is_string()) query = parse_json(raw.get<std::string>(), Json::object());
+    else if (raw.is_object()) query = raw;
+  }
+  if ((!query.is_object() || query.empty()) && action.parameters.contains("query") &&
+      action.parameters.at("query").is_object()) {
+    query = action.parameters.at("query");
+  }
+  if (!query.is_object()) query = Json::object();
+
+  // Section: Merge filters instead of replacing them so direct and planner callers share one contract.
+  Json filters = query.value("filters", Json::array());
+  if (!filters.is_array()) filters = Json::array();
+  const auto action_filters = action.parameters.value("filters", Json::array());
+  if (action_filters.is_array()) {
+    for (const auto &filter : action_filters) {
+      if (filter.is_object() && std::find(filters.begin(), filters.end(), filter) == filters.end()) {
+        filters.push_back(filter);
+      }
+    }
+  }
+  // Section: Preserve historical extreme-mode payloads as an ordinary size selector.
+  auto mode = json_value<std::string>(action.parameters, "mode", "");
+  if (mode == "biggest") mode = "largest";
+  if ((mode == "largest" || mode == "smallest") &&
+      std::none_of(filters.begin(), filters.end(), [&mode](const Json &filter) {
+        return filter.is_object() && filter.value("feature", std::string{}) == "size_relation";
+      })) {
+    filters.push_back(Json{{"feature", "size_relation"},
+                           {"operator", "equals"},
+                           {"value", mode}});
+  }
+  query["filters"] = filters;
+  query["target"] = Json{{"object_name", object_name}, {"category", category}};
+  // Section: Default reporting can use deterministic bbox-derived image position on every find result.
+  if (!query.contains("requested_fields") || !query.at("requested_fields").is_array()) {
+    query["requested_fields"] = Json::array({"image_position"});
+  }
+  return query;
 }
 
 // Special function: Wait in short intervals so queue cancellation remains observable.
@@ -805,13 +861,15 @@ SkillResultData RemoteSkillClient::find_object(
   goal.category = category;
   goal.location = location;
   goal.search_scope = scope;
-  goal.approach_target =
-      json_value<bool>(action.parameters, "approach_target", true);
+  // Section: A bare FIND_OBJECT is a visual inspection; pickup macros explicitly opt into approach.
+  goal.approach_target = json_value<bool>(action.parameters, "approach_target", false);
   goal.stand_off_distance = static_cast<float>(
       json_value<double>(action.parameters, "stand_off_distance", 0.8));
   goal.timeout_sec = static_cast<float>(timeout);
   goal.preferred_viewpoint = json_value<std::string>(
       action.parameters, "preferred_viewpoint", "");
+  // Section: One action goal carries all characteristic and relation constraints to the Qwen detector.
+  goal.query_json = dump_json(build_find_query(action, object_name, category));
   auto goal_future = find_object_client_->async_send_goal(goal);
   if (!wait_future(goal_future, 5.0, blackboard)) {
     return make_skill_result(action.action_type, RECOVERABLE_FAILURE,
@@ -850,7 +908,8 @@ SkillResultData RemoteSkillClient::find_object(
                {"found_room", result->found_room},
                {"found_viewpoint", result->found_viewpoint},
                {"viewpoints_searched", result->viewpoints_searched},
-               {"navigation_failures", result->navigation_failures}};
+               {"navigation_failures", result->navigation_failures},
+               {"selection", parse_json(result->selection_json, Json::object())}};
   using Result = robot_ai_interfaces::action::FindObject::Result;
   std::string outcome = FAILED;
   bool recoverable = false;

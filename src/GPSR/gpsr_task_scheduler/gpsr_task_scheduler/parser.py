@@ -40,7 +40,7 @@ def parse_command(command_id: str, instruction: str, config: SchedulerConfig) ->
     task_location = _task_location(text, known_locations, report_location)
     recipient = _recipient(text, config)
     target = _target(text, task_type, config)
-    filters = _filters(text, config)
+    filters = _filters(text, config, task_type)
     person_selector, person_issues = _person_selector(text, task_type, filters, config)
     requested_person_fields = _requested_person_fields(text, task_type)
     issues.extend(person_issues)
@@ -278,6 +278,10 @@ def _unknown_location_mentions(text: str, config: SchedulerConfig) -> list[str]:
     unknown: list[str] = []
     stop_words = {"and", "then", "tell", "report", "say", "answer", "count", "find", "locate", "look", "go", "navigate", "with", "for"}
     for match in re.finditer(r"(?=\b(?:in|at|to|from|on)\s+(?:the\s+)?([a-z_]+(?:\s+[a-z_]+){0,2}))", text):
+        # Section: Image relations such as "to the left of the cup" are not room/surface phrases.
+        relation_phrase = text[match.start():]
+        if re.match(r"\b(?:to|on)\s+(?:the\s+)?(?:left|right)\s+of\b", relation_phrase):
+            continue
         words = []
         for word in match.group(1).split():
             if word in stop_words:
@@ -428,12 +432,17 @@ def strip_object_mentions(text: str, config: SchedulerConfig) -> str:
     return cleaned
 
 
-def _filters(text: str, config: SchedulerConfig) -> list[dict[str, Any]]:
-    """Special function: Extract object features and human pose filters."""
+def _filters(text: str, config: SchedulerConfig, task_type: str) -> list[dict[str, Any]]:
+    """Special function: Extract task-compatible object features and human pose filters."""
     filters: list[dict[str, Any]] = []
     # Section: An object's published name does not itself request a color filter.
     feature_text = strip_object_mentions(text, config)
     for feature, values in config.supported_object_features.items():
+        # Section: A shirt attribute belongs to person appearance; an object color belongs to Qwen ROI filtering.
+        if task_type in {"find_object", "count_objects", "acquire_object", "place_object", "deliver_object"} and feature == "shirt_color":
+            continue
+        if task_type in {"find_person", "count_people"} and feature == "object_color":
+            continue
         for value in values:
             if re.search(rf"\b{re.escape(value.replace('_', ' '))}\b", feature_text):
                 filters.append({"feature": feature, "operator": "equals", "value": value})

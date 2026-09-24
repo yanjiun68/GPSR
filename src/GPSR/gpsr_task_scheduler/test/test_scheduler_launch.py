@@ -10,6 +10,7 @@ from types import ModuleType
 from launch import LaunchContext
 from launch.actions import DeclareLaunchArgument
 from launch_ros.actions import LifecycleNode, Node
+from launch_ros.utilities import evaluate_parameters
 from launch.actions import IncludeLaunchDescription  # Inspect ownership of the managed runtime stack.
 from launch.utilities import perform_substitutions  # Resolve forwarded controls under launch defaults.
 
@@ -66,6 +67,65 @@ def launched_node(entities: list[object], node_name: str) -> Node:
     ]
     assert len(matches) == 1
     return matches[0]
+
+
+def evaluated_node_parameters(node: Node, context: LaunchContext) -> dict[str, object]:
+    """Special function: Resolve one launch node's parameter substitutions for assertions."""
+    # Section: ROS stores each parameter dictionary in a private normalized tuple.
+    normalized = getattr(node, "_Node__parameters")
+    evaluated = evaluate_parameters(context, normalized)
+    assert len(evaluated) == 1 and isinstance(evaluated[0], dict)
+    return evaluated[0]
+
+
+def test_follow_provider_defaults_to_master_and_can_select_legacy(
+    tmp_path: Path,
+) -> None:
+    """Special function: Keep follow client and lifecycle ownership aligned by endpoint."""
+    # Section: The default client selects the managed master adapter.
+    entities, master_context = launch_entities(tmp_path)
+    executor = launched_node(entities, "gpsr_executor")
+    manager = launched_node(entities, "gpsr_lifecycle_manager")
+    adapter = lifecycle_node(entities, "follow_person_skill_server")
+    assert (
+        master_context.launch_configurations["follow_person_action"]
+        == "/person_follow/master"
+    )
+    assert (
+        evaluated_node_parameters(executor, master_context)["follow_person_action"]
+        == "/person_follow/master"
+    )
+    assert (
+        evaluated_node_parameters(manager, master_context)[
+            "manage_follow_person_adapter"
+        ]
+        is True
+    )
+    assert (
+        evaluated_node_parameters(adapter, master_context)["action_name"]
+        == "/person_follow/master"
+    )
+
+    # Section: Legacy selection disables only master-adapter lifecycle ownership.
+    entities, legacy_context = launch_entities(tmp_path)
+    legacy_context.launch_configurations["follow_person_action"] = "/person_follow/control"
+    executor = launched_node(entities, "gpsr_executor")
+    manager = launched_node(entities, "gpsr_lifecycle_manager")
+    adapter = lifecycle_node(entities, "follow_person_skill_server")
+    assert (
+        evaluated_node_parameters(executor, legacy_context)["follow_person_action"]
+        == "/person_follow/control"
+    )
+    assert (
+        evaluated_node_parameters(manager, legacy_context)[
+            "manage_follow_person_adapter"
+        ]
+        is False
+    )
+    assert (
+        evaluated_node_parameters(adapter, legacy_context)["action_name"]
+        == "/person_follow/master"
+    )
 
 
 def test_all_selectable_perception_pipelines_are_enabled_by_default(tmp_path: Path) -> None:

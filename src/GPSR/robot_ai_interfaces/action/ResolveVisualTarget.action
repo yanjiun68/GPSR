@@ -10,6 +10,12 @@ builtin_interfaces/Time image_stamp
 sensor_msgs/Image segmentation_mask
 bool require_mask
 float32 stand_off_distance
+# Section: Opt-in depth-threshold tracking keeps this goal alive across fresh depth observations.
+bool wait_for_target_depth
+float32 target_depth_m
+float32 target_depth_tolerance_m
+float32 wait_timeout_sec
+uint32 required_consecutive_samples
 ---
 # Section: Stable result codes for perception and geometry failures.
 uint8 SUCCESS=0
@@ -20,6 +26,8 @@ uint8 MASK_UNAVAILABLE=4
 uint8 DEPTH_QUALITY_FAILED=5
 uint8 TF_FAILED=6
 uint8 CANCELED=7
+uint8 TIMEOUT=8
+uint8 OVERSHOT=9
 bool success
 uint8 result_code
 geometry_msgs/PoseStamped target_pose
@@ -31,3 +39,7 @@ string message
 # Section: Bounded action feedback for observation selection and TF resolution.
 string phase
 float32 valid_depth_ratio
+# Section: Persistent depth tracking exposes the latest sample and threshold progress to clients.
+float32 depth_m
+uint32 consecutive_samples
+float32 remaining_time_sec

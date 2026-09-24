@@ -310,7 +310,11 @@ class QwenImageGrounder:
 
         # Section: Imports remain lazy so hardware-independent geometry tests need no ML runtime.
         import torch
-        from transformers import AutoModelForImageTextToText, AutoProcessor, BitsAndBytesConfig
+        from transformers import (
+            AutoProcessor,
+            BitsAndBytesConfig,
+            Qwen3VLForConditionalGeneration,
+        )
 
         quantization = BitsAndBytesConfig(
             load_in_4bit=True,
@@ -319,15 +323,17 @@ class QwenImageGrounder:
             bnb_4bit_use_double_quant=True,
         )
         self.processor = AutoProcessor.from_pretrained(self.model_path, local_files_only=True)
-        self.model = AutoModelForImageTextToText.from_pretrained(
+        self.model = Qwen3VLForConditionalGeneration.from_pretrained(
             self.model_path,
             quantization_config=quantization,
             device_map="auto",
-            attn_implementation="sdpa",
+            low_cpu_mem_usage=True,
             local_files_only=True,
         )
+        # Section: Disable training behavior because grounding is inference-only.
+        self.model.eval()
         self.torch = torch
-        self.logger.info("Loaded Qwen VLM for on-demand target grounding.")
+        self.logger.info("Loaded UnifoLM-ER-1 in NF4 for on-demand target grounding.")
 
     def ground(self, image_rgb: np.ndarray, requested_target: str) -> GroundedTarget:
         """Ground one semantic target in exactly one RGB observation."""
@@ -406,7 +412,7 @@ class TargetGraspGeometryNode(Node):
         # Section: Qwen performs semantic acquisition only on new or explicitly reacquired targets.
         default_prompt = str(Path(get_package_share_directory("vision")) / "config" / "qwen_grounding_prompt.txt")
         self.declare_parameter("qwen_enabled", True)
-        self.declare_parameter("qwen_model_path", "/home/yanjiun68/ai/models/Qwen3-VL-4B-Instruct")
+        self.declare_parameter("qwen_model_path", "/home/yanjiun68/ai/models/UnifoLM-ER-1")
         self.declare_parameter("qwen_prompt_path", default_prompt)
         self.declare_parameter("qwen_max_new_tokens", 192)
         self.declare_parameter("qwen_image_size", 448)

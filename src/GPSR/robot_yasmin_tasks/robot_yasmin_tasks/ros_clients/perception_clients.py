@@ -141,7 +141,14 @@ class PerceptionClients:
         """Special function: Build perception filter JSON from GPSR action parameters."""
         if "filter_json" in action.parameters:
             return str(action.parameters.get("filter_json") or "{}")
-        filters = dict(action.parameters.get("filters", {})) if isinstance(action.parameters.get("filters", {}), dict) else {}
+        # Section: Preserve the scheduler's semantic filter list for Qwen-backed object counting.
+        filters: dict[str, Any] = {}
+        raw_filters = action.parameters.get("filters", {})
+        if isinstance(raw_filters, list):
+            filters["filters"] = [item for item in raw_filters if isinstance(item, dict)]
+        elif isinstance(raw_filters, dict):
+            filters = dict(raw_filters)
+        # Section: Legacy count-control fields coexist with typed visual constraints in the same envelope.
         for key in ("min_confidence", "stale_timeout_sec", "enforce_location_filter"):
             if key in action.parameters:
                 filters[key] = action.parameters[key]

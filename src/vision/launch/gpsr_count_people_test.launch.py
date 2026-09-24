@@ -37,6 +37,8 @@ def generate_launch_description():
             "rgb_topic": rgb_topic,
             "detections_topic": "/perception/raw_human_detections",
             "annotated_image_topic": "/perception/human_detections_image",
+            # Section: Count-people testing retains the dedicated human YOLO backend.
+            "inference_backend": "yolo",
             "yolo_model_path": yolo_model_path,
             "confidence_threshold": 0.35,
             "include_classes": ["person"],

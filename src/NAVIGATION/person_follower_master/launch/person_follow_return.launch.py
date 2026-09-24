@@ -1,13 +1,14 @@
 """Composite launch: person-follow + breadcrumb teach + home-return.
 
-This is the production entry point for the follow-then-return-home
-behaviour. It layers on top of `my_robot_nav/drivers_only.launch.py`
-(lidar + base + odom + TF) with the stock breadcrumb node disabled
-so we can launch it ourselves with the session parameters applied.
+This is the production entry point for the follow-then-return-home behaviour.
+By default it expects robot/base/camera/Nav2 bringup to be launched
+separately. Set ``use_external_drivers:=false`` to include
+`my_robot_nav/drivers_only.launch.py` for standalone testing.
 
 Composition
 -----------
-  t=0  drivers_only (enable_breadcrumb_teach_repeat:=false)
+  t=0  external robot bringup (default) or drivers_only
+       (enable_breadcrumb_teach_repeat:=false)
        + RealSense D435i
        + scan_self_filter (/scan -> /scan_filtered)
        + static map -> odom identity (optional, off by default)
@@ -62,9 +63,9 @@ from launch.actions import (
     IncludeLaunchDescription,
     TimerAction,
 )
-from launch.conditions import IfCondition
+from launch.conditions import IfCondition, UnlessCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
+from launch.substitutions import LaunchConfiguration, PathJoinSubstitution, PythonExpression
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
 
@@ -80,8 +81,21 @@ def generate_launch_description() -> LaunchDescription:
     rviz = LaunchConfiguration("rviz", default="true")
     publish_map_tf = LaunchConfiguration("publish_map_tf", default="false")
     camera_enable = LaunchConfiguration("camera", default="true")
+    # Section: Default to the separated robot/Nav2 bringup contract.
+    use_external_drivers = LaunchConfiguration("use_external_drivers", default="true")
     yolo_device = LaunchConfiguration("yolo_device", default="cuda")
     yolo_stride = LaunchConfiguration("yolo_stride", default="1")
+
+    # Section: Allow the internal camera only when embedded hardware bringup is selected.
+    camera_enabled_condition = IfCondition(
+        PythonExpression([
+            "'",
+            camera_enable,
+            "' == 'true' and '",
+            use_external_drivers,
+            "' == 'false'",
+        ])
+    )
 
     # --- Drivers (lidar + base + odom + TF) with stock breadcrumb DISABLED. ---
     # We launch our own breadcrumb below so we can apply session_params.yaml
@@ -103,6 +117,7 @@ def generate_launch_description() -> LaunchDescription:
             # near the heading target (verified with /tmp/test_deadband_oscillation.py).
             "min_effective_wz": "0.0",
         }.items(),
+        condition=UnlessCondition(use_external_drivers),
     )
 
     # --- RealSense camera (aligned depth, 640x480x30) ---
@@ -120,7 +135,7 @@ def generate_launch_description() -> LaunchDescription:
             "depth_module.profile": "640x480x30",
             "pointcloud.enable": "false",
         }.items(),
-        condition=IfCondition(camera_enable),
+        condition=camera_enabled_condition,
     )
 
     # --- Self-filtered scan for breadcrumb and safety wrapper ---
@@ -255,6 +270,8 @@ def generate_launch_description() -> LaunchDescription:
         DeclareLaunchArgument("rviz", default_value="true"),
         DeclareLaunchArgument("publish_map_tf", default_value="false"),
         DeclareLaunchArgument("camera", default_value="true"),
+        # Section: External drivers/Nav2 are the default separate-launch mode.
+        DeclareLaunchArgument("use_external_drivers", default_value="true"),
         DeclareLaunchArgument("yolo_device", default_value="cuda"),
         DeclareLaunchArgument("yolo_stride", default_value="1"),
 
@@ -277,8 +294,9 @@ def generate_launch_description() -> LaunchDescription:
 
 """
 ros2 launch person_follower_master person_follow_return.launch.py \
-  launch_drivers:=false \
-  launch_camera:=false
+  use_external_drivers:=true \
+  camera:=false
 
-  This config is for integration with other nodes. 
+  The external mode is the default and is intended for integration with
+  a separately launched robot/Nav2 bringup.
   """

@@ -54,10 +54,10 @@ def test_named_recipient_inserts_find_person_before_tts() -> None:
 
 
 def test_multiple_object_features_are_structured_filters() -> None:
-    """Special function: Multiple feature words become structured perception filters."""
+    """Special function: Multiple feature words become object-Qwen perception filters."""
     result = planned_result("find coke with red and blue features in the kitchen tell me")
     filters = result.task_request.filters
-    assert {"feature": "shirt_color", "operator": "equals", "value": "red"} in filters
+    assert {"feature": "object_color", "operator": "equals", "value": "red"} in filters
     assert {"feature": "object_color", "operator": "equals", "value": "blue"} in filters
 
 

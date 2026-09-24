@@ -56,6 +56,8 @@ LEGACY_ACTION_ALIASES = {
     "RETURN_TO_INSTRUCTION_POINT": NAVIGATE,
     "REPORT": SAY,
     "GREET": SAY,
+    # Section: Historical feature-specific searches use the unified FIND_OBJECT contract.
+    "FIND_EXTREME_OBJECT": FIND_OBJECT,
 }
 
 

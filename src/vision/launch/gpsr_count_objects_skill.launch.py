@@ -12,7 +12,7 @@ def generate_launch_description() -> LaunchDescription:
     # Section: Skill input and detector configuration.
     rgb_topic = LaunchConfiguration("rgb_topic")
     show_gui = LaunchConfiguration("show_gui")
-    # Section: Use the requested workspace YOLOE segmentation weights for COUNT_OBJECTS.
+    # Section: Retain the local YOLO path only as an explicit fallback for the Qwen world-sensing detector.
     yolo_model_path = "/home/yanjiun68/workspace/WS1/PutrabotUPM-project/yoloe-26s-seg.pt"
 
     # Section: Temporal confirmation configuration shared with the existing test launch.
@@ -22,7 +22,7 @@ def generate_launch_description() -> LaunchDescription:
     confirmation_last_seen_timeout_sec = LaunchConfiguration("confirmation_last_seen_timeout_sec")
     confirmation_min_frames = LaunchConfiguration("confirmation_min_frames")
 
-    # Section: COUNT_OBJECTS-owned detector consuming the persistent camera topic.
+    # Section: COUNT_OBJECTS-owned Qwen detector consuming the persistent camera topic.
     gpsr_object_detector = Node(
         package="vision",
         executable="gpsr_object_detection_node.py",
@@ -32,6 +32,9 @@ def generate_launch_description() -> LaunchDescription:
             "rgb_topic": rgb_topic,
             "detections_topic": "/perception/raw_object_detections",
             "annotated_image_topic": "/perception/object_detections_image",
+            # Section: Count commands use the same test_camera-derived Qwen semantic ROI backend as FIND_OBJECT.
+            "inference_backend": "qwen",
+            "qwen_query_topic": "/perception/object_detector_query",
             "yolo_model_path": yolo_model_path,
             "confidence_threshold": 0.35,
             "exclude_classes": ["person"],
@@ -49,6 +52,9 @@ def generate_launch_description() -> LaunchDescription:
         parameters=[{
             "detections_topic": "/perception/raw_object_detections",
             "service_name": "/perception/count_objects",
+            # Section: Let the count request target Qwen and wait briefly for its next ROI frame.
+            "detector_query_topic": "/perception/object_detector_query",
+            "qwen_query_wait_timeout_sec": 1.5,
             "object_quantities_topic": "/perception/object_quantities",
             "raw_object_quantities_topic": "/perception/object_quantities_raw",
             "stale_timeout_sec": 5.0,

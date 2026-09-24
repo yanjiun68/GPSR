@@ -140,6 +140,12 @@ if(BUILD_TESTING)
     test/test_gpsr_count_objects_skill_launch.py
   )
 
+  # Section: Verify Qwen query dispatch and local semantic filtering for COUNT_OBJECTS.
+  ament_add_pytest_test(
+    test_count_objects_perception_server
+    test/test_count_objects_perception_server.py
+  )
+
   # Section: Verify Qwen ROI scaling, robust depth sampling, projection, and stand-off geometry.
   ament_add_pytest_test(
     test_qwen_roi_depth_resolver

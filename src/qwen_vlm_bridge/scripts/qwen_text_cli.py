@@ -37,8 +37,8 @@ def main() -> None:
     )
     parser.add_argument(
         "--model",
-        default="/home/yanjiun68/ai/models/Qwen3-VL-4B-Instruct",
-        help="Path to local Qwen model weights.",
+        default="/home/yanjiun68/ai/models/UnifoLM-ER-1",
+        help="Path to local UnifoLM-ER-1 model weights.",
     )
     parser.add_argument("--max-new-tokens", type=int, default=256)
     parser.add_argument("--no-4bit", action="store_true")

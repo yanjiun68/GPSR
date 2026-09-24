@@ -36,6 +36,10 @@ def generate_launch_description() -> LaunchDescription:
             "rgb_topic": rgb_topic,
             "detections_topic": "/perception/raw_object_detections",
             "annotated_image_topic": "/perception/object_detections_image",
+            # Section: GPSR object skills use Qwen world sensing through the existing detector contract.
+            "inference_backend": "qwen",
+            # Section: Active FIND_OBJECT and COUNT_OBJECTS goals supply semantic constraints through this shared topic.
+            "qwen_query_topic": "/perception/object_detector_query",
             "yolo_model_path": yolo_model_path,
             "confidence_threshold": 0.35,
             "exclude_classes": ["person"],
@@ -59,6 +63,8 @@ def generate_launch_description() -> LaunchDescription:
             "action_name": "/gpsr/find_object",
             "target_status_topic": "/gpsr/find_object/target_status",
             "detector_ready_topic": "/perception/object_detector_ready",
+            # Section: Keep the FIND_OBJECT selector correlated with the Qwen detector query topic.
+            "detector_query_topic": "/perception/object_detector_query",
         }],
     )
 
@@ -73,6 +79,8 @@ def generate_launch_description() -> LaunchDescription:
             "rgb_topic": rgb_topic,
             "detections_topic": "/perception/raw_human_detections",
             "annotated_image_topic": "/perception/human_detections_image",
+            # Section: Human-only perception remains on the class-trained YOLO backend.
+            "inference_backend": "yolo",
             "yolo_model_path": human_yolo_model_path,
             "confidence_threshold": 0.35,
             "include_classes": ["person"],
@@ -92,6 +100,9 @@ def generate_launch_description() -> LaunchDescription:
         parameters=[{
             "detections_topic": "/perception/raw_object_detections",
             "service_name": "/perception/count_objects",
+            # Section: COUNT_OBJECTS directs the shared Qwen detector before taking its confirmed ROI count.
+            "detector_query_topic": "/perception/object_detector_query",
+            "qwen_query_wait_timeout_sec": 1.5,
         }],
     )
     count_objects_skill = LifecycleNode(

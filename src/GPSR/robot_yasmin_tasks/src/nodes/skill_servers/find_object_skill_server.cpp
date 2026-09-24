@@ -2,10 +2,12 @@
 #include <atomic>
 #include <chrono>
 #include <cctype>
+#include <cmath>
 #include <condition_variable>
 #include <map>
 #include <memory>
 #include <mutex>
+#include <limits>
 #include <optional>
 #include <set>
 #include <string>
@@ -62,6 +64,7 @@ class FindObjectServer final : public rclcpp_lifecycle::LifecycleNode {
     declare_parameter<std::string>("global_costmap_service", "/global_costmap/get_costmap");
     declare_parameter<std::string>("target_status_topic", "/gpsr/find_object/target_status");
     declare_parameter<std::string>("detector_ready_topic", "/perception/object_detector_ready");
+    declare_parameter<std::string>("detector_query_topic", "/perception/object_detector_query");
     declare_parameter<std::string>("search_config_file", "");
     declare_parameter<std::string>("object_knowledge_file", "");
     declare_parameter<double>("default_timeout_sec", 300.0);
@@ -83,6 +86,9 @@ class FindObjectServer final : public rclcpp_lifecycle::LifecycleNode {
     ready_subscription_ = create_subscription<std_msgs::msg::Bool>(
         get_parameter("detector_ready_topic").as_string(), ready_qos,
         std::bind(&FindObjectServer::ready_callback, this, std::placeholders::_1));
+    // Section: One active FIND_OBJECT goal publishes its typed Qwen query before waiting for fresh frames.
+    detector_query_publisher_ = create_publisher<std_msgs::msg::String>(
+        get_parameter("detector_query_topic").as_string(), 10);
     action_server_ = rclcpp_action::create_server<Action>(
         this, get_parameter("action_name").as_string(),
         std::bind(&FindObjectServer::admit, this, std::placeholders::_1, std::placeholders::_2),
@@ -179,12 +185,13 @@ class FindObjectServer final : public rclcpp_lifecycle::LifecycleNode {
     return !object_aliases_.empty();
   }
 
-  // Special function: Resolve one goal into the detector labels it may match.
-  std::set<std::string> target_labels(const Action::Goal &goal,
-                                      bool &wildcard) const {
+  // Special function: Resolve object/category symbols into detector labels and wildcard behavior.
+  std::set<std::string> target_labels_for(
+      const std::string &raw_object, const std::string &raw_category,
+      bool &wildcard) const {
     // Section: Exact-object aliases take precedence over category membership.
     wildcard = false;
-    const auto object = clean_symbol(goal.object_name);
+    const auto object = clean_symbol(raw_object);
     if (!object.empty()) {
       if (wildcards_.count(object) != 0U) {
         wildcard = true;
@@ -194,12 +201,271 @@ class FindObjectServer final : public rclcpp_lifecycle::LifecycleNode {
       return found == object_aliases_.end() ? std::set<std::string>{}
                                             : std::set<std::string>{found->second};
     }
-    const auto category = clean_symbol(goal.category);
+    const auto category = clean_symbol(raw_category);
+    // Section: Generic object/any_object selectors are valid whether transported as object or category.
+    if (wildcards_.count(category) != 0U) {
+      wildcard = true;
+      return {};
+    }
     const auto alias = category_aliases_.find(category);
     if (alias == category_aliases_.end()) return {};
     const auto labels = category_labels_.find(alias->second);
     return labels == category_labels_.end() ? std::set<std::string>{}
                                             : labels->second;
+  }
+
+  // Special function: Resolve one action goal into detector labels using the shared lookup policy.
+  std::set<std::string> target_labels(const Action::Goal &goal,
+                                      bool &wildcard) const {
+    return target_labels_for(goal.object_name, goal.category, wildcard);
+  }
+
+  // Special function: Normalize optional query JSON while binding it to the action goal's canonical target.
+  Json query_from_goal(const Action::Goal &goal) const {
+    // Section: Invalid or non-object optional JSON becomes an empty constraint object, never model text.
+    Json query = Json::object();
+    if (!goal.query_json.empty()) {
+      try {
+        query = Json::parse(goal.query_json);
+      } catch (const Json::exception &) {
+        query = Json::object();
+      }
+    }
+    if (!query.is_object()) query = Json::object();
+    Json target = query.value("target", Json::object());
+    if (!target.is_object()) target = Json::object();
+    const auto object = clean_symbol(goal.object_name);
+    const auto category = clean_symbol(goal.category);
+    if (!object.empty()) target["object_name"] = object;
+    if (!category.empty()) target["category"] = category;
+    query["target"] = target;
+    Json filters = query.value("filters", Json::array());
+    if (!filters.is_array()) filters = Json::array();
+    // Section: Preserve direct legacy mode payloads while standardizing them as a size constraint.
+    auto mode = clean_symbol(query.value("mode", std::string{}));
+    if (mode == "biggest") mode = "largest";
+    if ((mode == "largest" || mode == "smallest") &&
+        std::none_of(filters.begin(), filters.end(), [&mode](const Json &item) {
+          return item.is_object() && item.value("feature", std::string{}) == "size_relation";
+        })) {
+      filters.push_back(Json{{"feature", "size_relation"},
+                             {"operator", "equals"},
+                             {"value", mode}});
+    }
+    query["filters"] = filters;
+    return query;
+  }
+
+  // Special function: Read one normalized value from the generic FIND_OBJECT filter list.
+  std::string query_filter_value(const Json &query,
+                                 const std::string &feature) const {
+    const auto filters = query.value("filters", Json::array());
+    if (!filters.is_array()) return "";
+    for (const auto &item : filters) {
+      if (!item.is_object()) continue;
+      if (clean_symbol(item.value("feature", std::string{})) != feature) continue;
+      if (clean_symbol(item.value("operator", std::string{"equals"})) != "equals") continue;
+      const auto value = clean_symbol(item.value("value", std::string{}));
+      if (!value.empty()) return value;
+    }
+    return "";
+  }
+
+  // Special function: Decode optional Qwen semantic attributes without trusting malformed detector data.
+  Json detection_attributes(const Detection &detection) const {
+    if (detection.attributes_json.empty()) return Json::object();
+    try {
+      const auto parsed = Json::parse(detection.attributes_json);
+      return parsed.is_object() ? parsed : Json::object();
+    } catch (const Json::exception &) {
+      return Json::object();
+    }
+  }
+
+  // Special function: Read one semantic property through compatible Qwen schema names.
+  std::string detection_attribute(const Detection &detection,
+                                  const std::string &feature) const {
+    const auto attributes = detection_attributes(detection);
+    std::vector<std::string> keys;
+    if (feature == "object_color") keys = {"color", "object_color"};
+    else if (feature == "shape") keys = {"shape", "approximate_shape"};
+    else if (feature == "orientation") keys = {"orientation"};
+    for (const auto &key : keys) {
+      const auto value = clean_symbol(attributes.value(key, std::string{}));
+      if (!value.empty()) return value;
+    }
+    return "";
+  }
+
+  // Special function: Reject candidates that cannot prove requested Qwen characteristics.
+  bool matches_attribute_filters(const Detection &detection,
+                                 const Json &query) const {
+    // Section: Size and spatial relations are evaluated after all ordinary attributes are filtered.
+    for (const auto &feature : {std::string{"object_color"}, std::string{"shape"},
+                                std::string{"orientation"}}) {
+      const auto required = query_filter_value(query, feature);
+      if (required.empty()) continue;
+      if (detection_attribute(detection, feature) != required) return false;
+    }
+    return true;
+  }
+
+  // Special function: Test one supported image-space relation between a target and reference ROI.
+  bool relation_matches(const Detection &candidate, const Detection &reference,
+                        const std::string &relation) const {
+    if (relation == "left_of") return candidate.center_u < reference.center_u;
+    if (relation == "right_of") return candidate.center_u > reference.center_u;
+    if (relation == "above") return candidate.center_v < reference.center_v;
+    if (relation == "below") return candidate.center_v > reference.center_v;
+    return relation == "near" || relation == "far_from";
+  }
+
+  // Special function: Compute an image-plane center distance for near/far relation ranking.
+  double image_distance(const Detection &first, const Detection &second) const {
+    const double horizontal = static_cast<double>(first.center_u - second.center_u);
+    const double vertical = static_cast<double>(first.center_v - second.center_v);
+    return std::sqrt(horizontal * horizontal + vertical * vertical);
+  }
+
+  // Special function: Return one finite image ROI area for largest/smallest selection.
+  double bbox_area(const Detection &detection) const {
+    const double width = std::max(1, detection.x2 - detection.x1);
+    const double height = std::max(1, detection.y2 - detection.y1);
+    return width * height;
+  }
+
+  // Special function: Select a query-compliant target from one detector frame deterministically.
+  std::optional<Detection> select_frame_candidate(
+      const std::vector<Detection> &frame, const std::set<std::string> &labels,
+      const bool wildcard, const Json &query) const {
+    // Section: First retain only semantic target candidates with sufficiently confident visual evidence.
+    std::vector<const Detection *> candidates;
+    for (const auto &detection : frame) {
+      const auto name = clean_symbol(detection.name);
+      const bool semantic_match = wildcard || labels.count(name) != 0U;
+      if (semantic_match && detection.confidence >= 0.50F &&
+          matches_attribute_filters(detection, query)) {
+        candidates.push_back(&detection);
+      }
+    }
+    if (candidates.empty()) return std::nullopt;
+
+    const auto relation = query_filter_value(query, "spatial_relation");
+    std::vector<const Detection *> references;
+    if (!relation.empty()) {
+      bool reference_wildcard = false;
+      const auto reference_labels = target_labels_for(
+          query_filter_value(query, "reference_object"),
+          query_filter_value(query, "reference_category"), reference_wildcard);
+      // Section: A relation without a visible configured reference must not select an arbitrary target.
+      if (!reference_wildcard && reference_labels.empty()) return std::nullopt;
+      for (const auto &detection : frame) {
+        const auto name = clean_symbol(detection.name);
+        if ((reference_wildcard || reference_labels.count(name) != 0U) &&
+            detection.confidence >= 0.50F) {
+          references.push_back(&detection);
+        }
+      }
+      if (references.empty()) return std::nullopt;
+    }
+
+    const auto size_relation = query_filter_value(query, "size_relation");
+    const Detection *best = nullptr;
+    double best_relation_score = 0.0;
+    for (const auto *candidate : candidates) {
+      double relation_score = 0.0;
+      if (!relation.empty()) {
+        bool relation_satisfied = false;
+        double nearest_distance = std::numeric_limits<double>::infinity();
+        double farthest_distance = 0.0;
+        for (const auto *reference : references) {
+          if (candidate == reference || !relation_matches(*candidate, *reference, relation)) continue;
+          relation_satisfied = true;
+          const auto distance = image_distance(*candidate, *reference);
+          nearest_distance = std::min(nearest_distance, distance);
+          farthest_distance = std::max(farthest_distance, distance);
+        }
+        if (!relation_satisfied) continue;
+        relation_score = relation == "far_from" ? farthest_distance : nearest_distance;
+      }
+      if (best == nullptr) {
+        best = candidate;
+        best_relation_score = relation_score;
+        continue;
+      }
+      // Section: Near/far ranks relative geometry first; size ranks eligible same-relation candidates.
+      if (relation == "near" && relation_score != best_relation_score) {
+        if (relation_score < best_relation_score) {
+          best = candidate;
+          best_relation_score = relation_score;
+        }
+        continue;
+      }
+      if (relation == "far_from" && relation_score != best_relation_score) {
+        if (relation_score > best_relation_score) {
+          best = candidate;
+          best_relation_score = relation_score;
+        }
+        continue;
+      }
+      const auto candidate_area = bbox_area(*candidate);
+      const auto best_area = bbox_area(*best);
+      if (size_relation == "smallest" && candidate_area != best_area) {
+        if (candidate_area < best_area) best = candidate;
+        continue;
+      }
+      if (size_relation == "largest" && candidate_area != best_area) {
+        if (candidate_area > best_area) best = candidate;
+        continue;
+      }
+      if (candidate->confidence > best->confidence) best = candidate;
+    }
+    return best ? std::optional<Detection>{*best} : std::nullopt;
+  }
+
+  // Special function: Build a coarse stable key so three confirmation frames refer to one image target.
+  std::string candidate_key(const Detection &detection) const {
+    return clean_symbol(detection.name) + "_" +
+           std::to_string(static_cast<int>(detection.center_u / 64.0F)) + "_" +
+           std::to_string(static_cast<int>(detection.center_v / 64.0F));
+  }
+
+  // Special function: Derive a reportable image-grid position from detector-provided image bounds.
+  std::string image_position(const Detection &detection) const {
+    if (detection.image_width <= 0 || detection.image_height <= 0) return "unknown";
+    const double horizontal = detection.center_u / static_cast<double>(detection.image_width);
+    const double vertical = detection.center_v / static_cast<double>(detection.image_height);
+    const std::string horizontal_name = horizontal < 1.0 / 3.0 ? "left"
+                                      : horizontal > 2.0 / 3.0 ? "right" : "center";
+    const std::string vertical_name = vertical < 1.0 / 3.0 ? "upper"
+                                    : vertical > 2.0 / 3.0 ? "lower" : "middle";
+    return vertical_name + "_" + horizontal_name;
+  }
+
+  // Special function: Serialize selected visual evidence for speech, history, and downstream manipulation.
+  Json selection_payload(const Detection &detection, const Json &query) const {
+    // Section: Preserve the original query so a later reporter can explain how the object was selected.
+    const auto size_relation = query_filter_value(query, "size_relation");
+    const auto spatial_relation = query_filter_value(query, "spatial_relation");
+    const auto reason = !size_relation.empty() ? "image_bbox_" + size_relation
+                      : !spatial_relation.empty() ? "image_relation_" + spatial_relation
+                      : "highest_confidence";
+    return Json{{"object_id", candidate_key(detection)},
+                {"name", clean_symbol(detection.name)},
+                {"confidence", detection.confidence},
+                {"bbox", Json::array({detection.x1, detection.y1, detection.x2, detection.y2})},
+                {"image_position", image_position(detection)},
+                {"attributes", detection_attributes(detection)},
+                {"selection_reason", reason},
+                {"query", query}};
+  }
+
+  // Special function: Send a sanitized goal query to the lifecycle-owned Qwen detector.
+  void publish_detector_query(const Json &query) {
+    if (!detector_query_publisher_) return;
+    std_msgs::msg::String message;
+    message.data = query.dump();
+    detector_query_publisher_->publish(message);
   }
 
   // Special function: Retain one complete detector frame, including an empty frame.
@@ -240,6 +506,9 @@ class FindObjectServer final : public rclcpp_lifecycle::LifecycleNode {
     const auto goal = goal_handle->get_goal();
     bool wildcard = false;
     const auto labels = target_labels(*goal, wildcard);
+    // Section: The action goal is the sole source of the active Qwen target/query for this mission.
+    const auto query = query_from_goal(*goal);
+    publish_detector_query(query);
     const auto timeout = goal->timeout_sec > 0.0F ? goal->timeout_sec : default_timeout_sec_;
     const auto started = std::chrono::steady_clock::now();
     const auto deadline = started + std::chrono::duration<double>(timeout);
@@ -247,6 +516,7 @@ class FindObjectServer final : public rclcpp_lifecycle::LifecycleNode {
     std::uint64_t cursor = 0;
     unsigned hits = 0;
     std::optional<Detection> best;
+    std::string last_candidate_key;
     while (std::chrono::steady_clock::now() < deadline && active_.load() && !goal_handle->is_canceling()) {
       std::vector<Detection> frame;
       {
@@ -258,18 +528,16 @@ class FindObjectServer final : public rclcpp_lifecycle::LifecycleNode {
         cursor = sequence_;
         frame = detections_;
       }
-      std::optional<Detection> frame_best;
-      for (const auto &detection : frame) {
-        const auto name = clean_symbol(detection.name);
-        const bool semantic_match = wildcard || labels.count(name) != 0U;
-        if (semantic_match && detection.confidence >= 0.50F &&
-            (!frame_best || detection.confidence > frame_best->confidence)) frame_best = detection;
-      }
+      // Section: The unified selector applies semantic labels, characteristics, relations, and extremes.
+      const auto frame_best = select_frame_candidate(frame, labels, wildcard, query);
       if (frame_best) {
-        ++hits;
+        const auto frame_candidate_key = candidate_key(*frame_best);
+        hits = frame_candidate_key == last_candidate_key ? hits + 1U : 1U;
+        last_candidate_key = frame_candidate_key;
         best = frame_best;
       } else {
         hits = 0;
+        last_candidate_key.clear();
       }
       const auto elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
       auto feedback = std::make_shared<Action::Feedback>();
@@ -304,6 +572,7 @@ class FindObjectServer final : public rclcpp_lifecycle::LifecycleNode {
       result->object_id = clean_symbol(best->name) + "_" + std::to_string(static_cast<int>(best->center_u)) + "_" +
                           std::to_string(static_cast<int>(best->center_v));
       result->found_room = goal->location;
+      result->selection_json = selection_payload(*best, query).dump();
       result->message = goal->approach_target
                             ? "Target verified, but approach geometry is not available from RGB detections alone."
                             : "Target verified from the live object detector.";
@@ -340,6 +609,7 @@ class FindObjectServer final : public rclcpp_lifecycle::LifecycleNode {
     action_server_.reset();
     detection_subscription_.reset();
     ready_subscription_.reset();
+    detector_query_publisher_.reset();
     std::lock_guard<std::mutex> lock(mutex_);
     detections_.clear();
     sequence_ = 0;
@@ -361,6 +631,7 @@ class FindObjectServer final : public rclcpp_lifecycle::LifecycleNode {
   std::uint64_t sequence_{0};
   std::vector<Detection> detections_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr status_publisher_;
+  rclcpp::Publisher<std_msgs::msg::String>::SharedPtr detector_query_publisher_;
   rclcpp::Subscription<DetectionArray>::SharedPtr detection_subscription_;
   rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr ready_subscription_;
   rclcpp_action::Server<Action>::SharedPtr action_server_;

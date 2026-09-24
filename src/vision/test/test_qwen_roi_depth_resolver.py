@@ -11,6 +11,7 @@ from pathlib import Path
 
 # Section: Synthetic depth and segmentation arrays make sensor behavior deterministic.
 import numpy as np
+import pytest
 
 
 def load_resolver_module():
@@ -71,6 +72,82 @@ def test_depth_quality_rejects_sparse_sensor_support() -> None:
         assert "Insufficient target depth support" in str(exc)
         return
     raise AssertionError("Sparse depth must be rejected.")
+
+
+def test_depth_wait_policy_preserves_legacy_one_shot_goals() -> None:
+    """Special function: Keep existing callers on the one-sample resolver path unless they explicitly opt in."""
+    # Section: Zero-valued persistent settings are valid only because the opt-in flag is false.
+    module = load_resolver_module()
+    assert module.validate_depth_wait_policy(False, 0.0, 0.0, 0.0, 0) is None
+
+
+def test_depth_wait_policy_rejects_unsafe_persistent_inputs() -> None:
+    """Special function: Require bounded, positive settings before a goal can wait for a depth threshold."""
+    # Section: Each invalid policy field must reject the action goal instead of creating an unbounded wait.
+    module = load_resolver_module()
+    invalid_policies = (
+        (0.0, 0.01, 120.0, 3),
+        (0.05, -0.01, 120.0, 3),
+        (0.05, 0.01, 0.0, 3),
+        (0.05, 0.01, 120.0, 0),
+    )
+    for target_depth_m, tolerance_m, timeout_sec, confirmations in invalid_policies:
+        with pytest.raises(ValueError):
+            module.validate_depth_wait_policy(True, target_depth_m, tolerance_m, timeout_sec, confirmations)
+
+
+def test_depth_wait_progress_requires_three_inclusive_target_samples() -> None:
+    """Special function: Complete only after three consecutive samples inside the selected 4-to-6 cm band."""
+    # Section: Both tolerance boundaries are inclusive and 5 cm remains the intended nominal success depth.
+    module = load_resolver_module()
+    policy = module.DepthWaitPolicy(0.05, 0.01, 120.0, 3)
+    first = module.advance_depth_wait_progress(0.04, policy, 0, 10.0, 130.0)
+    second = module.advance_depth_wait_progress(0.05, policy, first.consecutive_samples, 11.0, 130.0)
+    third = module.advance_depth_wait_progress(0.06, policy, second.consecutive_samples, 12.0, 130.0)
+    assert (first.phase, first.consecutive_samples, first.terminal_outcome) == (
+        "WAITING_FOR_CONFIRMATION", 1, None,
+    )
+    assert (second.phase, second.consecutive_samples, second.terminal_outcome) == (
+        "WAITING_FOR_CONFIRMATION", 2, None,
+    )
+    assert (third.phase, third.consecutive_samples, third.terminal_outcome) == (
+        "TARGET_DEPTH_REACHED", 3, "SUCCESS",
+    )
+
+
+def test_depth_wait_progress_resets_on_distant_or_invalid_samples() -> None:
+    """Special function: Prevent non-consecutive or invalid frames from satisfying the target-depth confirmation count."""
+    # Section: A too-distant sample and an absent sample both reset the in-band confirmation sequence.
+    module = load_resolver_module()
+    policy = module.DepthWaitPolicy(0.05, 0.01, 120.0, 3)
+    distant = module.advance_depth_wait_progress(0.07, policy, 2, 10.0, 130.0)
+    invalid = module.advance_depth_wait_progress(None, policy, 2, 11.0, 130.0)
+    assert (distant.phase, distant.consecutive_samples, distant.terminal_outcome) == (
+        "WAITING_FOR_TARGET_DEPTH", 0, None,
+    )
+    assert (invalid.phase, invalid.consecutive_samples, invalid.terminal_outcome) == (
+        "WAITING_FOR_VALID_DEPTH", 0, None,
+    )
+
+
+def test_depth_wait_progress_stops_on_overshoot_or_timeout() -> None:
+    """Special function: Report distinct terminal outcomes for a too-close ROI and an expired wait deadline."""
+    # Section: Timeout takes precedence at the exact deadline so an action cannot succeed after its bound.
+    module = load_resolver_module()
+    policy = module.DepthWaitPolicy(0.05, 0.01, 120.0, 3)
+    overshot = module.advance_depth_wait_progress(0.039, policy, 0, 10.0, 130.0)
+    timed_out = module.advance_depth_wait_progress(0.05, policy, 0, 130.0, 130.0)
+    assert (overshot.phase, overshot.terminal_outcome) == ("OVERSHOT", "OVERSHOT")
+    assert (timed_out.phase, timed_out.terminal_outcome) == ("TIMEOUT", "TIMEOUT")
+
+
+def test_sample_roi_depth_accepts_five_centimetres_with_near_field_floor() -> None:
+    """Special function: Permit a valid 5 cm ROI sample only when the configured depth floor supports it."""
+    # Section: The default 20 cm safety floor remains unchanged; the launch override enables this experiment.
+    module = load_resolver_module()
+    depth = np.full((20, 20), 0.05, dtype=np.float32)
+    sample = module.sample_roi_depth(depth, (0, 0, 20, 20), None, 0.01, 1.0, 0.25, 10, 0.0, 0.01)
+    assert sample.depth_m == pytest.approx(0.05)
 
 
 def test_pixel_projection_uses_camera_intrinsics() -> None:

@@ -83,6 +83,7 @@ install(PROGRAMS
   src/return_home.py
   src/scan_self_filter.py
   src/robocup_astra_camera_node.py
+  src/astra_cam_qw.py
   src/semantic_navigator.py
   scripts/follow_person.py
   scripts/people_candidates_bridge.py

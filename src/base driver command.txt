@@ -27,3 +27,50 @@ ros2 topic echo /gpsr/action_queue_status_json --field data \
       "\(.current_action_type) [\(.queue_state)] phase=\(.phase)"'
 
 =====================================================
+
+ros2 launch person_follower_master person_follow.launch.py \
+  use_external_drivers:=false (default is true)
+
+  ====================================================
+  # Existing behavior
+python3 test_text.py --input-source file --message message.txt
+
+# Read one command from /gpsr/command
+python3 test_text.py \
+  --input-source gpsr-command \
+  --gpsr-command-topic /gpsr/command \
+  --gpsr-command-timeout 60
+ =====================================
+
+
+  ros2 launch gpsr_task_scheduler gpsr_scheduler.launch.py \
+  command_input_mode:=qwen_bridge
+
+ros2 launch gpsr_task_scheduler qwen_action_queue.launch.py \
+  auto_execute:=true
+
+python3 /home/yanjiun68/ai/qwen3v1/test_text.py \
+  --input-source gpsr-command \
+  --publish-qwen-json
+----------------------------------------
+Local mode: 
+command_input_mode:=topic, 
+Qwen auto_execute:=false
+
+Qwen execution mode: 
+command_input_mode:=qwen_bridge, 
+Qwen auto_execute:=true
+=========================================
+
+
+
+
+
+============================================================
+Action interface for resolve visual target low level manual 
+============================================================
+ros2 action send_goal --feedback \
+  /vision/resolve_qwen_roi \
+  robot_ai_interfaces/action/ResolveVisualTarget \
+  "{target_id: 'cup', roi_x_min: 160.0, roi_y_min: 120.0, roi_x_max: 360.0, roi_y_max: 360.0, coordinate_width: 640, coordinate_height: 480, stand_off_distance: 0.9}"
+

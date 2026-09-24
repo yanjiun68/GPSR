@@ -11,6 +11,8 @@
 
   <exec_depend>ament_index_python</exec_depend>
   <exec_depend>astra_camera</exec_depend>
+  <!-- Astra Qwen ROI grounding converts adapter images and optionally publishes OpenCV annotations. -->
+  <exec_depend>cv_bridge</exec_depend>
   <exec_depend>diagnostic_msgs</exec_depend>
   <exec_depend>geometry_msgs</exec_depend>
   <exec_depend>launch</exec_depend>
@@ -27,6 +29,9 @@
   <exec_depend>nav2_dwb_controller</exec_depend>
   <exec_depend>nav2_mppi_controller</exec_depend>
   <exec_depend>python3-numpy</exec_depend>
+  <!-- The installed Qwen virtual environment supplies Transformers, Torch, and BitsAndBytes at runtime. -->
+  <exec_depend>python3-opencv</exec_depend>
+  <exec_depend>python3-pil</exec_depend>
   <exec_depend>realsense2_camera</exec_depend>
   <exec_depend>rclpy</exec_depend>
   <exec_depend>robot_description</exec_depend>
