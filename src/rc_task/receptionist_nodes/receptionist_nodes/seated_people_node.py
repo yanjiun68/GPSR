@@ -11,7 +11,7 @@ import rclpy
 from rclpy.node import Node
 
 # Import the seated-target service exposed by this node.
-from receptionist_interfaces.srv import ResolvePresentationTargets
+from robot_ai_interfaces.srv import ResolvePresentationTargets
 # Import the detections topic used to estimate occupied chairs.
 from putrabot_interfaces.msg import CamDetections
 # Import the stamped pose message used in the service response.

@@ -20,6 +20,8 @@ TASK_TO_SKILL = {
     "guide_person": "GUIDE_PERSON",
     "say": "SAY",
     "ask_and_listen": "ASK_AND_LISTEN",
+    # Section: Fixed facts are spoken through SAY, which delegates lookup to fixed_information_dialogue.
+    "fixed_information": "SAY",
 }
 
 # Section: Compound parser tasks are compiler-only and never become ActionQueue identifiers.
@@ -58,7 +60,7 @@ def plan_task(request: TaskRequest, config: SchedulerConfig) -> SchedulerResult:
             config,
         ))
         return _validated_capability_result(request, steps, config)
-    if request.task_type in {"say", "ask_and_listen"}:
+    if request.task_type in {"say", "ask_and_listen", "fixed_information"}:
         steps.extend(_communication_steps(request, config))
         return _validated_capability_result(request, steps, config)
     # Section: Every FIND skill is a compound mission and owns its search navigation.
@@ -263,7 +265,16 @@ def _communication_steps(request: TaskRequest, config: SchedulerConfig) -> list[
         )
         steps.append(recipient)
         dependencies = [recipient.step_id]
-    steps.append(_step("communicate", action_type, arguments, dependencies, config, "dialogue_result" if action_type == "ASK_AND_LISTEN" else None))
+    # Section: Both question-oriented skills expose their structured result to later steps.
+    result_variable = "dialogue_result" if action_type == "ASK_AND_LISTEN" else "fixed_information_result" if request.task_type == "fixed_information" else None
+    # Section: Mark fixed facts so SAY routes to the provider instead of speaking the question literally.
+    if request.task_type == "fixed_information":
+        arguments["fixed_information"] = True
+    communication_step = _step("communicate", action_type, arguments, dependencies, config, result_variable)
+    # Section: Provider lookup and answer speech retain the legacy fixed-information timeout budget.
+    if request.task_type == "fixed_information":
+        communication_step.timeout = config.timeout_for("FIXED_INFORMATION")
+    steps.append(communication_step)
     return steps
 
 

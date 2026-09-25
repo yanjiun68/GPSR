@@ -6,9 +6,9 @@ namespace robot_yasmin_tasks {
 
 yasmin::Outcomes skill_outcomes() {
   // Section: Keep ordering aligned with outcomes.py for viewer and test parity.
-  return {SUCCESS, FAILED, CANCELED, TIMEOUT, INVALID_INPUT, NOT_FOUND,
-          NEED_CLARIFICATION, RECOVERABLE_FAILURE, FATAL_FAILURE, PERSON_LOST,
-          SKILL_UNAVAILABLE};
+  return {SUCCESS,       FAILED,      CANCELED,           TIMEOUT,
+          INVALID_INPUT, NOT_FOUND,   NEED_CLARIFICATION, RECOVERABLE_FAILURE,
+          FATAL_FAILURE, PERSON_LOST, SKILL_UNAVAILABLE};
 }
 
 Json parse_json(const std::string &text, const Json &fallback) {
@@ -28,8 +28,7 @@ std::string dump_json(const Json &value) {
   return value.dump();
 }
 
-ActionStepData action_from_msg(
-    const robot_ai_interfaces::msg::ActionStep &message) {
+ActionStepData action_from_msg(const robot_ai_interfaces::msg::ActionStep &message) {
   // Section: Copy every public ActionStep field without reinterpretation.
   ActionStepData action;
   action.step_id = message.step_id;
@@ -52,8 +51,7 @@ ActionStepData action_from_msg(
   return action;
 }
 
-robot_ai_interfaces::msg::SkillResult result_to_msg(
-    const SkillResultData &result) {
+robot_ai_interfaces::msg::SkillResult result_to_msg(const SkillResultData &result) {
   // Section: Preserve the generated SkillResult wire contract.
   robot_ai_interfaces::msg::SkillResult message;
   message.action_type = result.action_type;
@@ -67,43 +65,37 @@ robot_ai_interfaces::msg::SkillResult result_to_msg(
 
 Json result_to_json(const SkillResultData &result) {
   // Section: Retain Python field names consumed by queue status and report skills.
-  return Json{{"action_type", result.action_type},
-              {"outcome", result.outcome},
-              {"message", result.message},
-              {"payload", result.payload},
-              {"recoverable", result.recoverable},
-              {"fatal", result.fatal}};
+  return Json{{"action_type", result.action_type}, {"outcome", result.outcome},
+              {"message", result.message},         {"payload", result.payload},
+              {"recoverable", result.recoverable}, {"fatal", result.fatal}};
 }
 
-SkillResultData make_skill_result(
-    const std::string &action_type, const std::string &outcome,
-    const std::string &message, const Json &payload, bool recoverable,
-    bool fatal) {
+SkillResultData make_skill_result(const std::string &action_type,
+                                  const std::string &outcome,
+                                  const std::string &message, const Json &payload,
+                                  bool recoverable, bool fatal) {
   // Section: Aggregate construction mirrors the Python factory without side effects.
-  return SkillResultData{action_type, outcome, message, payload, recoverable,
-                         fatal};
+  return SkillResultData{action_type, outcome, message, payload, recoverable, fatal};
 }
 
 bool is_recoverable(const std::string &outcome) {
   // Section: Preserve the exact recovery outcome set.
   static const std::set<std::string> values{
-      FAILED, TIMEOUT, NOT_FOUND, NEED_CLARIFICATION, RECOVERABLE_FAILURE,
-      PERSON_LOST};
+      FAILED, TIMEOUT, NOT_FOUND, NEED_CLARIFICATION, RECOVERABLE_FAILURE, PERSON_LOST};
   return values.count(outcome) != 0U;
 }
 
 bool is_fatal(const std::string &outcome) {
   // Section: Preserve the exact fatal outcome set.
-  static const std::set<std::string> values{CANCELED, INVALID_INPUT,
-                                             FATAL_FAILURE,
-                                             SKILL_UNAVAILABLE};
+  static const std::set<std::string> values{CANCELED, INVALID_INPUT, FATAL_FAILURE,
+                                            SKILL_UNAVAILABLE};
   return values.count(outcome) != 0U;
 }
 
 bool cancel_requested(const Blackboard::SharedPtr &blackboard) {
   // Section: The queue stores cancellation as a callable, matching Python behavior.
-  const auto callback = bb_get<std::function<bool()>>(
-      blackboard, bb::CANCEL_REQUESTED, std::function<bool()>{});
+  const auto callback = bb_get<std::function<bool()>>(blackboard, bb::CANCEL_REQUESTED,
+                                                      std::function<bool()>{});
   return callback ? callback() : false;
 }
 
@@ -117,18 +109,16 @@ std::optional<geometry_msgs::msg::PoseStamped> pose_from_json(const Json &raw) {
     const auto &position = raw.at("position");
     const auto &orientation = raw.at("orientation");
     std::vector<double> values{
-        position.at("x").get<double>(), position.at("y").get<double>(),
-        position.at("z").get<double>(), orientation.at("x").get<double>(),
+        position.at("x").get<double>(),    position.at("y").get<double>(),
+        position.at("z").get<double>(),    orientation.at("x").get<double>(),
         orientation.at("y").get<double>(), orientation.at("z").get<double>(),
         orientation.at("w").get<double>()};
     if (!std::all_of(values.begin(), values.end(),
                      [](double value) { return std::isfinite(value); })) {
       return std::nullopt;
     }
-    const double norm = std::sqrt(values[3] * values[3] +
-                                  values[4] * values[4] +
-                                  values[5] * values[5] +
-                                  values[6] * values[6]);
+    const double norm = std::sqrt(values[3] * values[3] + values[4] * values[4] +
+                                  values[5] * values[5] + values[6] * values[6]);
     if (norm <= 1.0e-9) {
       return std::nullopt;
     }

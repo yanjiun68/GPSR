@@ -1,13 +1,12 @@
 #include <atomic>
 #include <memory>
-#include <string>
-#include <thread>
-
 #include <rclcpp/executors/multi_threaded_executor.hpp>
 #include <rclcpp_action/rclcpp_action.hpp>
 #include <rclcpp_lifecycle/lifecycle_node.hpp>
 #include <robot_ai_interfaces/action/count_people.hpp>
 #include <robot_ai_interfaces/srv/count_people.hpp>
+#include <string>
+#include <thread>
 
 #include "robot_yasmin_tasks/runtime.hpp"
 
@@ -18,13 +17,15 @@ class CountPeopleSkillServer final : public rclcpp_lifecycle::LifecycleNode {
   using Action = robot_ai_interfaces::action::CountPeople;
   using GoalHandle = rclcpp_action::ServerGoalHandle<Action>;
   using Service = robot_ai_interfaces::srv::CountPeople;
-  using CallbackReturn = rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface::CallbackReturn;
+  using CallbackReturn =
+      rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface::CallbackReturn;
 
   // Special function: Declare unchanged interface names and timeout policy.
   CountPeopleSkillServer()
       : rclcpp_lifecycle::LifecycleNode("count_people_skill_server") {
     action_name_ = declare_parameter<std::string>("action_name", "/gpsr/count_people");
-    service_name_ = declare_parameter<std::string>("perception_service", "/perception/count_people");
+    service_name_ = declare_parameter<std::string>("perception_service",
+                                                   "/perception/count_people");
     default_timeout_sec_ = declare_parameter<double>("default_timeout_sec", 5.0);
     RCLCPP_INFO(get_logger(), "CountPeople lifecycle server is UNCONFIGURED.");
   }
@@ -36,8 +37,8 @@ class CountPeopleSkillServer final : public rclcpp_lifecycle::LifecycleNode {
       action_server_ = rclcpp_action::create_server<Action>(
           get_node_base_interface(), get_node_clock_interface(),
           get_node_logging_interface(), get_node_waitables_interface(), action_name_,
-          std::bind(&CountPeopleSkillServer::goal_callback, this,
-                    std::placeholders::_1, std::placeholders::_2),
+          std::bind(&CountPeopleSkillServer::goal_callback, this, std::placeholders::_1,
+                    std::placeholders::_2),
           std::bind(&CountPeopleSkillServer::cancel_callback, this,
                     std::placeholders::_1),
           std::bind(&CountPeopleSkillServer::accepted_callback, this,
@@ -93,17 +94,15 @@ class CountPeopleSkillServer final : public rclcpp_lifecycle::LifecycleNode {
   }
 
   // Special function: Apply the original active and timeout admission checks.
-  rclcpp_action::GoalResponse goal_callback(
-      const rclcpp_action::GoalUUID &,
-      std::shared_ptr<const Action::Goal> goal) {
+  rclcpp_action::GoalResponse goal_callback(const rclcpp_action::GoalUUID &,
+                                            std::shared_ptr<const Action::Goal> goal) {
     return skill_active_.load() && goal->timeout_sec >= 0.0F
                ? rclcpp_action::GoalResponse::ACCEPT_AND_EXECUTE
                : rclcpp_action::GoalResponse::REJECT;
   }
 
   // Special function: Allow executor cancellation.
-  rclcpp_action::CancelResponse cancel_callback(
-      const std::shared_ptr<GoalHandle>) {
+  rclcpp_action::CancelResponse cancel_callback(const std::shared_ptr<GoalHandle>) {
     return rclcpp_action::CancelResponse::ACCEPT;
   }
 
@@ -126,9 +125,8 @@ class CountPeopleSkillServer final : public rclcpp_lifecycle::LifecycleNode {
     feedback->status = "Counting people at " +
                        (goal->location.empty() ? "current view" : goal->location);
     goal_handle->publish_feedback(feedback);
-    const double timeout = goal->timeout_sec != 0.0F
-                               ? goal->timeout_sec
-                               : default_timeout_sec_;
+    const double timeout =
+        goal->timeout_sec != 0.0F ? goal->timeout_sec : default_timeout_sec_;
     if (!count_client_->wait_for_service(std::chrono::duration<double>(timeout))) {
       result->result_json = "{}";
       result->message = "Perception count_people service is unavailable.";

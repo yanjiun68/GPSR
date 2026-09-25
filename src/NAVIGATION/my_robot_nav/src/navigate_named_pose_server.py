@@ -12,7 +12,7 @@ from rclpy.action import ActionClient, ActionServer, CancelResponse, GoalRespons
 from rclpy.node import Node
 from yaml import safe_load
 
-from receptionist_interfaces.action import NavigateNamedPose
+from robot_ai_interfaces.action import NavigateNamedPose
 
 
 class NavigateNamedPoseServer(Node):

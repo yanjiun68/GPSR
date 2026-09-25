@@ -74,3 +74,8 @@ ros2 action send_goal --feedback \
   robot_ai_interfaces/action/ResolveVisualTarget \
   "{target_id: 'cup', roi_x_min: 160.0, roi_y_min: 120.0, roi_x_max: 360.0, roi_y_max: 360.0, coordinate_width: 640, coordinate_height: 480, stand_off_distance: 0.9}"
 
+=========================
+# REAL TIME INSPECT PLAN
+-------------------------
+ros2 topic echo --once /gpsr/task_plan std_msgs/msg/String   --field data --full-length   | jq '.command_context.action_queue'
+=========================

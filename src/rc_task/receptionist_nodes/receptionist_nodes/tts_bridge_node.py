@@ -8,7 +8,7 @@ from rclpy.node import Node
 from std_msgs.msg import String
 
 # Import the explicit speech service used by SMACC2 and other nodes.
-from receptionist_interfaces.srv import SpeakText
+from robot_ai_interfaces.srv import SpeakText
 # Import the helper that performs Piper playback.
 from receptionist_nodes.helpers.piper_utils import speak_text_with_piper
 

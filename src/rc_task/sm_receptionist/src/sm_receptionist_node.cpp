@@ -17,23 +17,23 @@
 #include <llm_interfaces/srv/get_receptionist_advice.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <rclcpp_action/rclcpp_action.hpp>
-#include <receptionist_interfaces/action/capture_named_profile.hpp>
-#include <receptionist_interfaces/action/collect_guest_profile.hpp>
-#include <receptionist_interfaces/action/navigate_named_pose.hpp>
-#include <receptionist_interfaces/action/track_guest_appearance.hpp>
-#include <receptionist_interfaces/msg/guest_appearance.hpp>
-#include <receptionist_interfaces/msg/person_profile.hpp>
-#include <receptionist_interfaces/srv/clear_current_guest.hpp>
-#include <receptionist_interfaces/srv/commit_current_guest.hpp>
-#include <receptionist_interfaces/srv/face_pose.hpp>
-#include <receptionist_interfaces/srv/find_empty_chair.hpp>
-#include <receptionist_interfaces/srv/mark_profile_seated.hpp>
-#include <receptionist_interfaces/srv/point_to_seat.hpp>
-#include <receptionist_interfaces/srv/prepare_navigation_session.hpp>
-#include <receptionist_interfaces/srv/resolve_presentation_targets.hpp>
-#include <receptionist_interfaces/srv/set_current_guest_profile.hpp>
-#include <receptionist_interfaces/srv/set_host_profile.hpp>
-#include <receptionist_interfaces/srv/speak_text.hpp>
+#include <robot_ai_interfaces/action/capture_named_profile.hpp>
+#include <robot_ai_interfaces/action/collect_guest_profile.hpp>
+#include <robot_ai_interfaces/action/navigate_named_pose.hpp>
+#include <robot_ai_interfaces/action/track_guest_appearance.hpp>
+#include <robot_ai_interfaces/msg/guest_appearance.hpp>
+#include <robot_ai_interfaces/msg/person_profile.hpp>
+#include <robot_ai_interfaces/srv/clear_current_guest.hpp>
+#include <robot_ai_interfaces/srv/commit_current_guest.hpp>
+#include <robot_ai_interfaces/srv/face_pose.hpp>
+#include <robot_ai_interfaces/srv/find_empty_chair.hpp>
+#include <robot_ai_interfaces/srv/mark_profile_seated.hpp>
+#include <robot_ai_interfaces/srv/point_to_seat.hpp>
+#include <robot_ai_interfaces/srv/prepare_navigation_session.hpp>
+#include <robot_ai_interfaces/srv/resolve_presentation_targets.hpp>
+#include <robot_ai_interfaces/srv/set_current_guest_profile.hpp>
+#include <robot_ai_interfaces/srv/set_host_profile.hpp>
+#include <robot_ai_interfaces/srv/speak_text.hpp>
 #include <smacc2/smacc.hpp>
 #include <std_msgs/msg/bool.hpp>
 
@@ -359,7 +359,7 @@ private:
       return true;
     }
 
-    auto host = receptionist_interfaces::msg::PersonProfile();
+    auto host = robot_ai_interfaces::msg::PersonProfile();
     host.profile_id = "host";
     host.role = "host";
     host.name = "Host";
@@ -368,18 +368,18 @@ private:
     host.is_confirmed = true;
     host.confidence_score = 1.0;
 
-    auto set_host_req = std::make_shared<receptionist_interfaces::srv::SetHostProfile::Request>();
+    auto set_host_req = std::make_shared<robot_ai_interfaces::srv::SetHostProfile::Request>();
     set_host_req->profile = host;
-    auto set_host_resp = callService<receptionist_interfaces::srv::SetHostProfile>(
+    auto set_host_resp = callService<robot_ai_interfaces::srv::SetHostProfile>(
       "/guest_memory/set_host_profile", set_host_req, 2.0, 2.0);
 
-    auto clear_req = std::make_shared<receptionist_interfaces::srv::ClearCurrentGuest::Request>();
-    auto clear_resp = callService<receptionist_interfaces::srv::ClearCurrentGuest>(
+    auto clear_req = std::make_shared<robot_ai_interfaces::srv::ClearCurrentGuest::Request>();
+    auto clear_resp = callService<robot_ai_interfaces::srv::ClearCurrentGuest>(
       "/guest_memory/clear_current_guest", clear_req, 2.0, 2.0);
 
     auto prepare_req =
-      std::make_shared<receptionist_interfaces::srv::PrepareNavigationSession::Request>();
-    auto prepare_resp = callService<receptionist_interfaces::srv::PrepareNavigationSession>(
+      std::make_shared<robot_ai_interfaces::srv::PrepareNavigationSession::Request>();
+    auto prepare_resp = callService<robot_ai_interfaces::srv::PrepareNavigationSession>(
       "/nav/prepare_session", prepare_req, 3.0, 5.0);
 
     return set_host_resp && set_host_resp->success && clear_resp && clear_resp->success &&
@@ -401,9 +401,9 @@ private:
       return true;
     }
 
-    receptionist_interfaces::action::NavigateNamedPose::Goal goal;
+    robot_ai_interfaces::action::NavigateNamedPose::Goal goal;
     goal.target_name = target;
-    auto result = callAction<receptionist_interfaces::action::NavigateNamedPose>(
+    auto result = callAction<robot_ai_interfaces::action::NavigateNamedPose>(
       "/nav/navigate_named_pose", goal, 5.0, 180.0);
     return result && result->success;
   }
@@ -415,9 +415,9 @@ private:
       return true;
     }
 
-    auto req = std::make_shared<receptionist_interfaces::srv::SpeakText::Request>();
+    auto req = std::make_shared<robot_ai_interfaces::srv::SpeakText::Request>();
     req->text = text;
-    auto resp = callService<receptionist_interfaces::srv::SpeakText>(
+    auto resp = callService<robot_ai_interfaces::srv::SpeakText>(
       "/speech/speak_text", req, 3.0, 20.0);
     return resp && resp->success;
   }
@@ -502,10 +502,10 @@ private:
     return speakText(adviceSpeech(request_type, fallback));
   }
 
-  receptionist_interfaces::msg::PersonProfile fallbackProfile()
+  robot_ai_interfaces::msg::PersonProfile fallbackProfile()
   {
     const int index = guestIndex();
-    receptionist_interfaces::msg::PersonProfile profile;
+    robot_ai_interfaces::msg::PersonProfile profile;
     profile.profile_id = "current_guest";
     profile.role = "guest";
     profile.name = "Guest " + std::to_string(index);
@@ -518,17 +518,17 @@ private:
 
   bool collectProfile()
   {
-    receptionist_interfaces::msg::PersonProfile profile = fallbackProfile();
+    robot_ai_interfaces::msg::PersonProfile profile = fallbackProfile();
 
     if (!dryRun()) {
-      receptionist_interfaces::action::CollectGuestProfile::Goal goal;
+      robot_ai_interfaces::action::CollectGuestProfile::Goal goal;
       goal.mic_device = stringParam("dialogue_mic_device", "auto");
       goal.record_sec = static_cast<float>(doubleParam("dialogue_record_sec", 4.0));
       goal.piper_model_path = stringParam("dialogue_piper_model_path", "");
       goal.whisper_model = stringParam("dialogue_whisper_model", "base");
       goal.whisper_language = stringParam("dialogue_whisper_language", "en");
 
-      auto result = callAction<receptionist_interfaces::action::CollectGuestProfile>(
+      auto result = callAction<robot_ai_interfaces::action::CollectGuestProfile>(
         "/dialogue/collect_guest_profile", goal, 3.0, 60.0);
       if (result && result->success) {
         profile = result->profile;
@@ -551,10 +551,10 @@ private:
       return true;
     }
 
-    receptionist_interfaces::action::TrackGuestAppearance::Goal goal;
+    robot_ai_interfaces::action::TrackGuestAppearance::Goal goal;
     goal.guest_profile_id = "current_guest";
     auto node = getNode();
-    auto client = rclcpp_action::create_client<receptionist_interfaces::action::TrackGuestAppearance>(
+    auto client = rclcpp_action::create_client<robot_ai_interfaces::action::TrackGuestAppearance>(
       node, "/appearance/track_guest");
     if (!client->wait_for_action_server(2s)) {
       return true;
@@ -574,7 +574,7 @@ private:
 
   bool storeGuest()
   {
-    receptionist_interfaces::msg::PersonProfile profile = fallbackProfile();
+    robot_ai_interfaces::msg::PersonProfile profile = fallbackProfile();
     getStateMachine()->getGlobalSMData("guest_name", profile.name);
     getStateMachine()->getGlobalSMData("favorite_drink", profile.favorite_drink);
 
@@ -582,9 +582,9 @@ private:
       return true;
     }
 
-    auto req = std::make_shared<receptionist_interfaces::srv::SetCurrentGuestProfile::Request>();
+    auto req = std::make_shared<robot_ai_interfaces::srv::SetCurrentGuestProfile::Request>();
     req->profile = profile;
-    auto resp = callService<receptionist_interfaces::srv::SetCurrentGuestProfile>(
+    auto resp = callService<robot_ai_interfaces::srv::SetCurrentGuestProfile>(
       "/guest_memory/set_current_guest_profile", req, 2.0, 2.0);
     return resp && resp->success;
   }
@@ -601,9 +601,9 @@ private:
       return true;
     }
 
-    auto req = std::make_shared<receptionist_interfaces::srv::CommitCurrentGuest::Request>();
+    auto req = std::make_shared<robot_ai_interfaces::srv::CommitCurrentGuest::Request>();
     req->new_profile_id = profile_id;
-    auto resp = callService<receptionist_interfaces::srv::CommitCurrentGuest>(
+    auto resp = callService<robot_ai_interfaces::srv::CommitCurrentGuest>(
       "/guest_memory/commit_current_guest", req, 2.0, 2.0);
     if (resp && resp->success) {
       getStateMachine()->setGlobalSMData(
@@ -618,9 +618,9 @@ private:
     std::vector<std::string> target_ids{"host"};
     if (!dryRun()) {
       auto req =
-        std::make_shared<receptionist_interfaces::srv::ResolvePresentationTargets::Request>();
+        std::make_shared<robot_ai_interfaces::srv::ResolvePresentationTargets::Request>();
       req->guest_index = guestIndex();
-      auto resp = callService<receptionist_interfaces::srv::ResolvePresentationTargets>(
+      auto resp = callService<robot_ai_interfaces::srv::ResolvePresentationTargets>(
         "/seated_people/resolve_presentation_targets", req, 3.0, 5.0);
       if (resp && resp->success) {
         target_ids = resp->target_profile_ids;
@@ -639,9 +639,9 @@ private:
 
     (void)key;
     geometry_msgs::msg::PoseStamped pose;
-    auto req = std::make_shared<receptionist_interfaces::srv::FacePose::Request>();
+    auto req = std::make_shared<robot_ai_interfaces::srv::FacePose::Request>();
     req->target_pose = pose;
-    auto resp = callService<receptionist_interfaces::srv::FacePose>(
+    auto resp = callService<robot_ai_interfaces::srv::FacePose>(
       "/nav/face_pose", req, 3.0, 20.0);
     return resp && resp->success;
   }
@@ -652,11 +652,11 @@ private:
       return true;
     }
 
-    receptionist_interfaces::action::CaptureNamedProfile::Goal goal;
+    robot_ai_interfaces::action::CaptureNamedProfile::Goal goal;
     goal.profile_id = "host";
     goal.role = "host";
     goal.name = "Host";
-    auto result = callAction<receptionist_interfaces::action::CaptureNamedProfile>(
+    auto result = callAction<robot_ai_interfaces::action::CaptureNamedProfile>(
       "/appearance/capture_named_profile", goal, 3.0, 30.0);
     return result && result->success;
   }
@@ -683,8 +683,8 @@ private:
       return true;
     }
 
-    auto req = std::make_shared<receptionist_interfaces::srv::FindEmptyChair::Request>();
-    auto resp = callService<receptionist_interfaces::srv::FindEmptyChair>(
+    auto req = std::make_shared<robot_ai_interfaces::srv::FindEmptyChair::Request>();
+    auto resp = callService<robot_ai_interfaces::srv::FindEmptyChair>(
       "/chair/find_empty_chair", req, 3.0, 5.0);
     if (!resp || !resp->success) {
       getStateMachine()->setGlobalSMData("last_error", std::string("no_empty_chair"));
@@ -710,12 +710,12 @@ private:
       return true;
     }
 
-    auto req = std::make_shared<receptionist_interfaces::srv::PointToSeat::Request>();
+    auto req = std::make_shared<robot_ai_interfaces::srv::PointToSeat::Request>();
     req->chair_id = chair_id;
     req->waist_yaw_rad = static_cast<float>(waist_yaw);
     req->return_home = false;
     req->home_only = false;
-    auto resp = callService<receptionist_interfaces::srv::PointToSeat>(
+    auto resp = callService<robot_ai_interfaces::srv::PointToSeat>(
       "/chair/point_to_seat", req, 3.0, 10.0);
     return resp && resp->success;
   }
@@ -738,9 +738,9 @@ private:
       return true;
     }
 
-    auto req = std::make_shared<receptionist_interfaces::srv::MarkProfileSeated::Request>();
+    auto req = std::make_shared<robot_ai_interfaces::srv::MarkProfileSeated::Request>();
     req->profile_id = profile_id;
-    auto resp = callService<receptionist_interfaces::srv::MarkProfileSeated>(
+    auto resp = callService<robot_ai_interfaces::srv::MarkProfileSeated>(
       "/guest_memory/mark_profile_seated", req, 2.0, 2.0);
     return resp && resp->success;
   }

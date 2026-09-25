@@ -15,9 +15,9 @@ from rclpy.action import ActionServer
 from rclpy.node import Node
 
 # Import the action definition used for guest-profile collection.
-from receptionist_interfaces.action import CollectGuestProfile
+from robot_ai_interfaces.action import CollectGuestProfile
 # Import the profile message that will be returned to SMACC2.
-from receptionist_interfaces.msg import PersonProfile
+from robot_ai_interfaces.msg import PersonProfile
 # Import the helper used to load Whisper lazily.
 from receptionist_nodes.helpers.whisper_utils import lazy_load_whisper, transcribe_file
 

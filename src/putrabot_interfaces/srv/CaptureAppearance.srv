@@ -7,5 +7,5 @@ string commit_profile_id
 ---
 bool success
 string message
-receptionist_interfaces/PersonProfile profile
+robot_ai_interfaces/PersonProfile profile
 string json_data

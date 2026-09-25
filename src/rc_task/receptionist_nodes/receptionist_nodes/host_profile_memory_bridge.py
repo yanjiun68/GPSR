@@ -3,8 +3,8 @@
 import rclpy
 from rclpy.node import Node
 
-from receptionist_interfaces.msg import PersonProfile
-from receptionist_interfaces.srv import SetHostProfile
+from robot_ai_interfaces.msg import PersonProfile
+from robot_ai_interfaces.srv import SetHostProfile
 
 
 class HostProfileMemoryBridge(Node):

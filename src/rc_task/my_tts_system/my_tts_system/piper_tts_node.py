@@ -6,7 +6,7 @@ import time
 from pathlib import Path
 
 import rclpy
-from my_tts_system_interfaces.action import SpeakText
+from robot_ai_interfaces.action import SpeakText
 from rclpy.action import ActionServer, CancelResponse, GoalResponse
 from rclpy.node import Node
 

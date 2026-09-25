@@ -24,9 +24,9 @@ from rclpy.action import ActionServer, CancelResponse, GoalResponse
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
-from receptionist_interfaces.action import CaptureNamedProfile
-from receptionist_interfaces.msg import CurrentGuestStatus, GuestAppearance, PersonProfile
-from receptionist_interfaces.srv import (
+from robot_ai_interfaces.action import CaptureNamedProfile
+from robot_ai_interfaces.msg import CurrentGuestStatus, GuestAppearance, PersonProfile
+from robot_ai_interfaces.srv import (
     CaptureAppearance,
     CommitCurrentGuest,
     SetCurrentGuestProfile,

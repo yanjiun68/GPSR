@@ -7,6 +7,7 @@ matching:
 static_entries:
   robot_self_description:
     aliases:
+      - about yourself
       - something about yourself
       - tell me something about yourself
       - tell me about yourself
@@ -15,6 +16,8 @@ static_entries:
 
   team_name:
     aliases:
+      - team name
+      - your team name
       - your teams name
       - your team's name
       - what is your team name
@@ -24,6 +27,8 @@ static_entries:
 
   team_country:
     aliases:
+      - team country
+      - your team country
       - your teams country
       - your team's country
       - what country is your team from
@@ -32,6 +37,8 @@ static_entries:
 
   team_affiliation:
     aliases:
+      - team affiliation
+      - your team affiliation
       - your teams affiliation
       - your team's affiliation
       - what is your team affiliation
@@ -40,15 +47,15 @@ static_entries:
 
 runtime_entries:
   current_time:
-    aliases: [the time, what time is it, tell me the time, what is the current time]
+    aliases: [time, the time, current time, what time is it, tell me the time, what is the current time]
     handler: time
 
   today:
-    aliases: [what day is today, what is today's date, tell me today's date, what date is it today]
+    aliases: [today, today's date, current date, the date, what day is today, what is today's date, tell me today's date, what date is it today]
     handler: today
 
   tomorrow:
-    aliases: [what day is tomorrow, what is tomorrow's date, tell me tomorrow's date]
+    aliases: [tomorrow, tomorrow's date, what day is tomorrow, what is tomorrow's date, tell me tomorrow's date]
     handler: tomorrow
 
   day_of_week:

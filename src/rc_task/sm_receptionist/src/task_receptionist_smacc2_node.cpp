@@ -21,14 +21,14 @@
 
 #include <rclcpp/rclcpp.hpp>
 #include <rclcpp_action/rclcpp_action.hpp>
-#include <my_tts_system_interfaces/action/speak_text.hpp>
+#include <robot_ai_interfaces/action/speak_text.hpp>
 #include <nav2_msgs/action/navigate_to_pose.hpp>
-#include <receptionist_interfaces/action/collect_guest_profile.hpp>
-#include <receptionist_interfaces/action/navigate_named_pose.hpp>
-#include <receptionist_interfaces/msg/guest_appearance.hpp>
-#include <receptionist_interfaces/msg/person_profile.hpp>
-#include <receptionist_interfaces/srv/clear_current_guest.hpp>
-#include <receptionist_interfaces/srv/set_current_guest_profile.hpp>
+#include <robot_ai_interfaces/action/collect_guest_profile.hpp>
+#include <robot_ai_interfaces/action/navigate_named_pose.hpp>
+#include <robot_ai_interfaces/msg/guest_appearance.hpp>
+#include <robot_ai_interfaces/msg/person_profile.hpp>
+#include <robot_ai_interfaces/srv/clear_current_guest.hpp>
+#include <robot_ai_interfaces/srv/set_current_guest_profile.hpp>
 #include <smacc2/smacc.hpp>
 #include <std_msgs/msg/string.hpp>
 
@@ -136,15 +136,15 @@ struct SmTaskReceptionist : smacc2::SmaccStateMachineBase<SmTaskReceptionist, St
     setGlobalSMData("shirt_color_confidence", 0.0);
     setGlobalSMData(
       "glasses_state",
-      static_cast<int>(receptionist_interfaces::msg::GuestAppearance::UNKNOWN));
+      static_cast<int>(robot_ai_interfaces::msg::GuestAppearance::UNKNOWN));
     setGlobalSMData("glasses_confidence", 0.0);
     setGlobalSMData(
       "hat_state",
-      static_cast<int>(receptionist_interfaces::msg::GuestAppearance::UNKNOWN));
+      static_cast<int>(robot_ai_interfaces::msg::GuestAppearance::UNKNOWN));
     setGlobalSMData("hat_confidence", 0.0);
     setGlobalSMData(
       "face_mask_state",
-      static_cast<int>(receptionist_interfaces::msg::GuestAppearance::UNKNOWN));
+      static_cast<int>(robot_ai_interfaces::msg::GuestAppearance::UNKNOWN));
     setGlobalSMData("face_mask_confidence", 0.0);
     setGlobalSMData("feature_summary_text", std::string{});
     setGlobalSMData("active_insightface_pgid", static_cast<std::int64_t>(-1));
@@ -167,12 +167,12 @@ struct SmTaskReceptionist : smacc2::SmaccStateMachineBase<SmTaskReceptionist, St
 
 namespace client_behaviors
 {
-using CollectGuestProfile = receptionist_interfaces::action::CollectGuestProfile;
-using GuestAppearance = receptionist_interfaces::msg::GuestAppearance;
-using NavigateNamedPose = receptionist_interfaces::action::NavigateNamedPose;
+using CollectGuestProfile = robot_ai_interfaces::action::CollectGuestProfile;
+using GuestAppearance = robot_ai_interfaces::msg::GuestAppearance;
+using NavigateNamedPose = robot_ai_interfaces::action::NavigateNamedPose;
 using NavigateToPose = nav2_msgs::action::NavigateToPose;
-using PersonProfile = receptionist_interfaces::msg::PersonProfile;
-using TtsSpeakText = my_tts_system_interfaces::action::SpeakText;
+using PersonProfile = robot_ai_interfaces::msg::PersonProfile;
+using TtsSpeakText = robot_ai_interfaces::action::SpeakText;
 
 // Section: small formatting helpers shared by launch, speech, and appearance summary logic.
 std::chrono::milliseconds secondsToMilliseconds(double seconds)
@@ -734,13 +734,13 @@ private:
         missing.push_back(dialogue_action);
       }
       if (boolParam("store_profile_in_memory", true)) {
-        if (!serviceReady<receptionist_interfaces::srv::SetCurrentGuestProfile>(
+        if (!serviceReady<robot_ai_interfaces::srv::SetCurrentGuestProfile>(
             "/guest_memory/set_current_guest_profile",
             0.2))
         {
           missing.push_back("/guest_memory/set_current_guest_profile");
         }
-        if (!serviceReady<receptionist_interfaces::srv::ClearCurrentGuest>(
+        if (!serviceReady<robot_ai_interfaces::srv::ClearCurrentGuest>(
             "/guest_memory/clear_current_guest",
             0.2))
         {
@@ -1109,9 +1109,9 @@ private:
     }
 
     auto req =
-      std::make_shared<receptionist_interfaces::srv::SetCurrentGuestProfile::Request>();
+      std::make_shared<robot_ai_interfaces::srv::SetCurrentGuestProfile::Request>();
     req->profile = profile;
-    auto resp = callService<receptionist_interfaces::srv::SetCurrentGuestProfile>(
+    auto resp = callService<robot_ai_interfaces::srv::SetCurrentGuestProfile>(
       "/guest_memory/set_current_guest_profile", req, 3.0, 3.0);
     if (!resp || !resp->success) {
       RCLCPP_ERROR(
@@ -1156,8 +1156,8 @@ private:
 
     bool memory_cleared = true;
     if (!dryRun() && boolParam("store_profile_in_memory", true)) {
-      auto req = std::make_shared<receptionist_interfaces::srv::ClearCurrentGuest::Request>();
-      auto resp = callService<receptionist_interfaces::srv::ClearCurrentGuest>(
+      auto req = std::make_shared<robot_ai_interfaces::srv::ClearCurrentGuest::Request>();
+      auto resp = callService<robot_ai_interfaces::srv::ClearCurrentGuest>(
         "/guest_memory/clear_current_guest", req, 3.0, 3.0);
       memory_cleared = resp && resp->success;
       if (!memory_cleared) {

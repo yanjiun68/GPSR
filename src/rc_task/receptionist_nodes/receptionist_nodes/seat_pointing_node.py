@@ -10,7 +10,7 @@ import rclpy
 from rclpy.node import Node
 
 # Import the service exposed by this node.
-from receptionist_interfaces.srv import PointToSeat
+from robot_ai_interfaces.srv import PointToSeat
 
 # Import the Interbotix single-joint command only when the package is available.
 try:

@@ -12,7 +12,7 @@
 #include <putrabot_interfaces/action/person_follow.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <rclcpp_action/rclcpp_action.hpp>
-#include <receptionist_interfaces/action/navigate_named_pose.hpp>
+#include <robot_ai_interfaces/action/navigate_named_pose.hpp>
 #include <robot_ai_interfaces/action/count_objects.hpp>
 #include <robot_ai_interfaces/action/count_people.hpp>
 #include <robot_ai_interfaces/action/extract_guest_info.hpp>
@@ -78,6 +78,33 @@ class DialogueClient {
   rclcpp::Subscription<std_msgs::msg::String>::SharedPtr transcript_sub_;
 };
 
+class FixedInformationClient {
+ public:
+  // Special function: Create correlated fixed-information topic interfaces and reuse TTS.
+  FixedInformationClient(const rclcpp::Node::SharedPtr &node,
+                         const std::shared_ptr<SpeechClient> &speech,
+                         bool simulate = false);
+
+  // Special function: Resolve one package-owned question and speak its deterministic answer.
+  SkillResultData answer(const Blackboard::SharedPtr &blackboard,
+                         const ActionStepData &action);
+
+ private:
+  // Special function: Cache only the response matching the currently active request identifier.
+  void answer_callback(const std_msgs::msg::String::SharedPtr message);
+
+  rclcpp::Node::SharedPtr node_;
+  std::shared_ptr<SpeechClient> speech_;
+  bool simulate_;
+  std::mutex mutex_;
+  std::condition_variable condition_;
+  std::string pending_request_id_;
+  Json latest_answer_{Json::object()};
+  std::uint64_t sequence_{0};
+  rclcpp::Publisher<std_msgs::msg::String>::SharedPtr query_pub_;
+  rclcpp::Subscription<std_msgs::msg::String>::SharedPtr answer_sub_;
+};
+
 class Nav2Client {
  public:
   // Special function: Create named-pose, raw-pose, and spin action clients.
@@ -102,7 +129,7 @@ class Nav2Client {
   std::string named_action_;
   std::string pose_action_;
   std::string spin_action_;
-  rclcpp_action::Client<receptionist_interfaces::action::NavigateNamedPose>::SharedPtr
+  rclcpp_action::Client<robot_ai_interfaces::action::NavigateNamedPose>::SharedPtr
       named_client_;
   rclcpp_action::Client<nav2_msgs::action::NavigateToPose>::SharedPtr pose_client_;
   rclcpp_action::Client<nav2_msgs::action::Spin>::SharedPtr spin_client_;

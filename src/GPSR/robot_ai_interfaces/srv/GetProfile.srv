@@ -1,0 +1,5 @@
+string profile_id
+---
+bool success
+string message
+robot_ai_interfaces/PersonProfile profile

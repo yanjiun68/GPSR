@@ -21,8 +21,8 @@ from robot_yasmin_tasks.ros_clients.dialogue_clients import DialogueClients
 
 try:
     # Section: These are the repository's existing face recognition and enrollment interfaces.
-    from receptionist_interfaces.action import CaptureNamedProfile, RecognizeHumanId
-    from receptionist_interfaces.srv import LookupIdentityProfile
+    from robot_ai_interfaces.action import CaptureNamedProfile, RecognizeHumanId
+    from robot_ai_interfaces.srv import LookupIdentityProfile
 except ImportError:  # pragma: no cover - permits source-only unit tests before interface build.
     CaptureNamedProfile = None
     RecognizeHumanId = None

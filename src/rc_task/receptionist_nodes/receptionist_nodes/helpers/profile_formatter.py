@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 
-from receptionist_interfaces.msg import GuestAppearance
+from robot_ai_interfaces.msg import GuestAppearance
 
 
 def describe_person(profile):

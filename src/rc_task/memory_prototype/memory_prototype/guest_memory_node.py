@@ -8,8 +8,8 @@ from pathlib import Path
 import rclpy
 from rclpy.node import Node
 
-from receptionist_interfaces.msg import GuestAppearance, PersonProfile
-from receptionist_interfaces.srv import (
+from robot_ai_interfaces.msg import GuestAppearance, PersonProfile
+from robot_ai_interfaces.srv import (
     ClearCurrentGuest,
     CommitCurrentGuest,
     GetGuestCount,

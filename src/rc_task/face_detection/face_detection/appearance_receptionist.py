@@ -6,7 +6,7 @@ import rclpy
 from cv_bridge import CvBridge
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
-from receptionist_interfaces.msg import GuestAppearance
+from robot_ai_interfaces.msg import GuestAppearance
 from sensor_msgs.msg import Image
 from std_msgs.msg import Bool, String
 from ultralytics import YOLO

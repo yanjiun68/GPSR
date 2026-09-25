@@ -9,9 +9,9 @@ import rclpy
 from rclpy.node import Node
 
 # Import the profile message used throughout the receptionist task.
-from receptionist_interfaces.msg import PersonProfile
+from robot_ai_interfaces.msg import PersonProfile
 # Import the services that this memory node must expose.
-from receptionist_interfaces.srv import (
+from robot_ai_interfaces.srv import (
     ClearCurrentGuest,
     CommitCurrentGuest,
     GetGuestCount,

@@ -7,6 +7,7 @@ from __future__ import annotations
 from gpsr_task_scheduler.config import SchedulerConfig
 from gpsr_task_scheduler.clarification import assess_command
 from gpsr_task_scheduler.models import CommandContext, SchedulerResult, ValidationIssue
+from gpsr_task_scheduler.parser import _is_fixed_information_query
 from gpsr_task_scheduler.semantic_compiler import _semantic_drift_issues, compile_command
 
 
@@ -23,6 +24,14 @@ def schedule_command(
     if normalized_instruction is not None and _semantic_drift_issues(str(instruction), str(candidate), config):
         return compile_command(command_id, instruction, config, normalized_text=normalized_instruction)
     # Section: A normalizer cannot supply an action or entity absent from raw speech.
+    # Section: Provider-owned information questions are complete without physical target/location slots.
+    if _is_fixed_information_query(str(candidate).casefold()):
+        return compile_command(
+            command_id,
+            instruction,
+            config,
+            normalized_text=normalized_instruction,
+        )
     raw_completeness = assess_command(instruction, config)
     completeness = raw_completeness if not raw_completeness.complete else assess_command(candidate, config)
     if not completeness.complete:

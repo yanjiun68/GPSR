@@ -7,7 +7,7 @@ find_package(rclpy REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(cv_bridge REQUIRED)
-find_package(receptionist_interfaces REQUIRED)
+find_package(robot_ai_interfaces REQUIRED)
 find_package(putrabot_interfaces REQUIRED)
 
 ament_python_install_package(${PROJECT_NAME})

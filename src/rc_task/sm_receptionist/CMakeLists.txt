@@ -11,14 +11,14 @@ find_package(action_msgs REQUIRED)
 find_package(Boost REQUIRED COMPONENTS thread)
 find_package(geometry_msgs REQUIRED)
 find_package(llm_interfaces REQUIRED)
-find_package(my_tts_system_interfaces REQUIRED)
+find_package(robot_ai_interfaces REQUIRED)
 find_package(nav2_msgs REQUIRED)
 find_package(nav2_util REQUIRED)
 find_package(nlohmann_json REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(rclcpp_action REQUIRED)
 find_package(rclcpp_lifecycle REQUIRED)
-find_package(receptionist_interfaces REQUIRED)
+find_package(robot_ai_interfaces REQUIRED)
 find_package(smacc2 REQUIRED)
 find_package(std_msgs REQUIRED)
 
@@ -34,7 +34,7 @@ ament_target_dependencies(
   llm_interfaces
   rclcpp
   rclcpp_action
-  receptionist_interfaces
+  robot_ai_interfaces
   smacc2
   std_msgs
 )
@@ -49,11 +49,11 @@ target_compile_features(task_receptionist_smacc2_node PUBLIC cxx_std_17)
 target_include_directories(task_receptionist_smacc2_node PUBLIC include)
 ament_target_dependencies(
   task_receptionist_smacc2_node
-  my_tts_system_interfaces
+  robot_ai_interfaces
   nav2_msgs
   rclcpp
   rclcpp_action
-  receptionist_interfaces
+  robot_ai_interfaces
   smacc2
   std_msgs
 )

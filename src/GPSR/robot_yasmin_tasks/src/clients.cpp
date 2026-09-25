@@ -8,7 +8,8 @@
 namespace robot_yasmin_tasks {
 namespace {
 
-// Special function: Read one JSON value while preserving Python truthy-default behavior.
+// Special function: Read one JSON value while preserving Python truthy-default
+// behavior.
 template <typename T>
 T json_value(const Json &object, const std::string &key, const T &fallback) {
   if (!object.is_object() || !object.contains(key) || object.at(key).is_null()) {
@@ -30,7 +31,8 @@ std::string build_filter_json(const ActionStepData &action) {
     if (raw_filter.is_object()) return dump_json(raw_filter);
     return "{}";
   }
-  // Section: Semantic compiler filters are an array; preserve it inside the service's JSON envelope.
+  // Section: Semantic compiler filters are an array; preserve it inside the service's
+  // JSON envelope.
   Json payload = Json::object();
   const Json filters = action.parameters.value("filters", Json::array());
   if (filters.is_array()) {
@@ -38,9 +40,10 @@ std::string build_filter_json(const ActionStepData &action) {
   } else if (filters.is_object()) {
     payload = filters;
   }
-  // Section: Legacy count-control fields remain top-level and coexist with semantic ROI constraints.
-  for (const auto *key : {"min_confidence", "stale_timeout_sec",
-                          "enforce_location_filter"}) {
+  // Section: Legacy count-control fields remain top-level and coexist with semantic ROI
+  // constraints.
+  for (const auto *key :
+       {"min_confidence", "stale_timeout_sec", "enforce_location_filter"}) {
     if (action.parameters.contains(key)) {
       payload[key] = action.parameters.at(key);
     }
@@ -48,15 +51,19 @@ std::string build_filter_json(const ActionStepData &action) {
   return dump_json(payload);
 }
 
-// Special function: Build one typed object-query envelope from generic ActionStep parameters.
+// Special function: Build one typed object-query envelope from generic ActionStep
+// parameters.
 Json build_find_query(const ActionStepData &action, const std::string &object_name,
                       const std::string &category) {
-  // Section: Accept an explicit serialized query first, then the scheduler's native query object.
+  // Section: Accept an explicit serialized query first, then the scheduler's native
+  // query object.
   Json query = Json::object();
   if (action.parameters.contains("query_json")) {
     const auto raw = action.parameters.at("query_json");
-    if (raw.is_string()) query = parse_json(raw.get<std::string>(), Json::object());
-    else if (raw.is_object()) query = raw;
+    if (raw.is_string())
+      query = parse_json(raw.get<std::string>(), Json::object());
+    else if (raw.is_object())
+      query = raw;
   }
   if ((!query.is_object() || query.empty()) && action.parameters.contains("query") &&
       action.parameters.at("query").is_object()) {
@@ -64,13 +71,15 @@ Json build_find_query(const ActionStepData &action, const std::string &object_na
   }
   if (!query.is_object()) query = Json::object();
 
-  // Section: Merge filters instead of replacing them so direct and planner callers share one contract.
+  // Section: Merge filters instead of replacing them so direct and planner callers
+  // share one contract.
   Json filters = query.value("filters", Json::array());
   if (!filters.is_array()) filters = Json::array();
   const auto action_filters = action.parameters.value("filters", Json::array());
   if (action_filters.is_array()) {
     for (const auto &filter : action_filters) {
-      if (filter.is_object() && std::find(filters.begin(), filters.end(), filter) == filters.end()) {
+      if (filter.is_object() &&
+          std::find(filters.begin(), filters.end(), filter) == filters.end()) {
         filters.push_back(filter);
       }
     }
@@ -80,15 +89,16 @@ Json build_find_query(const ActionStepData &action, const std::string &object_na
   if (mode == "biggest") mode = "largest";
   if ((mode == "largest" || mode == "smallest") &&
       std::none_of(filters.begin(), filters.end(), [&mode](const Json &filter) {
-        return filter.is_object() && filter.value("feature", std::string{}) == "size_relation";
+        return filter.is_object() &&
+               filter.value("feature", std::string{}) == "size_relation";
       })) {
-    filters.push_back(Json{{"feature", "size_relation"},
-                           {"operator", "equals"},
-                           {"value", mode}});
+    filters.push_back(
+        Json{{"feature", "size_relation"}, {"operator", "equals"}, {"value", mode}});
   }
   query["filters"] = filters;
   query["target"] = Json{{"object_name", object_name}, {"category", category}};
-  // Section: Default reporting can use deterministic bbox-derived image position on every find result.
+  // Section: Default reporting can use deterministic bbox-derived image position on
+  // every find result.
   if (!query.contains("requested_fields") || !query.at("requested_fields").is_array()) {
     query["requested_fields"] = Json::array({"image_position"});
   }
@@ -102,8 +112,7 @@ bool wait_future(FutureT &future, double timeout_sec,
   const auto deadline = std::chrono::steady_clock::now() +
                         std::chrono::duration<double>(std::max(0.1, timeout_sec));
   while (std::chrono::steady_clock::now() < deadline) {
-    if (future.wait_for(std::chrono::milliseconds(50)) ==
-        std::future_status::ready) {
+    if (future.wait_for(std::chrono::milliseconds(50)) == std::future_status::ready) {
       return true;
     }
     if (blackboard && cancel_requested(blackboard)) {
@@ -124,7 +133,8 @@ std::pair<std::string, std::vector<std::string>> render_template(
   std::size_t prior = 0;
   for (; cursor != end; ++cursor) {
     const auto &match = *cursor;
-    output.append(input.substr(prior, static_cast<std::size_t>(match.position()) - prior));
+    output.append(
+        input.substr(prior, static_cast<std::size_t>(match.position()) - prior));
     std::string path = match[1].str();
     std::string remainder = path.rfind("result.", 0) == 0 ? path.substr(7) : path;
     Json value = source;
@@ -187,8 +197,8 @@ SkillResultData SpeechClient::say(const Blackboard::SharedPtr &blackboard,
         action.parameters.at("substitution_data").is_object()) {
       source = action.parameters.at("substitution_data");
     } else {
-      const auto variables = bb_get<Json>(blackboard, bb::RESULT_VARIABLES,
-                                          Json::object());
+      const auto variables =
+          bb_get<Json>(blackboard, bb::RESULT_VARIABLES, Json::object());
       if (variables.is_object() && variables.contains(substitution)) {
         source = variables.at(substitution);
       } else {
@@ -198,21 +208,20 @@ SkillResultData SpeechClient::say(const Blackboard::SharedPtr &blackboard,
     auto rendered = render_template(text, source);
     text = std::move(rendered.first);
     if (!rendered.second.empty()) {
-      return make_skill_result(
-          action.action_type, FAILED,
-          "Speech substitution fields are missing: " +
-              Json(rendered.second).dump() + ".",
-          Json{{"missing_fields", rendered.second}}, true);
+      return make_skill_result(action.action_type, FAILED,
+                               "Speech substitution fields are missing: " +
+                                   Json(rendered.second).dump() + ".",
+                               Json{{"missing_fields", rendered.second}}, true);
     }
   }
   if (simulate_) {
-    return make_skill_result(action.action_type, SUCCESS,
-                             "Simulated speech completed.", Json{{"text", text}});
+    return make_skill_result(action.action_type, SUCCESS, "Simulated speech completed.",
+                             Json{{"text", text}});
   }
   if (!client_) {
     return make_skill_result(action.action_type, FAILED,
-                             "TTS client unavailable: " + service_name_,
-                             Json::object(), true);
+                             "TTS client unavailable: " + service_name_, Json::object(),
+                             true);
   }
   if (!client_->wait_for_service(std::chrono::seconds(3))) {
     return make_skill_result(action.action_type, FAILED,
@@ -224,8 +233,8 @@ SkillResultData SpeechClient::say(const Blackboard::SharedPtr &blackboard,
   auto future = client_->async_send_request(request);
   const double timeout = action.timeout_sec != 0.0 ? action.timeout_sec : 8.0;
   if (!wait_future(future, timeout)) {
-    return make_skill_result(action.action_type, FAILED,
-                             "TTS response timed out.", Json::object(), true);
+    return make_skill_result(action.action_type, FAILED, "TTS response timed out.",
+                             Json::object(), true);
   }
   const auto response = future.get();
   if (response && response->success) {
@@ -233,8 +242,8 @@ SkillResultData SpeechClient::say(const Blackboard::SharedPtr &blackboard,
                              Json{{"text", text}});
   }
   return make_skill_result(action.action_type, FAILED,
-                           response ? response->message : "TTS failed.",
-                           Json::object(), true);
+                           response ? response->message : "TTS failed.", Json::object(),
+                           true);
 }
 
 DialogueClient::DialogueClient(const rclcpp::Node::SharedPtr &node,
@@ -243,12 +252,11 @@ DialogueClient::DialogueClient(const rclcpp::Node::SharedPtr &node,
     : node_(node), speech_(speech), simulate_(simulate) {
   // Section: Match the Python depth-10 voice topic endpoints.
   if (node_ && !simulate_) {
-    start_pub_ = node_->create_publisher<std_msgs::msg::Float32>(
-        "/voice/stt/start", 10);
+    start_pub_ =
+        node_->create_publisher<std_msgs::msg::Float32>("/voice/stt/start", 10);
     transcript_sub_ = node_->create_subscription<std_msgs::msg::String>(
         "/voice/stt/transcript", 10,
-        std::bind(&DialogueClient::transcript_callback, this,
-                  std::placeholders::_1));
+        std::bind(&DialogueClient::transcript_callback, this, std::placeholders::_1));
   }
 }
 
@@ -261,8 +269,8 @@ void DialogueClient::transcript_callback(
   condition_.notify_all();
 }
 
-SkillResultData DialogueClient::ask_and_listen(
-    const Blackboard::SharedPtr &blackboard, const ActionStepData &action) {
+SkillResultData DialogueClient::ask_and_listen(const Blackboard::SharedPtr &blackboard,
+                                               const ActionStepData &action) {
   // Section: Preserve explicit simulation timeout and answer behavior.
   if (json_value<bool>(action.parameters, "simulate_timeout", false)) {
     return make_skill_result(action.action_type, TIMEOUT, "Dialogue timed out.",
@@ -279,9 +287,9 @@ SkillResultData DialogueClient::ask_and_listen(
     return make_skill_result(action.action_type, SUCCESS, "Answer received.",
                              Json{{"answer", answer}});
   }
-  const auto question = json_value<std::string>(
-      action.parameters, "question",
-      json_value<std::string>(action.parameters, "text", ""));
+  const auto question =
+      json_value<std::string>(action.parameters, "question",
+                              json_value<std::string>(action.parameters, "text", ""));
   if (!question.empty()) {
     auto speech_action = action;
     speech_action.parameters["text"] = question;
@@ -297,19 +305,18 @@ SkillResultData DialogueClient::ask_and_listen(
     initial_sequence = sequence_;
   }
   std_msgs::msg::Float32 trigger;
-  trigger.data = static_cast<float>(
-      json_value<double>(action.parameters, "record_sec", 4.0));
+  trigger.data =
+      static_cast<float>(json_value<double>(action.parameters, "record_sec", 4.0));
   start_pub_->publish(trigger);
-  const double listen_timeout = json_value<double>(
-      action.parameters, "listen_timeout_sec", trigger.data + 8.0);
-  const auto deadline = std::chrono::steady_clock::now() +
-                        std::chrono::duration<double>(listen_timeout);
+  const double listen_timeout =
+      json_value<double>(action.parameters, "listen_timeout_sec", trigger.data + 8.0);
+  const auto deadline =
+      std::chrono::steady_clock::now() + std::chrono::duration<double>(listen_timeout);
   std::unique_lock<std::mutex> lock(mutex_);
   while (std::chrono::steady_clock::now() < deadline) {
     if (cancel_requested(blackboard)) {
-      return make_skill_result(action.action_type, CANCELED,
-                               "Dialogue canceled.", Json::object(), false,
-                               true);
+      return make_skill_result(action.action_type, CANCELED, "Dialogue canceled.",
+                               Json::object(), false, true);
     }
     condition_.wait_for(lock, std::chrono::milliseconds(50));
     if (sequence_ != initial_sequence) {
@@ -317,12 +324,150 @@ SkillResultData DialogueClient::ask_and_listen(
       lock.unlock();
       blackboard->set<std::string>(bb::DIALOGUE_ANSWER, answer);
       return make_skill_result(action.action_type, SUCCESS,
-                               "Local STT answer received.",
-                               Json{{"answer", answer}});
+                               "Local STT answer received.", Json{{"answer", answer}});
     }
   }
   return make_skill_result(action.action_type, NEED_CLARIFICATION,
                            "No STT transcript received.", Json::object(), true);
+}
+
+FixedInformationClient::FixedInformationClient(
+    const rclcpp::Node::SharedPtr &node, const std::shared_ptr<SpeechClient> &speech,
+    bool simulate)
+    : node_(node), speech_(speech), simulate_(simulate) {
+  // Section: The provider uses JSON envelopes over paired depth-10 string topics.
+  if (node_ && !simulate_) {
+    query_pub_ =
+        node_->create_publisher<std_msgs::msg::String>("/fixed_information/query", 10);
+    answer_sub_ = node_->create_subscription<std_msgs::msg::String>(
+        "/fixed_information/answer", 10,
+        std::bind(&FixedInformationClient::answer_callback, this,
+                  std::placeholders::_1));
+  }
+}
+
+void FixedInformationClient::answer_callback(
+    const std_msgs::msg::String::SharedPtr message) {
+  // Section: Malformed or unrelated envelopes cannot complete the active state.
+  if (!message) return;
+  const Json payload = parse_json(message->data, Json::object());
+  if (!payload.is_object()) return;
+  const auto request_id = payload.value("request_id", std::string{});
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (pending_request_id_.empty() || request_id != pending_request_id_) return;
+  latest_answer_ = payload;
+  ++sequence_;
+  condition_.notify_all();
+}
+
+SkillResultData FixedInformationClient::answer(const Blackboard::SharedPtr &blackboard,
+                                               const ActionStepData &action) {
+  // Section: Preserve the complete scheduler question for provider-owned alias
+  // matching.
+  const auto question =
+      json_value<std::string>(action.parameters, "question",
+                              json_value<std::string>(action.parameters, "text", ""));
+  if (question.empty()) {
+    return make_skill_result(action.action_type, INVALID_INPUT,
+                             "Fixed-information question missing.", Json::object(),
+                             false, true);
+  }
+  // Section: Simulation provides a deterministic state path without ROS topic
+  // dependencies.
+  if (simulate_) {
+    const auto simulated_answer =
+        json_value<std::string>(action.parameters, "simulated_answer", "");
+    if (simulated_answer.empty()) {
+      return make_skill_result(action.action_type, NOT_FOUND,
+                               "Simulated fixed-information answer missing.",
+                               Json{{"question", question}}, true);
+    }
+    blackboard->set<std::string>(bb::REPORT_TEXT, simulated_answer);
+    return make_skill_result(
+        action.action_type, SUCCESS, "Fixed-information answer resolved.",
+        Json{{"question", question}, {"answer_text", simulated_answer}});
+  }
+  if (!query_pub_ || !answer_sub_) {
+    return make_skill_result(action.action_type, FAILED,
+                             "Fixed-information topic client unavailable.",
+                             Json::object(), true);
+  }
+
+  // Section: A unique request identifier prevents another dialogue caller's result from
+  // leaking in.
+  const auto request_id =
+      "gpsr-fixed-" +
+      std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
+  std::uint64_t initial_sequence;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    pending_request_id_ = request_id;
+    latest_answer_ = Json::object();
+    initial_sequence = sequence_;
+  }
+  std_msgs::msg::String request;
+  request.data = Json{{"request_id", request_id}, {"text", question}}.dump();
+  query_pub_->publish(request);
+
+  // Section: Wait briefly for the local deterministic provider while honoring queue
+  // cancellation.
+  const double provider_timeout =
+      json_value<double>(action.parameters, "provider_timeout_sec", 2.0);
+  const auto deadline = std::chrono::steady_clock::now() +
+                        std::chrono::duration<double>(std::max(0.1, provider_timeout));
+  Json payload = Json::object();
+  std::unique_lock<std::mutex> lock(mutex_);
+  while (std::chrono::steady_clock::now() < deadline) {
+    if (cancel_requested(blackboard)) {
+      pending_request_id_.clear();
+      return make_skill_result(action.action_type, CANCELED,
+                               "Fixed-information query canceled.", Json::object(),
+                               false, true);
+    }
+    condition_.wait_for(lock, std::chrono::milliseconds(50));
+    if (sequence_ != initial_sequence) {
+      payload = latest_answer_;
+      pending_request_id_.clear();
+      break;
+    }
+  }
+  pending_request_id_.clear();
+  lock.unlock();
+  if (payload.empty()) {
+    return make_skill_result(action.action_type, TIMEOUT,
+                             "Fixed-information provider timed out.",
+                             Json{{"question", question}}, true);
+  }
+
+  // Section: Preserve provider status semantics instead of converting misses into
+  // speech guesses.
+  const auto status = payload.value("status", std::string{});
+  const auto answer_text = payload.value("answer_text", std::string{});
+  if (status == "AMBIGUOUS") {
+    return make_skill_result(action.action_type, NEED_CLARIFICATION,
+                             "Fixed-information question is ambiguous.", payload, true);
+  }
+  if (status == "NO_MATCH") {
+    return make_skill_result(action.action_type, NOT_FOUND,
+                             "Fixed-information provider has no matching answer.",
+                             payload, true);
+  }
+  if (status != "FOUND" || answer_text.empty()) {
+    return make_skill_result(action.action_type, FAILED,
+                             "Fixed-information answer is not configured.", payload,
+                             true);
+  }
+
+  // Section: Speak exactly the provider-owned answer, then expose it on the shared
+  // blackboard.
+  auto speech_action = action;
+  speech_action.parameters = Json{{"text", answer_text}};
+  const auto speech_result = speech_->say(blackboard, speech_action);
+  if (speech_result.outcome != SUCCESS) return speech_result;
+  blackboard->set<std::string>(bb::REPORT_TEXT, answer_text);
+  payload["question"] = question;
+  return make_skill_result(action.action_type, SUCCESS,
+                           "Fixed-information answer spoken.", payload);
 }
 
 Nav2Client::Nav2Client(const rclcpp::Node::SharedPtr &node, bool simulate,
@@ -335,8 +480,9 @@ Nav2Client::Nav2Client(const rclcpp::Node::SharedPtr &node, bool simulate,
       spin_action_(std::move(spin_action)) {
   // Section: The executor owns all action clients for their complete lifetime.
   if (node_ && !simulate_) {
-    named_client_ = rclcpp_action::create_client<
-        receptionist_interfaces::action::NavigateNamedPose>(node_, named_action_);
+    named_client_ =
+        rclcpp_action::create_client<robot_ai_interfaces::action::NavigateNamedPose>(
+            node_, named_action_);
     pose_client_ = rclcpp_action::create_client<nav2_msgs::action::NavigateToPose>(
         node_, pose_action_);
     spin_client_ =
@@ -344,8 +490,8 @@ Nav2Client::Nav2Client(const rclcpp::Node::SharedPtr &node, bool simulate,
   }
 }
 
-SkillResultData Nav2Client::navigate_to_pose(
-    const Blackboard::SharedPtr &blackboard, const ActionStepData &action) {
+SkillResultData Nav2Client::navigate_to_pose(const Blackboard::SharedPtr &blackboard,
+                                             const ActionStepData &action) {
   // Section: Enforce the existing mutually exclusive named/raw target contract.
   std::string location = action.target_location;
   if (location.empty()) {
@@ -362,9 +508,10 @@ SkillResultData Nav2Client::navigate_to_pose(
         "NAVIGATE requires exactly one of target_location or target_pose.",
         Json::object(), false, true);
   }
-  const double timeout = action.timeout_sec != 0.0
-                             ? action.timeout_sec
-                             : json_value<double>(action.parameters, "timeout_sec", 60.0);
+  const double timeout =
+      action.timeout_sec != 0.0
+          ? action.timeout_sec
+          : json_value<double>(action.parameters, "timeout_sec", 60.0);
   if (has_pose) {
     const auto pose = pose_from_json(action.parameters.at("target_pose"));
     if (!pose) {
@@ -390,11 +537,10 @@ SkillResultData Nav2Client::navigate_to_pose(
     goal.pose.header.stamp = node_->now();
     auto goal_future = pose_client_->async_send_goal(goal);
     if (!wait_future(goal_future, std::min(5.0, timeout), blackboard)) {
-      return make_skill_result(action.action_type,
-                               cancel_requested(blackboard) ? CANCELED : TIMEOUT,
-                               "Navigation goal acceptance was canceled or timed out.",
-                               Json::object(), !cancel_requested(blackboard),
-                               cancel_requested(blackboard));
+      return make_skill_result(
+          action.action_type, cancel_requested(blackboard) ? CANCELED : TIMEOUT,
+          "Navigation goal acceptance was canceled or timed out.", Json::object(),
+          !cancel_requested(blackboard), cancel_requested(blackboard));
     }
     auto handle = goal_future.get();
     if (!handle) {
@@ -406,43 +552,37 @@ SkillResultData Nav2Client::navigate_to_pose(
     if (!wait_future(result_future, timeout, blackboard)) {
       pose_client_->async_cancel_goal(handle);
       const bool canceled = cancel_requested(blackboard);
-      return make_skill_result(action.action_type, canceled ? CANCELED : TIMEOUT,
-                               canceled ? "Navigation canceled."
-                                        : "Navigation result timed out.",
-                               Json::object(), !canceled, canceled);
+      return make_skill_result(
+          action.action_type, canceled ? CANCELED : TIMEOUT,
+          canceled ? "Navigation canceled." : "Navigation result timed out.",
+          Json::object(), !canceled, canceled);
     }
     const auto wrapped = result_future.get();
     if (wrapped.code == rclcpp_action::ResultCode::SUCCEEDED) {
-      return make_skill_result(action.action_type, SUCCESS,
-                               "Raw-pose navigation completed.",
-                               Json{{"target", pose_to_json(*pose)},
-                                    {"target_type", "pose"}});
+      return make_skill_result(
+          action.action_type, SUCCESS, "Raw-pose navigation completed.",
+          Json{{"target", pose_to_json(*pose)}, {"target_type", "pose"}});
     }
-    return make_skill_result(action.action_type, FAILED,
-                             "Raw-pose navigation failed.",
-                             Json{{"target", pose_to_json(*pose)},
-                                  {"target_type", "pose"}},
-                             true);
+    return make_skill_result(
+        action.action_type, FAILED, "Raw-pose navigation failed.",
+        Json{{"target", pose_to_json(*pose)}, {"target_type", "pose"}}, true);
   }
   if (location.empty()) {
-    return make_skill_result(action.action_type, FAILED,
-                             "Navigation target missing.", Json::object(), true);
+    return make_skill_result(action.action_type, FAILED, "Navigation target missing.",
+                             Json::object(), true);
   }
   if (simulate_) {
-    return make_skill_result(action.action_type, SUCCESS,
-                             "Simulated named navigation completed.",
-                             Json{{"target", location},
-                                  {"simulated", true},
-                                  {"target_type", "named"}});
+    return make_skill_result(
+        action.action_type, SUCCESS, "Simulated named navigation completed.",
+        Json{{"target", location}, {"simulated", true}, {"target_type", "named"}});
   }
   if (!named_client_ || !named_client_->wait_for_action_server(
                             std::chrono::duration<double>(std::min(5.0, timeout)))) {
     return make_skill_result(action.action_type, FAILED,
-                             "NavigateNamedPose action unavailable: " +
-                                 named_action_,
+                             "NavigateNamedPose action unavailable: " + named_action_,
                              Json{{"target", location}}, true);
   }
-  receptionist_interfaces::action::NavigateNamedPose::Goal goal;
+  robot_ai_interfaces::action::NavigateNamedPose::Goal goal;
   goal.target_name = location;
   auto goal_future = named_client_->async_send_goal(goal);
   if (!wait_future(goal_future, std::min(5.0, timeout), blackboard)) {
@@ -461,17 +601,16 @@ SkillResultData Nav2Client::navigate_to_pose(
   if (!wait_future(result_future, timeout, blackboard)) {
     named_client_->async_cancel_goal(handle);
     const bool canceled = cancel_requested(blackboard);
-    return make_skill_result(action.action_type, canceled ? CANCELED : TIMEOUT,
-                             canceled ? "Navigation canceled."
-                                      : "Navigation result timed out.",
-                             Json::object(), !canceled, canceled);
+    return make_skill_result(
+        action.action_type, canceled ? CANCELED : TIMEOUT,
+        canceled ? "Navigation canceled." : "Navigation result timed out.",
+        Json::object(), !canceled, canceled);
   }
   const auto wrapped = result_future.get();
   if (wrapped.code == rclcpp_action::ResultCode::SUCCEEDED && wrapped.result &&
       wrapped.result->success) {
     return make_skill_result(action.action_type, SUCCESS, wrapped.result->message,
-                             Json{{"target", location},
-                                  {"target_type", "named"}});
+                             Json{{"target", location}, {"target_type", "named"}});
   }
   return make_skill_result(
       action.action_type, FAILED,
@@ -480,12 +619,11 @@ SkillResultData Nav2Client::navigate_to_pose(
 }
 
 SkillResultData Nav2Client::spin(const Blackboard::SharedPtr &blackboard,
-                                 const ActionStepData &action,
-                                 double yaw_radians, double timeout_sec) {
+                                 const ActionStepData &action, double yaw_radians,
+                                 double timeout_sec) {
   // Section: Preserve the Nav2 Spin action and its relative yaw semantics.
   if (simulate_) {
-    return make_skill_result(action.action_type, SUCCESS,
-                             "Simulated spin completed.",
+    return make_skill_result(action.action_type, SUCCESS, "Simulated spin completed.",
                              Json{{"yaw", yaw_radians}});
   }
   if (!spin_client_ || !spin_client_->wait_for_action_server(
@@ -506,8 +644,8 @@ SkillResultData Nav2Client::spin(const Blackboard::SharedPtr &blackboard,
   }
   auto handle = goal_future.get();
   if (!handle) {
-    return make_skill_result(action.action_type, FAILED,
-                             "Spin goal was rejected.", Json::object(), true);
+    return make_skill_result(action.action_type, FAILED, "Spin goal was rejected.",
+                             Json::object(), true);
   }
   auto result_future = spin_client_->async_get_result(handle);
   if (!wait_future(result_future, timeout_sec, blackboard)) {
@@ -518,37 +656,38 @@ SkillResultData Nav2Client::spin(const Blackboard::SharedPtr &blackboard,
                              canceled);
   }
   return result_future.get().code == rclcpp_action::ResultCode::SUCCEEDED
-             ? make_skill_result(action.action_type, SUCCESS,
-                                 "Spin completed.", Json{{"yaw", yaw_radians}})
+             ? make_skill_result(action.action_type, SUCCESS, "Spin completed.",
+                                 Json{{"yaw", yaw_radians}})
              : make_skill_result(action.action_type, FAILED, "Spin failed.",
                                  Json{{"yaw", yaw_radians}}, true);
 }
 
-PerceptionClient::PerceptionClient(const rclcpp::Node::SharedPtr &node,
-                                   bool simulate, std::string object_action,
-                                   std::string people_action)
+PerceptionClient::PerceptionClient(const rclcpp::Node::SharedPtr &node, bool simulate,
+                                   std::string object_action, std::string people_action)
     : node_(node),
       simulate_(simulate),
       object_action_(std::move(object_action)),
       people_action_(std::move(people_action)) {
   // Section: Keep both action clients persistent on the executor node.
   if (node_ && !simulate_) {
-    object_client_ = rclcpp_action::create_client<
-        robot_ai_interfaces::action::CountObjects>(node_, object_action_);
-    people_client_ = rclcpp_action::create_client<
-        robot_ai_interfaces::action::CountPeople>(node_, people_action_);
+    object_client_ =
+        rclcpp_action::create_client<robot_ai_interfaces::action::CountObjects>(
+            node_, object_action_);
+    people_client_ =
+        rclcpp_action::create_client<robot_ai_interfaces::action::CountPeople>(
+            node_, people_action_);
   }
 }
 
-SkillResultData PerceptionClient::count_objects(
-    const Blackboard::SharedPtr &blackboard, const ActionStepData &action) {
+SkillResultData PerceptionClient::count_objects(const Blackboard::SharedPtr &blackboard,
+                                                const ActionStepData &action) {
   // Section: Preserve deterministic simulation used by camera-free tests.
   if (simulate_ || !object_client_) {
     const int count = json_value<int>(action.parameters, "simulated_count", 0);
-    const Json quantities = action.parameters.value("simulated_object_quantities",
-                                                     Json::object());
-    const Json detected = action.parameters.value("simulated_detected_objects",
-                                                   Json::array());
+    const Json quantities =
+        action.parameters.value("simulated_object_quantities", Json::object());
+    const Json detected =
+        action.parameters.value("simulated_detected_objects", Json::array());
     blackboard->set<int>(bb::COUNT_RESULT, count);
     blackboard->set<Json>(bb::OBJECT_QUANTITIES, quantities);
     blackboard->set<Json>(bb::DETECTED_OBJECTS, detected);
@@ -558,19 +697,18 @@ SkillResultData PerceptionClient::count_objects(
                                   {"detected_objects", detected}});
   }
   const double timeout = action.timeout_sec != 0.0 ? action.timeout_sec : 5.0;
-  if (!object_client_->wait_for_action_server(
-          std::chrono::duration<double>(timeout))) {
+  if (!object_client_->wait_for_action_server(std::chrono::duration<double>(timeout))) {
     return make_skill_result(action.action_type, FAILED,
                              "CountObjects action unavailable: " + object_action_,
                              Json::object(), true);
   }
   robot_ai_interfaces::action::CountObjects::Goal goal;
-  goal.category = !action.target_category.empty()
-                      ? action.target_category
-                      : (!action.target_object.empty()
-                             ? action.target_object
-                             : json_value<std::string>(action.parameters,
-                                                       "category", ""));
+  goal.category =
+      !action.target_category.empty()
+          ? action.target_category
+          : (!action.target_object.empty()
+                 ? action.target_object
+                 : json_value<std::string>(action.parameters, "category", ""));
   goal.location = !action.target_location.empty()
                       ? action.target_location
                       : json_value<std::string>(action.parameters, "location", "");
@@ -594,8 +732,8 @@ SkillResultData PerceptionClient::count_objects(
   }
   const auto wrapped = result_future.get();
   const auto result = wrapped.result;
-  const Json payload = result ? parse_json(result->result_json, Json::object())
-                              : Json::object();
+  const Json payload =
+      result ? parse_json(result->result_json, Json::object()) : Json::object();
   const int count = result ? result->count : 0;
   blackboard->set<int>(bb::COUNT_RESULT, count);
   blackboard->set<std::string>(bb::COUNT_OBJECTS_RESULT_JSON,
@@ -604,12 +742,11 @@ SkillResultData PerceptionClient::count_objects(
                         payload.value("object_quantities", Json::object()));
   blackboard->set<Json>(bb::DETECTED_OBJECTS,
                         payload.value("all_detected_objects", Json::array()));
-  Json skill_payload{{"count", count},
-                     {"object_quantities",
-                      payload.value("object_quantities", Json::object())},
-                     {"detected_objects",
-                      payload.value("all_detected_objects", Json::array())},
-                     {"result_json", payload}};
+  Json skill_payload{
+      {"count", count},
+      {"object_quantities", payload.value("object_quantities", Json::object())},
+      {"detected_objects", payload.value("all_detected_objects", Json::array())},
+      {"result_json", payload}};
   return result && result->success
              ? make_skill_result(action.action_type, SUCCESS, result->message,
                                  skill_payload)
@@ -618,18 +755,17 @@ SkillResultData PerceptionClient::count_objects(
                                  skill_payload, true);
 }
 
-SkillResultData PerceptionClient::count_people(
-    const Blackboard::SharedPtr &blackboard, const ActionStepData &action) {
+SkillResultData PerceptionClient::count_people(const Blackboard::SharedPtr &blackboard,
+                                               const ActionStepData &action) {
   // Section: Preserve deterministic people-count simulation.
   if (simulate_ || !people_client_) {
     const int count = json_value<int>(action.parameters, "simulated_count", 0);
-    const Json detected = action.parameters.value("simulated_detected_people",
-                                                   Json::array());
-    const Json result_json = action.parameters.value("simulated_result_json",
-                                                      Json::object());
+    const Json detected =
+        action.parameters.value("simulated_detected_people", Json::array());
+    const Json result_json =
+        action.parameters.value("simulated_result_json", Json::object());
     blackboard->set<int>(bb::COUNT_RESULT, count);
-    blackboard->set<std::string>(bb::COUNT_PEOPLE_RESULT_JSON,
-                                 dump_json(result_json));
+    blackboard->set<std::string>(bb::COUNT_PEOPLE_RESULT_JSON, dump_json(result_json));
     blackboard->set<Json>(bb::DETECTED_PEOPLE, detected);
     return make_skill_result(action.action_type, SUCCESS, "People counted.",
                              Json{{"count", count},
@@ -637,8 +773,7 @@ SkillResultData PerceptionClient::count_people(
                                   {"result_json", result_json}});
   }
   const double timeout = action.timeout_sec != 0.0 ? action.timeout_sec : 5.0;
-  if (!people_client_->wait_for_action_server(
-          std::chrono::duration<double>(timeout))) {
+  if (!people_client_->wait_for_action_server(std::chrono::duration<double>(timeout))) {
     return make_skill_result(action.action_type, FAILED,
                              "CountPeople action unavailable: " + people_action_,
                              Json::object(), true);
@@ -669,17 +804,16 @@ SkillResultData PerceptionClient::count_people(
                              true);
   }
   const auto result = result_future.get().result;
-  const Json payload = result ? parse_json(result->result_json, Json::object())
-                              : Json::object();
+  const Json payload =
+      result ? parse_json(result->result_json, Json::object()) : Json::object();
   const Json detected = payload.value("human_entities", Json::array());
   const int count = result ? result->count : 0;
   blackboard->set<int>(bb::COUNT_RESULT, count);
   blackboard->set<std::string>(bb::COUNT_PEOPLE_RESULT_JSON,
                                result ? result->result_json : "{}");
   blackboard->set<Json>(bb::DETECTED_PEOPLE, detected);
-  Json skill_payload{{"count", count},
-                     {"detected_people", detected},
-                     {"result_json", payload}};
+  Json skill_payload{
+      {"count", count}, {"detected_people", detected}, {"result_json", payload}};
   return result && result->success
              ? make_skill_result(action.action_type, SUCCESS, result->message,
                                  skill_payload)
@@ -704,12 +838,11 @@ SkillResultData PerceptionClient::extract_person_info(
     const Blackboard::SharedPtr &blackboard, const ActionStepData &action) {
   // Section: Preserve the legacy local extraction fallback exactly.
   const auto field = json_value<std::string>(action.parameters, "field", "name");
-  const auto value = json_value<std::string>(action.parameters, "value",
-                                              action.target_person);
+  const auto value =
+      json_value<std::string>(action.parameters, "value", action.target_person);
   const Json info{{field, value}};
   blackboard->set<Json>(bb::EXTRACTED_PERSON_INFO, info);
-  return make_skill_result(action.action_type, SUCCESS,
-                           "Person info extracted.", info);
+  return make_skill_result(action.action_type, SUCCESS, "Person info extracted.", info);
 }
 
 FollowPersonClient::FollowPersonClient(const rclcpp::Node::SharedPtr &node,
@@ -720,12 +853,13 @@ FollowPersonClient::FollowPersonClient(const rclcpp::Node::SharedPtr &node,
       node_, action_name_);
 }
 
-SkillResultData FollowPersonClient::follow(
-    const Blackboard::SharedPtr &blackboard, const ActionStepData &action) {
+SkillResultData FollowPersonClient::follow(const Blackboard::SharedPtr &blackboard,
+                                           const ActionStepData &action) {
   // Section: Preserve goal defaults and bounded action behavior.
-  const double timeout = action.timeout_sec != 0.0
-                             ? action.timeout_sec
-                             : json_value<double>(action.parameters, "timeout_sec", 120.0);
+  const double timeout =
+      action.timeout_sec != 0.0
+          ? action.timeout_sec
+          : json_value<double>(action.parameters, "timeout_sec", 120.0);
   if (!client_->wait_for_action_server(
           std::chrono::duration<double>(std::min(timeout, 10.0)))) {
     return make_skill_result(action.action_type, FAILED,
@@ -737,13 +871,12 @@ SkillResultData FollowPersonClient::follow(
       json_value<bool>(action.parameters, "auto_select_if_needed", true);
   goal.follow_distance_m = static_cast<float>(
       json_value<double>(action.parameters, "follow_distance_m", 1.2));
-  goal.face_hold_sec = static_cast<float>(
-      json_value<double>(action.parameters, "face_hold_sec", 5.0));
+  goal.face_hold_sec =
+      static_cast<float>(json_value<double>(action.parameters, "face_hold_sec", 5.0));
   Json feedback = Json::object();
   rclcpp_action::Client<putrabot_interfaces::action::PersonFollow>::SendGoalOptions
       options;
-  options.feedback_callback = [&feedback](auto,
-                                          const auto feedback_message) {
+  options.feedback_callback = [&feedback](auto, const auto feedback_message) {
     // Section: Cache only the latest standard feedback fields.
     feedback = Json{{"selected_track_id", feedback_message->selected_track_id},
                     {"target_visible", feedback_message->target_visible},
@@ -803,72 +936,77 @@ SkillResultData FollowPersonClient::follow(
 RemoteSkillClient::RemoteSkillClient(const rclcpp::Node::SharedPtr &node)
     : node_(node) {
   // Section: Keep lifecycle-owned action endpoint names unchanged.
-  find_object_client_ = rclcpp_action::create_client<
-      robot_ai_interfaces::action::FindObject>(node_, "/gpsr/find_object");
-  find_attribute_client_ = rclcpp_action::create_client<
-      robot_ai_interfaces::action::FindPersonByAttribute>(
-      node_, "/gpsr/find_person_by_attribute");
-  extract_client_ = rclcpp_action::create_client<
-      robot_ai_interfaces::action::ExtractGuestInfo>(node_,
-                                                     "/gpsr/extract_guest_info");
+  find_object_client_ =
+      rclcpp_action::create_client<robot_ai_interfaces::action::FindObject>(
+          node_, "/gpsr/find_object");
+  find_attribute_client_ =
+      rclcpp_action::create_client<robot_ai_interfaces::action::FindPersonByAttribute>(
+          node_, "/gpsr/find_person_by_attribute");
+  extract_client_ =
+      rclcpp_action::create_client<robot_ai_interfaces::action::ExtractGuestInfo>(
+          node_, "/gpsr/extract_guest_info");
 }
 
-SkillResultData RemoteSkillClient::find_object(
-    const Blackboard::SharedPtr &blackboard, const ActionStepData &action) {
-  // Section: Validate the public target and search-scope contract before goal submission.
-  const auto object_name = !action.target_object.empty()
-                               ? action.target_object
-                               : json_value<std::string>(action.parameters,
-                                                         "object_name", "");
-  const auto category = !action.target_category.empty()
-                            ? action.target_category
-                            : json_value<std::string>(action.parameters,
-                                                      "category", "");
+SkillResultData RemoteSkillClient::find_object(const Blackboard::SharedPtr &blackboard,
+                                               const ActionStepData &action) {
+  // Section: Validate the public target and search-scope contract before goal
+  // submission.
+  const auto object_name =
+      !action.target_object.empty()
+          ? action.target_object
+          : json_value<std::string>(action.parameters, "object_name", "");
+  const auto category =
+      !action.target_category.empty()
+          ? action.target_category
+          : json_value<std::string>(action.parameters, "category", "");
   if (object_name.empty() && category.empty()) {
     return make_skill_result(action.action_type, INVALID_INPUT,
                              "FIND_OBJECT requires object_name or category.",
                              Json::object(), false, true);
   }
-  std::string location = !action.target_location.empty()
-                             ? action.target_location
-                             : json_value<std::string>(action.parameters,
-                                                       "location", "");
+  std::string location =
+      !action.target_location.empty()
+          ? action.target_location
+          : json_value<std::string>(action.parameters, "location", "");
   if (location.empty()) {
     location = json_value<std::string>(action.parameters, "target_location", "");
   }
-  std::string scope = json_value<std::string>(
-      action.parameters, "search_scope",
-      location.empty() ? "GLOBAL" : "STRICT_LOCATION");
+  std::string scope =
+      json_value<std::string>(action.parameters, "search_scope",
+                              location.empty() ? "GLOBAL" : "STRICT_LOCATION");
   std::transform(scope.begin(), scope.end(), scope.begin(), ::toupper);
   if ((scope != "GLOBAL" && scope != "STRICT_LOCATION") ||
       (scope == "STRICT_LOCATION" && location.empty())) {
     return make_skill_result(
         action.action_type, INVALID_INPUT,
-        "FIND_OBJECT search_scope/location combination is invalid.",
-        Json::object(), false, true);
+        "FIND_OBJECT search_scope/location combination is invalid.", Json::object(),
+        false, true);
   }
-  const double timeout = action.timeout_sec != 0.0
-                             ? action.timeout_sec
-                             : json_value<double>(action.parameters, "timeout_sec", 300.0);
+  const double timeout =
+      action.timeout_sec != 0.0
+          ? action.timeout_sec
+          : json_value<double>(action.parameters, "timeout_sec", 300.0);
   if (!find_object_client_->wait_for_action_server(std::chrono::seconds(5))) {
     return make_skill_result(
         action.action_type, RECOVERABLE_FAILURE,
-        "FindObject action server /gpsr/find_object is unavailable.",
-        Json::object(), true);
+        "FindObject action server /gpsr/find_object is unavailable.", Json::object(),
+        true);
   }
   robot_ai_interfaces::action::FindObject::Goal goal;
   goal.object_name = object_name;
   goal.category = category;
   goal.location = location;
   goal.search_scope = scope;
-  // Section: A bare FIND_OBJECT is a visual inspection; pickup macros explicitly opt into approach.
+  // Section: A bare FIND_OBJECT is a visual inspection; pickup macros explicitly opt
+  // into approach.
   goal.approach_target = json_value<bool>(action.parameters, "approach_target", false);
   goal.stand_off_distance = static_cast<float>(
       json_value<double>(action.parameters, "stand_off_distance", 0.8));
   goal.timeout_sec = static_cast<float>(timeout);
-  goal.preferred_viewpoint = json_value<std::string>(
-      action.parameters, "preferred_viewpoint", "");
-  // Section: One action goal carries all characteristic and relation constraints to the Qwen detector.
+  goal.preferred_viewpoint =
+      json_value<std::string>(action.parameters, "preferred_viewpoint", "");
+  // Section: One action goal carries all characteristic and relation constraints to the
+  // Qwen detector.
   goal.query_json = dump_json(build_find_query(action, object_name, category));
   auto goal_future = find_object_client_->async_send_goal(goal);
   if (!wait_future(goal_future, 5.0, blackboard)) {
@@ -886,10 +1024,10 @@ SkillResultData RemoteSkillClient::find_object(
   if (!wait_future(result_future, timeout + 5.0, blackboard)) {
     find_object_client_->async_cancel_goal(handle);
     const bool canceled = cancel_requested(blackboard);
-    return make_skill_result(action.action_type, canceled ? CANCELED : TIMEOUT,
-                             canceled ? "FindObject goal canceled."
-                                      : "FindObject action result timed out.",
-                             Json::object(), !canceled, canceled);
+    return make_skill_result(
+        action.action_type, canceled ? CANCELED : TIMEOUT,
+        canceled ? "FindObject goal canceled." : "FindObject action result timed out.",
+        Json::object(), !canceled, canceled);
   }
   const auto wrapped = result_future.get();
   const auto result = wrapped.result;
@@ -948,9 +1086,10 @@ SkillResultData RemoteSkillClient::find_object(
 SkillResultData RemoteSkillClient::find_person_by_attribute(
     const Blackboard::SharedPtr &blackboard, const ActionStepData &action) {
   // Section: Forward the normalized selector and correlation fields unchanged.
-  const double timeout = action.timeout_sec != 0.0
-                             ? action.timeout_sec
-                             : json_value<double>(action.parameters, "timeout_sec", 20.0);
+  const double timeout =
+      action.timeout_sec != 0.0
+          ? action.timeout_sec
+          : json_value<double>(action.parameters, "timeout_sec", 20.0);
   if (!find_attribute_client_->wait_for_action_server(
           std::chrono::duration<double>(std::min(timeout, 5.0)))) {
     return make_skill_result(
@@ -971,9 +1110,10 @@ SkillResultData RemoteSkillClient::find_person_by_attribute(
   auto goal_future = find_attribute_client_->async_send_goal(goal);
   if (!wait_future(goal_future, std::min(timeout, 5.0), blackboard)) {
     const bool canceled = cancel_requested(blackboard);
-    return make_skill_result(action.action_type, canceled ? CANCELED : TIMEOUT,
-                             "Find-person goal acceptance did not complete before the absolute deadline.",
-                             Json::object(), !canceled, canceled);
+    return make_skill_result(
+        action.action_type, canceled ? CANCELED : TIMEOUT,
+        "Find-person goal acceptance did not complete before the absolute deadline.",
+        Json::object(), !canceled, canceled);
   }
   auto handle = goal_future.get();
   if (!handle) {
@@ -984,17 +1124,21 @@ SkillResultData RemoteSkillClient::find_person_by_attribute(
   if (!wait_future(result_future, timeout, blackboard)) {
     find_attribute_client_->async_cancel_goal(handle);
     const bool canceled = cancel_requested(blackboard);
-    return make_skill_result(action.action_type, canceled ? CANCELED : TIMEOUT,
-                             "Find-person action did not finish before its absolute deadline.",
-                             Json::object(), !canceled, canceled);
+    return make_skill_result(
+        action.action_type, canceled ? CANCELED : TIMEOUT,
+        "Find-person action did not finish before its absolute deadline.",
+        Json::object(), !canceled, canceled);
   }
   const auto result = result_future.get().result;
-  if (!result) return make_skill_result(action.action_type, FAILED, "Find-person returned no result.", Json::object(), true);
+  if (!result)
+    return make_skill_result(action.action_type, FAILED,
+                             "Find-person returned no result.", Json::object(), true);
   const auto person_ref = parse_json(result->person_ref_json, Json::object());
   const auto observation = parse_json(result->observation_json, Json::object());
   if (person_ref.is_object() && !person_ref.empty()) {
     blackboard->set<Json>(bb::PERSON_REF, person_ref);
-    blackboard->set<std::string>(bb::TARGET_PERSON,
+    blackboard->set<std::string>(
+        bb::TARGET_PERSON,
         person_ref.value("profile_id", person_ref.value("track_id", "")));
   }
   if (!result->memory_id.empty()) {
@@ -1002,8 +1146,8 @@ SkillResultData RemoteSkillClient::find_person_by_attribute(
     blackboard->set<std::uint64_t>(bb::GPSR_GUEST_MEMORY_REVISION,
                                    result->memory_revision);
   }
-  const std::set<std::string> valid{SUCCESS, FAILED, INVALID_INPUT, NOT_FOUND,
-                                    TIMEOUT, CANCELED};
+  const std::set<std::string> valid{SUCCESS,   FAILED,  INVALID_INPUT,
+                                    NOT_FOUND, TIMEOUT, CANCELED};
   const auto outcome = valid.count(result->outcome) ? result->outcome : FAILED;
   return make_skill_result(
       action.action_type, outcome, result->message,
@@ -1023,8 +1167,8 @@ SkillResultData RemoteSkillClient::extract_guest_info(
           std::chrono::duration<double>(std::min(timeout, 5.0)))) {
     return make_skill_result(
         action.action_type, FAILED,
-        "Extract-guest action unavailable: /gpsr/extract_guest_info",
-        Json::object(), true);
+        "Extract-guest action unavailable: /gpsr/extract_guest_info", Json::object(),
+        true);
   }
   Json fields = action.parameters.value("fields", Json::array());
   if ((!fields.is_array() || fields.empty()) && action.parameters.contains("field")) {
@@ -1060,7 +1204,9 @@ SkillResultData RemoteSkillClient::extract_guest_info(
                              !canceled, canceled);
   }
   const auto result = result_future.get().result;
-  if (!result) return make_skill_result(action.action_type, FAILED, "Extract-guest returned no result.", Json::object(), true);
+  if (!result)
+    return make_skill_result(action.action_type, FAILED,
+                             "Extract-guest returned no result.", Json::object(), true);
   const auto info = parse_json(result->info_json, Json::object());
   blackboard->set<Json>(bb::EXTRACTED_PERSON_INFO, info);
   if (!result->memory_id.empty()) {
@@ -1068,37 +1214,41 @@ SkillResultData RemoteSkillClient::extract_guest_info(
     blackboard->set<std::uint64_t>(bb::GPSR_GUEST_MEMORY_REVISION,
                                    result->memory_revision);
   }
-  const std::set<std::string> valid{SUCCESS, FAILED, INVALID_INPUT, NOT_FOUND,
-                                    TIMEOUT, CANCELED};
+  const std::set<std::string> valid{SUCCESS,   FAILED,  INVALID_INPUT,
+                                    NOT_FOUND, TIMEOUT, CANCELED};
   const auto outcome = valid.count(result->outcome) ? result->outcome : FAILED;
   Json payload = info.is_object() ? info : Json::object();
   payload["guest_info"] = info;
   payload["memory_id"] = result->memory_id;
   payload["memory_revision"] = result->memory_revision;
   payload["missing_fields"] = result->missing_fields;
-  return make_skill_result(action.action_type, outcome, result->message, payload,
-                           outcome == FAILED || outcome == NOT_FOUND ||
-                               outcome == TIMEOUT,
-                           outcome == CANCELED || outcome == INVALID_INPUT);
+  return make_skill_result(
+      action.action_type, outcome, result->message, payload,
+      outcome == FAILED || outcome == NOT_FOUND || outcome == TIMEOUT,
+      outcome == CANCELED || outcome == INVALID_INPUT);
 }
 
-ManipulationClient::ManipulationClient(
-    const rclcpp::Node::SharedPtr &node, bool simulate, std::string pick_action,
-    std::string place_action, std::string handover_action)
+ManipulationClient::ManipulationClient(const rclcpp::Node::SharedPtr &node,
+                                       bool simulate, std::string pick_action,
+                                       std::string place_action,
+                                       std::string handover_action)
     : node_(node), simulate_(simulate) {
   // Section: Simulation deliberately owns no ROS action handles.
   if (node_ && !simulate_) {
-    pick_client_ = rclcpp_action::create_client<robot_ai_interfaces::action::PickObject>(
-        node_, std::move(pick_action));
-    place_client_ = rclcpp_action::create_client<robot_ai_interfaces::action::PlaceObject>(
-        node_, std::move(place_action));
-    handover_client_ = rclcpp_action::create_client<robot_ai_interfaces::action::Handover>(
-        node_, std::move(handover_action));
+    pick_client_ =
+        rclcpp_action::create_client<robot_ai_interfaces::action::PickObject>(
+            node_, std::move(pick_action));
+    place_client_ =
+        rclcpp_action::create_client<robot_ai_interfaces::action::PlaceObject>(
+            node_, std::move(place_action));
+    handover_client_ =
+        rclcpp_action::create_client<robot_ai_interfaces::action::Handover>(
+            node_, std::move(handover_action));
   }
 }
 
-SkillResultData ManipulationClient::pick_object(
-    const Blackboard::SharedPtr &blackboard, const ActionStepData &action) {
+SkillResultData ManipulationClient::pick_object(const Blackboard::SharedPtr &blackboard,
+                                                const ActionStepData &action) {
   // Section: Resolve the object and grasp pose already validated by the skill state.
   const auto object = !action.target_object.empty()
                           ? action.target_object
@@ -1131,8 +1281,8 @@ SkillResultData ManipulationClient::pick_object(
   auto goal_future = pick_client_->async_send_goal(goal);
   if (!wait_future(goal_future, std::min(timeout, 5.0), blackboard) ||
       !goal_future.get()) {
-    return make_skill_result(action.action_type, FAILED, "Pick failed.",
-                             Json::object(), true);
+    return make_skill_result(action.action_type, FAILED, "Pick failed.", Json::object(),
+                             true);
   }
   auto handle = goal_future.get();
   auto result_future = pick_client_->async_get_result(handle);
@@ -1147,8 +1297,8 @@ SkillResultData ManipulationClient::pick_object(
   const auto result = wrapped.result;
   if (!result || !result->success) {
     return make_skill_result(action.action_type, FAILED,
-                             result ? result->message : "Pick failed.",
-                             Json::object(), true);
+                             result ? result->message : "Pick failed.", Json::object(),
+                             true);
   }
   const auto held = result->held_object_id.empty() ? object : result->held_object_id;
   blackboard->set<std::string>(bb::HELD_OBJECT, held);
@@ -1200,8 +1350,8 @@ SkillResultData ManipulationClient::place_object(
   const auto result = result_future.get().result;
   if (!result || !result->success) {
     return make_skill_result(action.action_type, FAILED,
-                             result ? result->message : "Place failed.",
-                             Json::object(), true);
+                             result ? result->message : "Place failed.", Json::object(),
+                             true);
   }
   blackboard->set<std::string>(bb::HELD_OBJECT, "");
   return make_skill_result(action.action_type, SUCCESS, result->message,
@@ -1220,8 +1370,8 @@ SkillResultData ManipulationClient::dispose_trash(
                            Json{{"object", object}});
 }
 
-SkillResultData ManipulationClient::handover(
-    const Blackboard::SharedPtr &blackboard, const ActionStepData &action) {
+SkillResultData ManipulationClient::handover(const Blackboard::SharedPtr &blackboard,
+                                             const ActionStepData &action) {
   // Section: Resolve the validated recipient before sending the handover goal.
   const auto held = bb_get<std::string>(blackboard, bb::HELD_OBJECT, "");
   const auto recipient = !action.target_person.empty()
@@ -1236,8 +1386,8 @@ SkillResultData ManipulationClient::handover(
   const double timeout = action.timeout_sec > 0.0 ? action.timeout_sec : 20.0;
   if (!handover_client_ || !handover_client_->wait_for_action_server(
                                std::chrono::duration<double>(std::min(timeout, 5.0)))) {
-    return make_skill_result(action.action_type, FAILED,
-                             "Handover action unavailable.", Json::object(), true);
+    return make_skill_result(action.action_type, FAILED, "Handover action unavailable.",
+                             Json::object(), true);
   }
   robot_ai_interfaces::action::Handover::Goal goal;
   goal.object_id = held;
@@ -1247,8 +1397,8 @@ SkillResultData ManipulationClient::handover(
   if (!wait_future(goal_future, std::min(timeout, 5.0), blackboard) ||
       !goal_future.get()) {
     return make_skill_result(action.action_type, FAILED,
-                             "Handover goal was rejected or timed out.",
-                             Json::object(), true);
+                             "Handover goal was rejected or timed out.", Json::object(),
+                             true);
   }
   auto handle = goal_future.get();
   auto result_future = handover_client_->async_get_result(handle);
@@ -1270,8 +1420,8 @@ SkillResultData ManipulationClient::handover(
                            Json{{"object", held}, {"recipient", recipient}});
 }
 
-GuidePersonClient::GuidePersonClient(const rclcpp::Node::SharedPtr &node,
-                                     bool simulate, std::string action_name)
+GuidePersonClient::GuidePersonClient(const rclcpp::Node::SharedPtr &node, bool simulate,
+                                     std::string action_name)
     : node_(node), simulate_(simulate), action_name_(std::move(action_name)) {
   // Section: Simulation deliberately owns no ROS action handle.
   if (node_ && !simulate_) {
@@ -1280,18 +1430,18 @@ GuidePersonClient::GuidePersonClient(const rclcpp::Node::SharedPtr &node,
   }
 }
 
-SkillResultData GuidePersonClient::guide(
-    const Blackboard::SharedPtr &blackboard, const ActionStepData &action) {
+SkillResultData GuidePersonClient::guide(const Blackboard::SharedPtr &blackboard,
+                                         const ActionStepData &action) {
   // Section: Normalize the two accepted destination representations.
-  const auto destination = !action.target_location.empty()
-                               ? action.target_location
-                               : json_value<std::string>(action.parameters,
-                                                         "destination", "");
+  const auto destination =
+      !action.target_location.empty()
+          ? action.target_location
+          : json_value<std::string>(action.parameters, "destination", "");
   if (simulate_) {
-    return make_skill_result(
-        action.action_type, SUCCESS, "Guide completed.",
-        Json{{"person", action.target_person}, {"destination", destination},
-             {"simulated", true}});
+    return make_skill_result(action.action_type, SUCCESS, "Guide completed.",
+                             Json{{"person", action.target_person},
+                                  {"destination", destination},
+                                  {"simulated", true}});
   }
   const double timeout = action.timeout_sec > 0.0 ? action.timeout_sec : 60.0;
   if (!client_ || !client_->wait_for_action_server(
@@ -1325,30 +1475,30 @@ SkillResultData GuidePersonClient::guide(
   if (!result || !result->success) {
     const auto outcome = result && result->person_lost ? PERSON_LOST : FAILED;
     return make_skill_result(action.action_type, outcome,
-                             result ? result->message : "Guide failed.",
-                             Json::object(), true);
+                             result ? result->message : "Guide failed.", Json::object(),
+                             true);
   }
   return make_skill_result(
       action.action_type, SUCCESS, result->message,
       Json{{"person", action.target_person}, {"destination", destination}});
 }
 
-LifecycleResourceClient::LifecycleResourceClient(
-    const rclcpp::Node::SharedPtr &node, double transition_timeout_sec,
-    double operation_margin_sec)
+LifecycleResourceClient::LifecycleResourceClient(const rclcpp::Node::SharedPtr &node,
+                                                 double transition_timeout_sec,
+                                                 double operation_margin_sec)
     : node_(node),
       transition_timeout_sec_(transition_timeout_sec),
       operation_margin_sec_(operation_margin_sec) {
   // Section: Bind only the four established lifecycle-manager endpoints.
-  prepare_client_ = node_->create_client<
-      robot_ai_interfaces::srv::ManageLifecycleSkill>(
-      GPSR_PREPARE_SKILL_SERVICE);
-  cleanup_client_ = node_->create_client<
-      robot_ai_interfaces::srv::ManageLifecycleSkill>(
-      GPSR_CLEANUP_SKILL_SERVICE);
-  recover_client_ = node_->create_client<
-      robot_ai_interfaces::srv::ManageLifecycleSkill>(
-      GPSR_RECOVER_SKILL_SERVICE);
+  prepare_client_ =
+      node_->create_client<robot_ai_interfaces::srv::ManageLifecycleSkill>(
+          GPSR_PREPARE_SKILL_SERVICE);
+  cleanup_client_ =
+      node_->create_client<robot_ai_interfaces::srv::ManageLifecycleSkill>(
+          GPSR_CLEANUP_SKILL_SERVICE);
+  recover_client_ =
+      node_->create_client<robot_ai_interfaces::srv::ManageLifecycleSkill>(
+          GPSR_RECOVER_SKILL_SERVICE);
 }
 
 std::pair<bool, std::string> LifecycleResourceClient::call(

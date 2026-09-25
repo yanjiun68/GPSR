@@ -16,7 +16,7 @@
   <depend>std_msgs</depend>
   <depend>cv_bridge</depend>
   <depend>message_filters</depend>
-  <depend>receptionist_interfaces</depend>
+  <depend>robot_ai_interfaces</depend>
   <depend>putrabot_interfaces</depend>
   <depend>vision</depend>
   <depend>yasmin</depend>

@@ -13,6 +13,7 @@ string FOLLOW_PERSON=FOLLOW_PERSON
 string GUIDE_PERSON=GUIDE_PERSON
 string SAY=SAY
 string ASK_AND_LISTEN=ASK_AND_LISTEN
+string FIXED_INFORMATION=FIXED_INFORMATION
 
 # Section: One ordered executable primitive; surface verbs never enter action_type.
 string step_id

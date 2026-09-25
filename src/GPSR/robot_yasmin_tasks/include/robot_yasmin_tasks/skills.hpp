@@ -57,6 +57,7 @@ struct PersonSearchPolicyData {
 struct SkillClients {
   std::shared_ptr<SpeechClient> speech;
   std::shared_ptr<DialogueClient> dialogue;
+  std::shared_ptr<FixedInformationClient> fixed_information;
   std::shared_ptr<Nav2Client> navigation;
   std::shared_ptr<PerceptionClient> perception;
   std::shared_ptr<FollowPersonClient> follow;

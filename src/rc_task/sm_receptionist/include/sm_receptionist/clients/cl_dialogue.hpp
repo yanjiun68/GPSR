@@ -6,7 +6,7 @@
 #include <rclcpp/rclcpp.hpp>
 #include <rclcpp_action/rclcpp_action.hpp>
 
-#include "receptionist_interfaces/action/collect_guest_profile.hpp"
+#include "robot_ai_interfaces/action/collect_guest_profile.hpp"
 
 namespace sm_receptionist
 {
@@ -14,7 +14,7 @@ namespace sm_receptionist
 class ClDialogue
 {
 public:
-  using CollectGuestProfile = receptionist_interfaces::action::CollectGuestProfile;
+  using CollectGuestProfile = robot_ai_interfaces::action::CollectGuestProfile;
   using GoalHandle = rclcpp_action::ClientGoalHandle<CollectGuestProfile>;
 
   explicit ClDialogue(const rclcpp::Node::SharedPtr & node)
@@ -26,7 +26,7 @@ public:
       "/dialogue/collect_guest_profile");
   }
 
-  bool collectProfile(receptionist_interfaces::msg::PersonProfile & out_profile)
+  bool collectProfile(robot_ai_interfaces::msg::PersonProfile & out_profile)
   {
     // Wait briefly for the dialogue action server to appear.
     if (!client_->wait_for_action_server(std::chrono::seconds(3))) {

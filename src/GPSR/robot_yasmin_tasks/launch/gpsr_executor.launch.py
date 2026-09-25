@@ -31,6 +31,13 @@ def generate_launch_description() -> LaunchDescription:
             ),
             Node(package="voice", executable="tts_node.py", name="voice_tts", output="screen", condition=IfCondition(use_local_voice)),
             Node(package="voice", executable="stt_node.py", name="voice_stt", output="screen", condition=IfCondition(use_local_voice)),
+            # Section: Provide deterministic runtime and configured fact answers to the dedicated skill state.
+            Node(
+                package="fixed_information_dialogue",
+                executable="fixed_information_node",
+                name="fixed_information_dialogue",
+                output="screen",
+            ),
             # Section: Every state-machine dispatch uses this manager, including persistent-resource skills.
             Node(
                 package="robot_yasmin_tasks",

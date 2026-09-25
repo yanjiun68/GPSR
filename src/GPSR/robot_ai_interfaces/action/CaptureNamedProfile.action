@@ -1,0 +1,18 @@
+# Goal
+string profile_id
+string role
+string name
+string person_uuid
+string tracking_session_id
+int64 track_id
+---
+# Result
+bool success
+string message
+string person_uuid
+robot_ai_interfaces/PersonProfile profile
+---
+# Feedback
+bool face_detected
+int32 stable_sample_count
+robot_ai_interfaces/GuestAppearance latest_appearance

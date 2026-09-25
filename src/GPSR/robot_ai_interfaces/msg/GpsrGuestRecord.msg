@@ -6,7 +6,7 @@ string tracking_session_id
 int32 track_id
 string person_ref_json
 string guest_info_json
-receptionist_interfaces/PersonProfile profile
+robot_ai_interfaces/PersonProfile profile
 uint64 revision
 builtin_interfaces/Time created_at
 builtin_interfaces/Time updated_at

@@ -16,6 +16,7 @@ from gpsr_task_scheduler.models import (
     ValidationIssue,
 )
 from gpsr_task_scheduler.parser import (
+    _is_fixed_information_query,
     _output_template,
     _requested_person_fields,
     parse_command,
@@ -70,6 +71,7 @@ INTENT_TO_TASK = {
     "GUIDE_PERSON": "guide_person",
     "SAY": "say",
     "ASK_AND_LISTEN": "ask_and_listen",
+    "FIXED_INFORMATION": "fixed_information",
 }
 
 
@@ -87,8 +89,10 @@ REQUIRED_PRIMITIVE_ARGUMENTS = {
     "HANDOVER_OBJECT": (("object_name",), ("target_person",)),
     "FOLLOW_PERSON": (("target_person",),),
     "GUIDE_PERSON": (("target_person",), ("target_location",)),
-    "SAY": (("text",),),
+    # Section: Fixed-information SAY actions carry a provider question instead of literal TTS text.
+    "SAY": (("text", "question"),),
     "ASK_AND_LISTEN": (("question",),),
+    "FIXED_INFORMATION": (("question",),),
 }
 
 
@@ -107,6 +111,12 @@ def compile_command(
     drift = _semantic_drift_issues(raw, normalized, config)
     if drift:
         return _invalid_result(command_id, context, drift)
+
+    # Section: Preserve the original question before SAY aliases can rewrite words such as "tell".
+    if _is_fixed_information_query(normalized.casefold()):
+        context.clauses = [{"index": 1, "text": normalized, "relationship": "then"}]
+        context.entities = _collect_entities(normalized, config)
+        return _compile_legacy_single(command_id, normalized, config, context)
 
     canonical_text = canonicalize_surface_text(normalized, config)
     clauses = segment_clauses(canonical_text, config)
@@ -449,6 +459,19 @@ def _semantic_from_clause(
         arguments["text"] = DEFAULT_GREETING if re.search(r"\bgreet\b", clause) else re.sub(r"^say\s+", "", clause).strip()  # Greeting commands supply their own text.
     if intent == "ASK_AND_LISTEN":
         arguments["question"] = re.sub(r"^ask\s+", "", clause).strip()
+    if intent == "FIXED_INFORMATION":
+        # Section: Strip the resolved recipient while retaining it as a delivery target.
+        target_person = str(arguments.get("target_person", ""))
+        fact_request = clause
+        if target_person:
+            person_phrase = target_person.replace("_", " ")
+            fact_request = re.sub(
+                rf"^\s*(?:tell|say|report)\s+(?:to\s+)?{re.escape(person_phrase)}\s+",
+                "",
+                fact_request,
+                count=1,
+            ).strip()
+        arguments["question"] = fact_request or clause
 
     return SemanticStep(
         step_id=f"semantic_{index}",
@@ -461,6 +484,9 @@ def _semantic_from_clause(
 
 def _detect_clause_intent(clause: str, entities: dict[str, list[str]]) -> str:
     """Special function: Resolve canonical and ambiguous verbs from entity context."""
+    # Section: Provider-owned fact requests take precedence over literal SAY classification.
+    if _is_fixed_information_query(clause):
+        return "FIXED_INFORMATION"
     # Section: A dialogue request for perceived person data is a search mission, not literal speech.
     if _requested_person_fields(clause, "find_person") and re.search(
         r"\b(?:person|guest|someone|man|woman)\b", clause
@@ -510,6 +536,8 @@ def _compile_semantic_steps(
     previous_final = ""
     found_objects: set[str] = set()
     picked_objects: set[str] = set()
+    # Section: Remember named people already located by an earlier clause in this command.
+    found_people: set[str] = set()
 
     for sequence, semantic in enumerate(semantic_steps, start=1):
         request = _request_from_semantic(command_id, semantic, config)
@@ -518,6 +546,11 @@ def _compile_semantic_steps(
         issues.extend(planned.issues)
         local_steps = list(planned.steps)
         object_name = str(semantic.arguments.get("object_name", ""))
+        target_person = str(semantic.arguments.get("target_person", ""))
+
+        # Section: Deliver fixed information to the person already found without repeating perception.
+        if semantic.intent == "FIXED_INFORMATION" and target_person in found_people:
+            local_steps = [step for step in local_steps if step.skill_name != "FIND_PERSON"]
 
         # Section: Reuse an explicitly produced object state instead of repeating macro work.
         if semantic.intent == "PICK_OBJECT" and object_name in found_objects:
@@ -547,6 +580,8 @@ def _compile_semantic_steps(
         if semantic.intent == "DELIVER_OBJECT" and object_name:
             found_objects.add(object_name)
             picked_objects.discard(object_name)
+        if semantic.intent == "FIND_PERSON" and target_person:
+            found_people.add(target_person)
 
     # Section: Preserve the existing one-return mission policy for a multi-step command.
     if config.return_after_completion and config.instruction_point and compiled:

@@ -19,7 +19,8 @@ def parse_command(command_id: str, instruction: str, config: SchedulerConfig) ->
     issues: list[ValidationIssue] = []
     if not text:
         return None, [ValidationIssue("empty_instruction", "Instruction is empty.")]
-    if re.search(r"\b(it|there|them|him|her)\b", text) and not _contains_known_target(text, config):
+    # Section: The idiom "what time is it" contains no unresolved entity reference.
+    if not _is_fixed_information_query(text) and re.search(r"\b(it|there|them|him|her)\b", text) and not _contains_known_target(text, config):
         issues.append(ValidationIssue("unresolved_pronoun", "Instruction contains a pronoun without a resolvable target."))
     task_type = _detect_task_type(text, config)
     if task_type == "accompany_ambiguous":
@@ -252,6 +253,9 @@ def _detect_task_type(text: str, config: SchedulerConfig) -> str:
         if re.search(r"\b(?:robot|you)\s+(?:lead|leads|are leading)\b|\brobot leads\b", text):
             return "guide_person"
         return "accompany_ambiguous"
+    # Section: Package-owned date/time and configured robot/team facts use their query skill.
+    if _is_fixed_information_query(text):
+        return "fixed_information"
     if re.search(r"\b(?:ask)\b|\btalk\b.*\b(?:and listen|with response)\b", text):
         return "ask_and_listen"
     if re.search(r"\b(?:say|speak|tell|report|greet)\b", text):
@@ -353,7 +357,15 @@ def _action_person(
     config: SchedulerConfig,
 ) -> tuple[str, list[ValidationIssue]]:
     """Special function: Resolve person roles for movement, delivery, and communication primitives."""
-    person_tasks = {"follow_person", "guide_person", "deliver_object", "say", "ask_and_listen"}
+    # Section: Fixed-information delivery can name a recipient just like literal speech.
+    person_tasks = {
+        "follow_person",
+        "guide_person",
+        "deliver_object",
+        "say",
+        "ask_and_listen",
+        "fixed_information",
+    }
     if task_type not in person_tasks:
         return "", []
     for person in sorted(config.known_people):
@@ -361,6 +373,9 @@ def _action_person(
             return person, []
     if task_type == "deliver_object" and re.search(r"\b(?:me|operator)\b", text):
         return "operator", []
+    # Section: A direct fact phrase after TELL is content, not an unknown person name.
+    if task_type == "fixed_information":
+        return "", []
 
     # Section: Extract a likely explicit name only to return a precise closed-vocabulary error.
     patterns = {
@@ -369,6 +384,7 @@ def _action_person(
         "deliver_object": r"\b(?:to|for)\s+([a-z_]+)",
         "say": r"\b(?:tell|greet)\s+([a-z_]+)",
         "ask_and_listen": r"\b(?:ask|talk to)\s+([a-z_]+)",
+        "fixed_information": r"\b(?:tell|say|report)\s+([a-z_]+)",
     }
     match = re.search(patterns[task_type], text)
     candidate = normalize_symbol(match.group(1)) if match else ""
@@ -386,8 +402,20 @@ def _speech_payload(
     target_person: str,
 ) -> tuple[dict[str, Any], list[ValidationIssue]]:
     """Special function: Extract literal SAY or ASK_AND_LISTEN content without query inference."""
-    if task_type not in {"say", "ask_and_listen"}:
+    if task_type not in {"say", "ask_and_listen", "fixed_information"}:
         return {}, []
+    if task_type == "fixed_information":
+        # Section: Remove only a resolved named recipient so the provider receives the fact request itself.
+        fact_request = text
+        if target_person:
+            person_phrase = target_person.replace("_", " ")
+            fact_request = re.sub(
+                rf"^\s*(?:tell|say|report)\s+(?:to\s+)?{re.escape(person_phrase)}\s+",
+                "",
+                fact_request,
+                count=1,
+            ).strip()
+        return {"question": fact_request or text}, []
     if task_type == "ask_and_listen":
         match = re.search(r"\bask\b\s+(.*)$", text)
         question = str(match.group(1) if match else text).strip()
@@ -407,6 +435,32 @@ def _speech_payload(
     if not speech:
         return {}, [ValidationIssue("missing_speech_text", "Speech requires literal text.")]
     return {"text": speech, "target_person": target_person}, []
+
+
+def _is_fixed_information_query(text: str) -> bool:
+    """Special function: Recognize provider-owned questions and direct fact triggers."""
+    normalized = str(text or "").strip()
+    # Section: Accept question/report verbs while keeping incidental fact words inside physical tasks unchanged.
+    request_form = bool(re.search(
+        r"^(?:what|what's|who|when|tell(?: me)?|say|report)\b",
+        normalized,
+    ))
+    # Section: These domains mirror runtime and static entries in fixed_information.yaml.
+    owned_domain = re.search(
+        r"\b(?:time|date|today|tomorrow|weekday|day of (?:the )?(?:week|month)|"
+        r"team(?:'s|s)? (?:name|country|affiliation)|who are you|about yourself)\b",
+        normalized,
+    )
+    if owned_domain is None:
+        return False
+    # Section: Bare noun phrases directly trigger the provider without pretending to be questions.
+    direct_fact = bool(re.fullmatch(
+        r"(?:the\s+)?(?:current\s+)?(?:time|date)|today(?:'s\s+date)?|"
+        r"tomorrow(?:'s\s+date)?|(?:the\s+)?(?:weekday|day of (?:the )?(?:week|month))|"
+        r"(?:your\s+)?team(?:'s|s)?\s+(?:name|country|affiliation)|about yourself",
+        normalized,
+    ))
+    return request_form or direct_fact
 
 
 def _target(text: str, task_type: str, config: SchedulerConfig) -> dict[str, Any]:

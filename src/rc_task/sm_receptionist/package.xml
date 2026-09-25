@@ -14,14 +14,14 @@
   <depend>boost</depend>
   <depend>geometry_msgs</depend>
   <depend>llm_interfaces</depend>
-  <depend>my_tts_system_interfaces</depend>
+  <depend>robot_ai_interfaces</depend>
   <depend>nav2_msgs</depend>
   <depend>nav2_util</depend>
   <build_depend>nlohmann_json</build_depend>
   <depend>rclcpp</depend>
   <depend>rclcpp_action</depend>
   <depend>rclcpp_lifecycle</depend>
-  <depend>receptionist_interfaces</depend>
+  <depend>robot_ai_interfaces</depend>
   <depend>smacc2</depend>
   <depend>std_msgs</depend>
 

@@ -194,6 +194,15 @@ def generate_launch_description() -> LaunchDescription:
         }],
     )
 
+    # Section: The FIXED_INFORMATION skill requires the deterministic local answer provider.
+    fixed_information_node = Node(
+        package="fixed_information_dialogue",
+        executable="fixed_information_node",
+        name="fixed_information_dialogue",
+        output="screen",
+        condition=IfCondition(start_executor),
+    )
+
     # Section: Every executor ActionStep resolves resource policy through one manager.
     gpsr_lifecycle_manager = Node(
         package="robot_yasmin_tasks",
@@ -683,6 +692,7 @@ def generate_launch_description() -> LaunchDescription:
             gpsr_guest_memory_node,
             gpsr_lifecycle_manager,
             gpsr_executor_node,
+            fixed_information_node,
             count_people_skill_server,
             count_objects_skill_server,
             gpsr_human_detector,

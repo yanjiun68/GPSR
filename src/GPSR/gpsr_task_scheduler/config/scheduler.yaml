@@ -68,6 +68,8 @@ skill_timeouts:
   GUIDE_PERSON: 60.0
   SAY: 8.0
   ASK_AND_LISTEN: 15.0
+  # Section: Allow provider lookup plus the resulting spoken answer.
+  FIXED_INFORMATION: 12.0
 skill_retries:
   NAVIGATE: 1
   FIND_OBJECT: 0
@@ -83,5 +85,6 @@ skill_retries:
   GUIDE_PERSON: 0
   SAY: 0
   ASK_AND_LISTEN: 0
+  FIXED_INFORMATION: 0
 actions:
   execute_action_queue: /execute_action_queue

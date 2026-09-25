@@ -13,7 +13,7 @@ from rclpy.node import Node
 from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped
 
 # Import the navigation services exposed by this support node.
-from receptionist_interfaces.srv import FacePose, PrepareNavigationSession
+from robot_ai_interfaces.srv import FacePose, PrepareNavigationSession
 
 
 # Provide safe navigation helper services for the receptionist state machine.

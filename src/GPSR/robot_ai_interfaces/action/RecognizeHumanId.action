@@ -1,0 +1,10 @@
+# Goal
+bool require_known_match
+---
+# Result
+bool success
+string message
+robot_ai_interfaces/RecognitionStatus status
+---
+# Feedback
+robot_ai_interfaces/RecognitionStatus latest_status

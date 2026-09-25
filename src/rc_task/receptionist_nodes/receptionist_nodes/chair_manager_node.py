@@ -25,7 +25,7 @@ from geometry_msgs.msg import PoseStamped
 from putrabot_interfaces.msg import CamDetections
 
 # Import the empty-chair service exposed by this node.
-from receptionist_interfaces.srv import FindEmptyChair
+from robot_ai_interfaces.srv import FindEmptyChair
 
 
 # Select an empty chair from the configured receptionist layout.

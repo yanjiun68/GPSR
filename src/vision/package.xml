@@ -33,12 +33,15 @@
   <depend>tf2_ros</depend>
   <depend>tf2_geometry_msgs</depend>
   <depend>putrabot_interfaces</depend>
-  <depend>receptionist_interfaces</depend>
+  <depend>robot_ai_interfaces</depend>
   <depend>robot_ai_interfaces</depend>
   <depend>robot_yasmin_tasks</depend>
   <depend>voice</depend>
   <depend>voice_interfaces</depend>
   <depend>cv_bridge</depend>
+  <!-- The Astra adapter launches the camera driver and reports stream health. -->
+  <exec_depend>astra_camera</exec_depend>
+  <exec_depend>diagnostic_msgs</exec_depend>
   <depend>image_transport</depend>
   <depend>OpenCV</depend>
 

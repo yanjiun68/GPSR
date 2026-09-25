@@ -12,7 +12,7 @@ from cv_bridge import CvBridge
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.lifecycle import LifecycleNode, State, TransitionCallbackReturn
 from rclpy.qos import qos_profile_sensor_data
-from receptionist_interfaces.msg import (
+from robot_ai_interfaces.msg import (
     GuestAppearance,
     PersonProfile,
     TrackedPersonAppearance,

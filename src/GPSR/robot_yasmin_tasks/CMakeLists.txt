@@ -26,7 +26,7 @@ find_package(putrabot_interfaces REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(rclcpp_action REQUIRED)
 find_package(rclcpp_lifecycle REQUIRED)
-find_package(receptionist_interfaces REQUIRED)
+find_package(robot_ai_interfaces REQUIRED)
 find_package(robot_ai_interfaces REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
@@ -51,7 +51,7 @@ target_include_directories(${PROJECT_NAME}_core PUBLIC
 ament_target_dependencies(${PROJECT_NAME}_core
   action_msgs ament_index_cpp builtin_interfaces geometry_msgs lifecycle_msgs
   nav2_msgs nav_msgs putrabot_interfaces rclcpp rclcpp_action rclcpp_lifecycle
-  receptionist_interfaces robot_ai_interfaces sensor_msgs std_msgs std_srvs
+  robot_ai_interfaces robot_ai_interfaces sensor_msgs std_msgs std_srvs
   tf2 tf2_geometry_msgs tf2_ros voice_interfaces yaml_cpp_vendor yasmin
 )
 target_link_libraries(${PROJECT_NAME}_core yaml-cpp)
@@ -98,7 +98,7 @@ foreach(target IN LISTS runtime_executables)
   ament_target_dependencies(${target}
     action_msgs ament_index_cpp builtin_interfaces cv_bridge geometry_msgs
     lifecycle_msgs nav2_msgs nav_msgs putrabot_interfaces rclcpp rclcpp_action
-    rclcpp_lifecycle receptionist_interfaces robot_ai_interfaces sensor_msgs
+    rclcpp_lifecycle robot_ai_interfaces robot_ai_interfaces sensor_msgs
     std_msgs std_srvs tf2 tf2_geometry_msgs tf2_ros voice_interfaces
     yaml_cpp_vendor yasmin
   )

@@ -49,6 +49,7 @@ CANONICAL_ACTION_TYPES = frozenset({
     "GUIDE_PERSON",
     "SAY",
     "ASK_AND_LISTEN",
+    "FIXED_INFORMATION",
 })
 
 
@@ -227,10 +228,23 @@ def _normalized_parameters(action_type: str, raw_params: dict[str, Any]) -> dict
         text = _first_string(params, "text", "message")
         if text:
             params["text"] = text
+        # Section: Provider-routed SAY actions preserve their factual question instead of TTS text.
+        if params.get("fixed_information"):
+            question = _first_string(params, "question", "text", "message")
+            if question:
+                params["question"] = question
     if action_type == "ASK_AND_LISTEN":
         question = _first_string(params, "question", "text", "message")
         if question:
             params["question"] = question
+    if action_type == "FIXED_INFORMATION":
+        # Section: Preserve the full factual question for provider-owned matching.
+        question = _first_string(params, "question", "text", "message")
+        if question:
+            params["question"] = question
+        # Section: Merge legacy model output into SAY while retaining the provider routing marker.
+        params["fixed_information"] = True
+        action_type = "SAY"
 
     return params
 
@@ -253,6 +267,11 @@ def _build_action_step(
         action_type = "FIND_PERSON_BY_ATTRIBUTE"
     else:
         action_type = _canonical_action_name(raw_name)
+    # Section: Legacy fixed-information actions use the unified SAY state machine.
+    if action_type == "FIXED_INFORMATION":
+        action_type = "SAY"
+        raw_params = dict(raw_params)
+        raw_params["fixed_information"] = True
     params = _normalized_parameters(action_type, raw_params)
 
     # Section: Generate stable identifiers when the model only provides ordered actions.

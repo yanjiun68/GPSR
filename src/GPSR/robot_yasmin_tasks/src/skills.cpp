@@ -16,8 +16,7 @@ ValidationCall require_any_field(std::vector<std::string> names) {
       if (name == "target_object") value = action.target_object;
       if (!value.empty() ||
           (action.parameters.is_object() && action.parameters.contains(name) &&
-           !action.parameters.at(name).is_null() &&
-           action.parameters.at(name) != "")) {
+           !action.parameters.at(name).is_null() && action.parameters.at(name) != "")) {
         return std::make_pair(true, std::string{});
       }
     }
@@ -26,15 +25,16 @@ ValidationCall require_any_field(std::vector<std::string> names) {
       if (!joined.empty()) joined += ", ";
       joined += name;
     }
-    return std::make_pair(false,
-                          "Missing one of required fields: " + joined);
+    return std::make_pair(false, "Missing one of required fields: " + joined);
   };
 }
 
-// Special function: Validate the complete attribute-selector contract before ROS dispatch.
-std::pair<bool, std::string> validate_attribute_selector(
-    const Blackboard::SharedPtr &, const ActionStepData &action) {
-  // Section: Named-person searches must use FIND_PERSON so identity semantics stay explicit.
+// Special function: Validate the complete attribute-selector contract before ROS
+// dispatch.
+std::pair<bool, std::string> validate_attribute_selector(const Blackboard::SharedPtr &,
+                                                         const ActionStepData &action) {
+  // Section: Named-person searches must use FIND_PERSON so identity semantics stay
+  // explicit.
   if (!action.target_person.empty()) {
     return {false, "FIND_PERSON_BY_ATTRIBUTE cannot accept a name selector."};
   }
@@ -44,14 +44,13 @@ std::pair<bool, std::string> validate_attribute_selector(
     return {false, "At least one attribute selector is required."};
   }
   const auto &selector = action.parameters.at("selector");
-  Json predicates = selector.contains("all") ? selector.at("all")
-                                              : Json::array({selector});
+  Json predicates =
+      selector.contains("all") ? selector.at("all") : Json::array({selector});
   if (!predicates.is_array() || predicates.empty()) {
     return {false, "At least one attribute selector is required."};
   }
   static const std::set<std::string> supported{
-      "pose", "gesture", "any_person", "shirt_color", "glasses", "hat",
-      "face_mask"};
+      "pose", "gesture", "any_person", "shirt_color", "glasses", "hat", "face_mask"};
   static const std::set<std::string> affirmative{"yes", "true", "wearing", "1"};
   for (const auto &predicate : predicates) {
     if (!predicate.is_object()) {
@@ -80,8 +79,8 @@ std::pair<bool, std::string> validate_attribute_selector(
 }
 
 // Special function: Validate every supported EXTRACT_PERSON_INFO field locally.
-std::pair<bool, std::string> validate_person_info_fields(
-    const Blackboard::SharedPtr &, const ActionStepData &action) {
+std::pair<bool, std::string> validate_person_info_fields(const Blackboard::SharedPtr &,
+                                                         const ActionStepData &action) {
   // Section: An omitted field requests the complete supported information set.
   Json fields = action.parameters.value("fields", Json::array());
   if ((!fields.is_array() || fields.empty()) && action.parameters.contains("field")) {
@@ -91,9 +90,10 @@ std::pair<bool, std::string> validate_person_info_fields(
     return {false, "Invalid person info field."};
   }
   static const std::set<std::string> supported{
-      "name", "age", "gender", "favorite_drink", "favourite_drink",
-      "hometown", "shirt_color", "shirt_colour", "glasses", "hat",
-      "face_mask", "pose", "gesture", "profile_id", "person_id", "track_id"};
+      "name",      "age",         "gender",       "favorite_drink", "favourite_drink",
+      "hometown",  "shirt_color", "shirt_colour", "glasses",        "hat",
+      "face_mask", "pose",        "gesture",      "profile_id",     "person_id",
+      "track_id"};
   for (const auto &field : fields) {
     if (!field.is_string()) {
       return {false, "Invalid person info field."};
@@ -121,7 +121,8 @@ double scan_delta_radians(double desired_deg, double current_deg) {
   return delta * 3.14159265358979323846 / 180.0;
 }
 
-// Special function: Execute the former PersonWaypointSearchSM mission around attribute perception.
+// Special function: Execute the former PersonWaypointSearchSM mission around attribute
+// perception.
 SkillResultData find_person_by_attribute_with_route(
     const Blackboard::SharedPtr &blackboard, const ActionStepData &original,
     const SkillClients &clients) {
@@ -134,15 +135,16 @@ SkillResultData find_person_by_attribute_with_route(
     requested = original.parameters.value("location", std::string{});
   }
   auto scope = original.parameters.value(
-      "search_scope", requested.empty() ? std::string("GLOBAL")
-                                         : std::string("STRICT_LOCATION"));
+      "search_scope",
+      requested.empty() ? std::string("GLOBAL") : std::string("STRICT_LOCATION"));
   std::transform(scope.begin(), scope.end(), scope.begin(), ::toupper);
   std::vector<std::string> waypoints;
   if (scope == "STRICT_LOCATION" && !requested.empty()) {
     waypoints = {requested};
   } else if (scope == "GLOBAL" && requested.empty()) {
     waypoints = clients.person_search.global_waypoints;
-    const auto preferred = original.parameters.value("preferred_location", std::string{});
+    const auto preferred =
+        original.parameters.value("preferred_location", std::string{});
     const auto iterator = std::find(waypoints.begin(), waypoints.end(), preferred);
     if (iterator != waypoints.end()) {
       waypoints.erase(iterator);
@@ -161,9 +163,11 @@ SkillResultData find_person_by_attribute_with_route(
                              Json::object(), false, true);
   }
 
-  // Section: One absolute deadline bounds navigation, observation, and scanning together.
+  // Section: One absolute deadline bounds navigation, observation, and scanning
+  // together.
   const double mission_timeout = original.timeout_sec > 0.0
-      ? original.timeout_sec : clients.person_search.mission_timeout_sec;
+                                     ? original.timeout_sec
+                                     : clients.person_search.mission_timeout_sec;
   const auto deadline = std::chrono::steady_clock::now() +
                         std::chrono::duration<double>(std::max(0.1, mission_timeout));
   Json visited = Json::array();
@@ -174,8 +178,9 @@ SkillResultData find_person_by_attribute_with_route(
       return make_skill_result(original.action_type, CANCELED,
                                "Person search canceled.", Json::object(), false, true);
     }
-    auto remaining = std::chrono::duration<double>(deadline -
-        std::chrono::steady_clock::now()).count();
+    auto remaining =
+        std::chrono::duration<double>(deadline - std::chrono::steady_clock::now())
+            .count();
     if (remaining <= 0.0) {
       return make_skill_result(original.action_type, TIMEOUT,
                                "Person search exceeded its mission deadline.",
@@ -185,8 +190,8 @@ SkillResultData find_person_by_attribute_with_route(
     navigation.action_type = NAVIGATE;
     navigation.target_location = waypoints[index];
     navigation.parameters = Json::object();
-    navigation.timeout_sec = std::min(clients.person_search.navigation_timeout_sec,
-                                      remaining);
+    navigation.timeout_sec =
+        std::min(clients.person_search.navigation_timeout_sec, remaining);
     const auto navigation_result =
         clients.navigation->navigate_to_pose(blackboard, navigation);
     if (navigation_result.outcome == CANCELED || navigation_result.outcome == TIMEOUT) {
@@ -207,8 +212,9 @@ SkillResultData find_person_by_attribute_with_route(
     headings.insert(headings.end(), clients.person_search.scan_headings_deg.begin(),
                     clients.person_search.scan_headings_deg.end());
     for (const double desired_heading : headings) {
-      remaining = std::chrono::duration<double>(deadline -
-          std::chrono::steady_clock::now()).count();
+      remaining =
+          std::chrono::duration<double>(deadline - std::chrono::steady_clock::now())
+              .count();
       if (remaining <= 0.0) {
         return make_skill_result(original.action_type, TIMEOUT,
                                  "Person search exceeded its mission deadline.",
@@ -216,8 +222,7 @@ SkillResultData find_person_by_attribute_with_route(
       }
       if (desired_heading != 0.0) {
         const auto spin = clients.navigation->spin(
-            blackboard, original,
-            scan_delta_radians(desired_heading, current_heading),
+            blackboard, original, scan_delta_radians(desired_heading, current_heading),
             std::min(clients.person_search.scan_timeout_sec, remaining));
         if (spin.outcome == CANCELED || spin.outcome == TIMEOUT) {
           auto result = spin;
@@ -237,8 +242,8 @@ SkillResultData find_person_by_attribute_with_route(
       local.parameters["active_search_waypoint"] = waypoints[index];
       local.timeout_sec = std::min(
           clients.person_search.observation_timeout_sec,
-          std::chrono::duration<double>(deadline -
-              std::chrono::steady_clock::now()).count());
+          std::chrono::duration<double>(deadline - std::chrono::steady_clock::now())
+              .count());
       auto perception = clients.remote->find_person_by_attribute(blackboard, local);
       if (perception.outcome == SUCCESS) {
         perception.action_type = original.action_type;
@@ -255,27 +260,27 @@ SkillResultData find_person_by_attribute_with_route(
   }
   // Section: Distinguish an exhausted route from a route with no reachable waypoint.
   if (visited.empty()) {
-    return make_skill_result(
-        original.action_type, FAILED, "No configured person-search waypoint was reachable.",
-        Json{{"searched_waypoints", visited},
-             {"navigation_failures", navigation_failures}}, true);
+    return make_skill_result(original.action_type, FAILED,
+                             "No configured person-search waypoint was reachable.",
+                             Json{{"searched_waypoints", visited},
+                                  {"navigation_failures", navigation_failures}},
+                             true);
   }
   return make_skill_result(
       original.action_type, NOT_FOUND,
       "Person was not found after all configured waypoints were searched.",
       Json{{"searched_waypoints", visited},
            {"navigation_failures", navigation_failures},
-           {"scan_failures", scan_failures}}, true);
+           {"scan_failures", scan_failures}},
+      true);
 }
 
 }  // namespace
 
 ValidateSkillInputState::ValidateSkillInputState(ValidationCall validator)
-    : yasmin::State({SUCCESS, INVALID_INPUT}),
-      validator_(std::move(validator)) {}
+    : yasmin::State({SUCCESS, INVALID_INPUT}), validator_(std::move(validator)) {}
 
-std::string ValidateSkillInputState::execute(
-    Blackboard::SharedPtr blackboard) {
+std::string ValidateSkillInputState::execute(Blackboard::SharedPtr blackboard) {
   // Section: Preserve negative-timeout rejection before skill-specific validation.
   const auto action = current_action(blackboard);
   blackboard->set<ActionStepData>(bb::CURRENT_ACTION, action);
@@ -289,8 +294,7 @@ std::string ValidateSkillInputState::execute(
     return SUCCESS;
   }
   const auto result = make_skill_result(action.action_type, INVALID_INPUT,
-                                        validation.second, Json::object(), false,
-                                        true);
+                                        validation.second, Json::object(), false, true);
   blackboard->set<std::string>(bb::FAILURE_REASON, validation.second);
   blackboard->set<SkillResultData>(bb::LAST_SKILL_RESULT, result);
   return INVALID_INPUT;
@@ -299,8 +303,7 @@ std::string ValidateSkillInputState::execute(
 ExecuteSkillClientState::ExecuteSkillClientState(SkillClientCall client_call)
     : yasmin::State(skill_outcomes()), client_call_(std::move(client_call)) {}
 
-std::string ExecuteSkillClientState::execute(
-    Blackboard::SharedPtr blackboard) {
+std::string ExecuteSkillClientState::execute(Blackboard::SharedPtr blackboard) {
   // Section: Convert exceptions into the same recoverable failed result.
   const auto action = current_action(blackboard);
   SkillResultData result;
@@ -316,8 +319,7 @@ std::string ExecuteSkillClientState::execute(
   return result.outcome;
 }
 
-SimpleSkillSM::SimpleSkillSM(const std::string &name,
-                             SkillClientCall client_call,
+SimpleSkillSM::SimpleSkillSM(const std::string &name, SkillClientCall client_call,
                              ValidationCall validator)
     : yasmin::StateMachine(name, skill_outcomes()) {
   // Section: Keep original state names and transition topology.
@@ -333,8 +335,8 @@ SimpleSkillSM::SimpleSkillSM(const std::string &name,
             transitions);
 }
 
-yasmin::StateMachine::SharedPtr make_skill_state_machine(
-    const std::string &action_type, const SkillClients &clients) {
+yasmin::StateMachine::SharedPtr make_skill_state_machine(const std::string &action_type,
+                                                         const SkillClients &clients) {
   // Section: Preserve one explicit mapping per canonical primitive.
   if (action_type == NAVIGATE) {
     return std::make_shared<SimpleSkillSM>(
@@ -370,28 +372,57 @@ yasmin::StateMachine::SharedPtr make_skill_state_machine(
         "FIND_PERSON_BY_ATTRIBUTE_SM",
         [clients](const auto &bb, const auto &action) {
           return find_person_by_attribute_with_route(bb, action, clients);
-        }, validate_attribute_selector);
+        },
+        validate_attribute_selector);
   }
   if (action_type == EXTRACT_PERSON_INFO) {
     return std::make_shared<SimpleSkillSM>(
         "EXTRACT_PERSON_INFO_SKILL_SM",
         [client = clients.remote](const auto &bb, const auto &action) {
           return client->extract_guest_info(bb, action);
-        }, validate_person_info_fields);
+        },
+        validate_person_info_fields);
   }
   if (action_type == SAY) {
     return std::make_shared<SimpleSkillSM>(
-        "SPEECH_SKILL_SM",
-        [client = clients.speech](const auto &bb, const auto &action) {
-          return client->say(bb, action);
+        "SAY_SKILL_SM",
+        [speech = clients.speech, fixed_information = clients.fixed_information](
+            const auto &bb, const auto &action) {
+          // Section: Fixed facts stay a SAY primitive, but their answer is owned by the
+          // dialogue provider.
+          if (action.parameters.value("fixed_information", false)) {
+            if (!fixed_information) {
+              return make_skill_result(action.action_type, FAILED,
+                                       "Fixed-information client unavailable.",
+                                       Json::object(), true);
+            }
+            return fixed_information->answer(bb, action);
+          }
+          // Section: Ordinary SAY actions retain direct text-to-speech behavior.
+          if (!speech) {
+            return make_skill_result(action.action_type, FAILED,
+                                     "Speech client unavailable.", Json::object(),
+                                     true);
+          }
+          return speech->say(bb, action);
         },
-        require_any_field({"text", "text_template"}));
+        require_any_field({"text", "text_template", "question"}));
   }
   if (action_type == ASK_AND_LISTEN) {
     return std::make_shared<SimpleSkillSM>(
         "DIALOGUE_SKILL_SM",
         [client = clients.dialogue](const auto &bb, const auto &action) {
           return client->ask_and_listen(bb, action);
+        },
+        require_any_field({"question", "text"}));
+  }
+  if (action_type == FIXED_INFORMATION) {
+    // Section: Accept legacy queues while routing execution through the unified SAY
+    // state machine.
+    return std::make_shared<SimpleSkillSM>(
+        "SAY_SKILL_SM",
+        [client = clients.fixed_information](const auto &bb, const auto &action) {
+          return client->answer(bb, action);
         },
         require_any_field({"question", "text"}));
   }
@@ -423,7 +454,8 @@ yasmin::StateMachine::SharedPtr make_skill_state_machine(
         "PICK_OBJECT_SKILL_SM",
         [client = clients.manipulation](const auto &bb, const auto &action) {
           return client->pick_object(bb, action);
-        }, validator);
+        },
+        validator);
   }
   if (action_type == PLACE_OBJECT) {
     const auto validator = [](const Blackboard::SharedPtr &bb,
@@ -433,9 +465,9 @@ yasmin::StateMachine::SharedPtr make_skill_state_machine(
         return std::make_pair(false, std::string("Place requires held_object."));
       }
       const bool destination = bb->contains(bb::TARGET_POSE) ||
-          !action.target_location.empty() ||
-          (action.parameters.contains("target_pose") &&
-           !action.parameters.at("target_pose").is_null());
+                               !action.target_location.empty() ||
+                               (action.parameters.contains("target_pose") &&
+                                !action.parameters.at("target_pose").is_null());
       return std::make_pair(destination,
                             std::string("Place requires target pose or location."));
     };
@@ -443,7 +475,8 @@ yasmin::StateMachine::SharedPtr make_skill_state_machine(
         "PLACE_OBJECT_SKILL_SM",
         [client = clients.manipulation](const auto &bb, const auto &action) {
           return client->place_object(bb, action);
-        }, validator);
+        },
+        validator);
   }
   if (action_type == HANDOVER_OBJECT) {
     const auto validator = [](const Blackboard::SharedPtr &bb,
@@ -459,12 +492,14 @@ yasmin::StateMachine::SharedPtr make_skill_state_machine(
         "HANDOVER_SKILL_SM",
         [client = clients.manipulation](const auto &bb, const auto &action) {
           return client->handover(bb, action);
-        }, validator);
+        },
+        validator);
   }
   if (action_type == GUIDE_PERSON) {
     const auto validator = [](const Blackboard::SharedPtr &,
                               const ActionStepData &action) {
-      const bool destination = !action.target_location.empty() ||
+      const bool destination =
+          !action.target_location.empty() ||
           (action.parameters.contains("destination") &&
            action.parameters.at("destination").is_string() &&
            !action.parameters.at("destination").get<std::string>().empty());
@@ -475,15 +510,16 @@ yasmin::StateMachine::SharedPtr make_skill_state_machine(
         "GUIDE_PERSON_SKILL_SM",
         [client = clients.guide](const auto &bb, const auto &action) {
           return client->guide(bb, action);
-        }, validator);
+        },
+        validator);
   }
   if (action_type == COMPARE_OBJECTS) {
     const auto validator = [](const Blackboard::SharedPtr &,
                               const ActionStepData &action) {
       auto property = action.parameters.value("property", std::string{});
       std::transform(property.begin(), property.end(), property.begin(), ::tolower);
-      static const std::set<std::string> supported{
-          "biggest", "largest", "smallest", "heaviest", "lightest", "thinnest"};
+      static const std::set<std::string> supported{"biggest",  "largest",  "smallest",
+                                                   "heaviest", "lightest", "thinnest"};
       return std::make_pair(supported.count(property) != 0U,
                             std::string("Invalid comparison property."));
     };
@@ -491,7 +527,8 @@ yasmin::StateMachine::SharedPtr make_skill_state_machine(
         "COMPARE_OBJECTS_SKILL_SM",
         [client = clients.perception](const auto &bb, const auto &action) {
           return client->compare_objects(bb, action);
-        }, validator);
+        },
+        validator);
   }
   if (action_type == DISPOSE_TRASH) {
     const auto validator = [](const Blackboard::SharedPtr &bb,
@@ -505,7 +542,8 @@ yasmin::StateMachine::SharedPtr make_skill_state_machine(
         "DISPOSE_TRASH_SKILL_SM",
         [client = clients.manipulation](const auto &bb, const auto &action) {
           return client->dispose_trash(bb, action);
-        }, validator);
+        },
+        validator);
   }
   throw std::invalid_argument("Unsupported action type: " + action_type);
 }

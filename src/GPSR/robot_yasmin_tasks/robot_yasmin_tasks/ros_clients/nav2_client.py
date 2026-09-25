@@ -13,7 +13,7 @@ from geometry_msgs.msg import PoseStamped
 from nav2_msgs.action import NavigateToPose, Spin
 from rclpy.action import ActionClient
 
-from receptionist_interfaces.action import NavigateNamedPose
+from robot_ai_interfaces.action import NavigateNamedPose
 from robot_yasmin_tasks.gpsr import blackboard_keys as bb
 from robot_yasmin_tasks.gpsr.blackboard_utils import bb_get
 from robot_yasmin_tasks.gpsr.models import ActionStepData, make_skill_result

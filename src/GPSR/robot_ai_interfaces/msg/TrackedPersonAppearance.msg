@@ -1,0 +1,14 @@
+# Section: One frame-associated appearance observation for a canonical tracked person.
+std_msgs/Header header
+string tracking_session_id
+int32 track_id
+int32 person_id
+string profile_id
+string person_uuid
+float32[4] bbox_xyxy
+robot_ai_interfaces/GuestAppearance appearance
+robot_ai_interfaces/PersonProfile profile
+string pose
+float32 pose_confidence
+string gesture
+float32 gesture_confidence

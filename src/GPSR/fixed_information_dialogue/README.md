@@ -41,7 +41,7 @@ source install/setup.bash
 ros2 launch fixed_information_dialogue fixed_information_dialogue.launch.py
 ```
 
-## Test a question
+## Test a direct fact trigger
 
 ```bash
 ros2 topic echo /fixed_information/answer
@@ -51,7 +51,7 @@ In another terminal:
 
 ```bash
 ros2 topic pub --once /fixed_information/query std_msgs/msg/String \
-  "{data: 'what is your team name'}"
+  "{data: \"today's date\"}"
 ```
 
 Direct TTS-oriented output:
@@ -98,3 +98,26 @@ STT
 
 `NO_MATCH` and `AMBIGUOUS` must be routed onward or clarified; this node never
 uses an LLM to invent a fixed answer.
+
+## GPSR skill-state integration
+
+The `robot_yasmin_tasks` executor exposes this provider as the
+`FIXED_INFORMATION_SKILL_SM` state. The scheduler emits the canonical
+`FIXED_INFORMATION` primitive for provider-owned requests such as:
+
+```text
+tell today's date
+today's date
+meet Axel in the bedroom, tell him today's date
+what time is it
+what is your team name
+who are you
+```
+
+Recipient-directed commands remove the recipient from the provider payload. For
+example, the compound command above becomes `FIND_PERSON` followed by
+`FIXED_INFORMATION(question="today's date")`; it does not become a literal
+`SAY` action.
+
+The state correlates the topic response by request ID, preserves `NO_MATCH` and
+`AMBIGUOUS`, and sends only a `FOUND` answer to TTS.

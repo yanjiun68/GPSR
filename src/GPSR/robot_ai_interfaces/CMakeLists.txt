@@ -7,15 +7,21 @@ find_package(rosidl_default_generators REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(builtin_interfaces REQUIRED)
 find_package(sensor_msgs REQUIRED)
-find_package(receptionist_interfaces REQUIRED)
 
-# Section: Generate GPSR action queue interfaces.
+# Section: Generate consolidated GPSR, receptionist, and text-to-speech interfaces.
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/ActionStep.msg"
   "msg/ActionQueue.msg"
   "msg/SkillResult.msg"
   "msg/GpsrGuestRecord.msg"
   "msg/FoundEntityRecord.msg"
+  "msg/CurrentGuestStatus.msg"
+  "msg/GuestAppearance.msg"
+  "msg/GuestCount.msg"
+  "msg/PersonProfile.msg"
+  "msg/RecognitionStatus.msg"
+  "msg/TrackedPersonAppearance.msg"
+  "msg/TrackedPersonAppearanceArray.msg"
   "action/ExecuteActionQueue.action"
   "action/ExecuteTaskPlan.action"
   "action/FindObject.action"
@@ -31,6 +37,13 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "action/FindPersonByAttribute.action"
   "action/ExtractGuestInfo.action"
   "action/ResolveVisualTarget.action"
+  "action/CaptureNamedProfile.action"
+  "action/CollectGuestProfile.action"
+  "action/NavigateNamedPose.action"
+  "action/RecognizeHumanId.action"
+  "action/RunRcTask.action"
+  "action/SpeakText.action"
+  "action/TrackGuestAppearance.action"
   "srv/CountObjects.srv"
   "srv/CountPeople.srv"
   "srv/CompareObjects.srv"
@@ -45,7 +58,23 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/Say.srv"
   "srv/ScheduleCommand.srv"
   "srv/ValidateActionQueue.srv"
-  DEPENDENCIES geometry_msgs builtin_interfaces sensor_msgs receptionist_interfaces
+  "srv/CaptureAppearance.srv"
+  "srv/ClearCurrentGuest.srv"
+  "srv/CommitCurrentGuest.srv"
+  "srv/FacePose.srv"
+  "srv/FindEmptyChair.srv"
+  "srv/GetGuestCount.srv"
+  "srv/GetProfile.srv"
+  "srv/LookupIdentityProfile.srv"
+  "srv/MarkProfileSeated.srv"
+  "srv/PointToSeat.srv"
+  "srv/PrepareNavigationSession.srv"
+  "srv/ResolvePresentationTargets.srv"
+  "srv/SetCurrentGuestProfile.srv"
+  "srv/SetHostProfile.srv"
+  "srv/SpeakGuestIntroduction.srv"
+  "srv/SpeakText.srv"
+  DEPENDENCIES geometry_msgs builtin_interfaces sensor_msgs
 )
 
 # Section: Export generated runtime dependencies.

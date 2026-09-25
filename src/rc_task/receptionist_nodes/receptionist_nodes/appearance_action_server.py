@@ -19,10 +19,10 @@ from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 
 # Import the action and appearance message used by this wrapper.
-from receptionist_interfaces.action import TrackGuestAppearance
+from robot_ai_interfaces.action import TrackGuestAppearance
 
 # Import GuestAppearance so the node can keep an unknown default estimate.
-from receptionist_interfaces.msg import GuestAppearance
+from robot_ai_interfaces.msg import GuestAppearance
 
 
 # Wrap the streaming appearance estimate topic as a cancelable action.

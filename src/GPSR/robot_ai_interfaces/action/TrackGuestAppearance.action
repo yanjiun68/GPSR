@@ -1,0 +1,10 @@
+# Goal
+string guest_profile_id
+---
+# Result
+bool success
+string message
+robot_ai_interfaces/GuestAppearance appearance
+---
+# Feedback
+robot_ai_interfaces/GuestAppearance latest_appearance

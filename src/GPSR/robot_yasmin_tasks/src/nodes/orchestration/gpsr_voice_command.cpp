@@ -5,14 +5,13 @@
 #include <memory>
 #include <mutex>
 #include <random>
-#include <sstream>
-#include <string>
-#include <thread>
-
 #include <rclcpp/executors/multi_threaded_executor.hpp>
 #include <rclcpp/rclcpp.hpp>
+#include <sstream>
 #include <std_msgs/msg/float32.hpp>
 #include <std_msgs/msg/string.hpp>
+#include <string>
+#include <thread>
 #include <voice_interfaces/srv/say_text.hpp>
 #include <voice_interfaces/srv/transcribe_audio.hpp>
 
@@ -27,21 +26,24 @@ class GpsrVoiceCommandNode final : public rclcpp::Node {
     const bool auto_start = declare_parameter<bool>("auto_start", true);
     declare_parameter<bool>("repeat", false);
     command_topic_ = declare_parameter<std::string>("command_topic", "/gpsr/command");
-    scheduler_topic_ = declare_parameter<std::string>("scheduler_state_topic", "/gpsr/state");
-    result_topic_ = declare_parameter<std::string>("command_result_topic", "/gpsr/command_result");
-    clarification_topic_ = declare_parameter<std::string>("clarification_response_topic", "/gpsr/clarification_response");
+    scheduler_topic_ =
+        declare_parameter<std::string>("scheduler_state_topic", "/gpsr/state");
+    result_topic_ =
+        declare_parameter<std::string>("command_result_topic", "/gpsr/command_result");
+    clarification_topic_ = declare_parameter<std::string>(
+        "clarification_response_topic", "/gpsr/clarification_response");
     declare_parameter<double>("record_sec", 6.0);
     declare_parameter<double>("listen_timeout_sec", 12.0);
     declare_parameter<double>("clarification_listen_timeout_sec", 20.0);
-    declare_parameter<std::string>("prompt_text", "Please give me a GPSR command after the beep.");
+    declare_parameter<std::string>("prompt_text",
+                                   "Please give me a GPSR command after the beep.");
     tts_ = create_client<voice_interfaces::srv::SayText>("/voice/tts/say");
-    stt_service_ = create_client<voice_interfaces::srv::TranscribeAudio>(
-        "/voice/stt/transcribe");
+    stt_service_ =
+        create_client<voice_interfaces::srv::TranscribeAudio>("/voice/stt/transcribe");
     stt_pub_ = create_publisher<std_msgs::msg::Float32>("/voice/stt/start", 10);
     stt_sub_ = create_subscription<std_msgs::msg::String>(
         "/voice/stt/transcript", 10,
-        std::bind(&GpsrVoiceCommandNode::stt_callback, this,
-                  std::placeholders::_1));
+        std::bind(&GpsrVoiceCommandNode::stt_callback, this, std::placeholders::_1));
     command_pub_ = create_publisher<std_msgs::msg::String>(command_topic_, 10);
     clarification_pub_ =
         create_publisher<std_msgs::msg::String>(clarification_topic_, 10);
@@ -51,12 +53,10 @@ class GpsrVoiceCommandNode final : public rclcpp::Node {
                   std::placeholders::_1));
     result_sub_ = create_subscription<std_msgs::msg::String>(
         result_topic_, 10,
-        std::bind(&GpsrVoiceCommandNode::result_callback, this,
-                  std::placeholders::_1));
+        std::bind(&GpsrVoiceCommandNode::result_callback, this, std::placeholders::_1));
     if (auto_start) {
       start_timer_ = create_wall_timer(
-          std::chrono::seconds(2),
-          std::bind(&GpsrVoiceCommandNode::start_once, this));
+          std::chrono::seconds(2), std::bind(&GpsrVoiceCommandNode::start_once, this));
     }
   }
 
@@ -72,7 +72,8 @@ class GpsrVoiceCommandNode final : public rclcpp::Node {
     return stream.str();
   }
 
-  // Special function: Wait for a ROS future while executor threads remain responsible for spinning.
+  // Special function: Wait for a ROS future while executor threads remain responsible
+  // for spinning.
   template <typename Future>
   static bool wait_future(Future &future, double timeout) {
     return future.wait_for(std::chrono::duration<double>(timeout)) ==
@@ -96,8 +97,7 @@ class GpsrVoiceCommandNode final : public rclcpp::Node {
         if (scheduler_state_ != "WAITING_FOR_COMMAND") break;
       }
       const double timeout = get_parameter("listen_timeout_sec").as_double();
-      RCLCPP_INFO(get_logger(), "Waiting for GPSR command (timeout: %.1f s).",
-                  timeout);
+      RCLCPP_INFO(get_logger(), "Waiting for GPSR command (timeout: %.1f s).", timeout);
       const auto transcript = transcribe_once(timeout);
       if (!transcript.empty()) {
         std_msgs::msg::String command;
@@ -105,10 +105,11 @@ class GpsrVoiceCommandNode final : public rclcpp::Node {
           std::lock_guard<std::mutex> lock(state_mutex_);
           active_command_id_ = command_id();
           awaiting_result_ = true;
-          command.data = Json{{"type", "gpsr_voice_command"},
-                              {"command_id", active_command_id_},
-                              {"instruction", transcript}}
-                             .dump();
+          command.data = Json{
+              {"type", "gpsr_voice_command"},
+              {"command_id", active_command_id_},
+              {"instruction",
+               transcript}}.dump();
         }
         RCLCPP_INFO(get_logger(),
                     "GPSR transcript received; awaiting scheduler result.");
@@ -123,7 +124,8 @@ class GpsrVoiceCommandNode final : public rclcpp::Node {
     if (!awaiting_result_) busy_ = false;
   }
 
-  // Special function: Track scheduler readiness without interpreting other payload fields.
+  // Special function: Track scheduler readiness without interpreting other payload
+  // fields.
   void scheduler_callback(const std_msgs::msg::String::SharedPtr message) {
     const auto payload = parse_json(message ? message->data : "", Json());
     if (!payload.is_object()) return;
@@ -157,8 +159,7 @@ class GpsrVoiceCommandNode final : public rclcpp::Node {
     }
     const auto result_id = result.value("command_id", "");
     if (!active_id.empty() && result_id != active_id) return;
-    if (result.contains("clarification") &&
-        result.at("clarification").is_object()) {
+    if (result.contains("clarification") && result.at("clarification").is_object()) {
       const auto clarification = result.at("clarification");
       const int attempt = clarification.value("attempt", 0);
       const auto id = clarification.value("command_id", result_id);
@@ -199,10 +200,9 @@ class GpsrVoiceCommandNode final : public rclcpp::Node {
                   1.0, get_parameter("clarification_listen_timeout_sec").as_double()))
             : "";
     std_msgs::msg::String reply;
-    reply.data = Json{{"command_id", id},
-                      {"attempt", attempt},
-                      {"transcript", transcript}}
-                     .dump();
+    reply.data =
+        Json{{"command_id", id}, {"attempt", attempt}, {"transcript", transcript}}
+            .dump();
     clarification_pub_->publish(reply);
   }
 
@@ -210,19 +210,19 @@ class GpsrVoiceCommandNode final : public rclcpp::Node {
   std::string transcribe_once(double timeout) {
     const auto deadline = std::chrono::steady_clock::now() +
                           std::chrono::duration<double>(std::max(0.0, timeout));
-    const double discovery = std::min(
-        2.0, std::max(0.0, std::chrono::duration<double>(
-                                    deadline - std::chrono::steady_clock::now())
-                                    .count()));
+    const double discovery =
+        std::min(2.0, std::max(0.0, std::chrono::duration<double>(
+                                        deadline - std::chrono::steady_clock::now())
+                                        .count()));
     if (!stt_service_->wait_for_service(std::chrono::duration<double>(discovery))) {
       return "";
     }
     auto request = std::make_shared<voice_interfaces::srv::TranscribeAudio::Request>();
-    request->record_sec =
-        static_cast<float>(get_parameter("record_sec").as_double());
+    request->record_sec = static_cast<float>(get_parameter("record_sec").as_double());
     auto future = stt_service_->async_send_request(request);
-    const double remaining = std::chrono::duration<double>(
-        deadline - std::chrono::steady_clock::now()).count();
+    const double remaining =
+        std::chrono::duration<double>(deadline - std::chrono::steady_clock::now())
+            .count();
     if (remaining <= 0.0 || !wait_future(future, remaining)) return "";
     try {
       const auto response = future.get();
@@ -269,7 +269,8 @@ class GpsrVoiceCommandNode final : public rclcpp::Node {
 }  // namespace robot_yasmin_tasks
 
 int main(int argc, char **argv) {
-  // Section: Preserve the four-thread executor used by voice service waits and callbacks.
+  // Section: Preserve the four-thread executor used by voice service waits and
+  // callbacks.
   rclcpp::init(argc, argv);
   auto node = std::make_shared<robot_yasmin_tasks::GpsrVoiceCommandNode>();
   rclcpp::executors::MultiThreadedExecutor executor(rclcpp::ExecutorOptions(), 4);

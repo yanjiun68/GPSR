@@ -2,13 +2,13 @@
 
 # Import the ROS 2 Python client library.
 import rclpy
-from my_tts_system_interfaces.action import SpeakText
+from robot_ai_interfaces.action import SpeakText
 from rclpy.action import ActionClient
 # Import the Node base class used to build ROS 2 nodes.
 from rclpy.node import Node
 
 # Import the memory lookup and introduction services used by this node.
-from receptionist_interfaces.srv import GetProfile, SpeakGuestIntroduction
+from robot_ai_interfaces.srv import GetProfile, SpeakGuestIntroduction
 # Import the helper that converts profiles into simple introduction sentences.
 from receptionist_nodes.helpers.profile_formatter import build_introduction_lines
 # Import the helper that performs Piper playback.

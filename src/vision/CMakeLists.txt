@@ -19,7 +19,7 @@ find_package(image_transport REQUIRED)
 find_package(OpenCV REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(putrabot_interfaces REQUIRED)
-find_package(receptionist_interfaces REQUIRED)
+find_package(robot_ai_interfaces REQUIRED)
 find_package(robot_ai_interfaces REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(voice_interfaces REQUIRED)
@@ -63,6 +63,9 @@ install(
   scripts/count_people_perception_server.py
   scripts/qwen_roi_depth_resolver.py
   scripts/target_grasp_geometry_node.py
+  # Section: Install the Astra camera adapter and optional Qwen ROI grounding node.
+  scripts/robocup_astra_camera_node.py
+  scripts/astra_cam_qw.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

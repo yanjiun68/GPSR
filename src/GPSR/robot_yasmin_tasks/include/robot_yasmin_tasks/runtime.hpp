@@ -54,6 +54,7 @@ inline constexpr char FOLLOW_PERSON[] = "FOLLOW_PERSON";
 inline constexpr char GUIDE_PERSON[] = "GUIDE_PERSON";
 inline constexpr char SAY[] = "SAY";
 inline constexpr char ASK_AND_LISTEN[] = "ASK_AND_LISTEN";
+inline constexpr char FIXED_INFORMATION[] = "FIXED_INFORMATION";
 inline constexpr char COMPARE_OBJECTS[] = "COMPARE_OBJECTS";
 inline constexpr char DISPOSE_TRASH[] = "DISPOSE_TRASH";
 inline constexpr char GPSR_PREPARE_SKILL_SERVICE[] = "/gpsr_lifecycle/prepare_skill";

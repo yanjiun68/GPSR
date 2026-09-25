@@ -1,14 +1,13 @@
 #include <algorithm>
 #include <atomic>
 #include <memory>
-#include <thread>
-#include <string>
-
 #include <rclcpp/executors/multi_threaded_executor.hpp>
 #include <rclcpp_action/rclcpp_action.hpp>
 #include <rclcpp_lifecycle/lifecycle_node.hpp>
 #include <robot_ai_interfaces/action/count_objects.hpp>
 #include <robot_ai_interfaces/srv/count_objects.hpp>
+#include <string>
+#include <thread>
 
 #include "robot_yasmin_tasks/runtime.hpp"
 
@@ -19,18 +18,21 @@ class CountObjectsSkillServer final : public rclcpp_lifecycle::LifecycleNode {
   using Action = robot_ai_interfaces::action::CountObjects;
   using GoalHandle = rclcpp_action::ServerGoalHandle<Action>;
   using Service = robot_ai_interfaces::srv::CountObjects;
-  using CallbackReturn = rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface::CallbackReturn;
+  using CallbackReturn =
+      rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface::CallbackReturn;
 
   // Special function: Declare stable interface names without allocating task resources.
   CountObjectsSkillServer()
       : rclcpp_lifecycle::LifecycleNode("count_objects_skill_server") {
     action_name_ = declare_parameter<std::string>("action_name", "/gpsr/count_objects");
-    service_name_ = declare_parameter<std::string>("perception_service", "/perception/count_objects");
+    service_name_ = declare_parameter<std::string>("perception_service",
+                                                   "/perception/count_objects");
     default_timeout_sec_ = declare_parameter<double>("default_timeout_sec", 5.0);
     RCLCPP_INFO(get_logger(), "CountObjects lifecycle server is UNCONFIGURED.");
   }
 
-  // Special function: Create the same perception client and GPSR action server on configure.
+  // Special function: Create the same perception client and GPSR action server on
+  // configure.
   CallbackReturn on_configure(const rclcpp_lifecycle::State &) override {
     try {
       count_client_ = create_client<Service>(service_name_);
@@ -94,9 +96,8 @@ class CountObjectsSkillServer final : public rclcpp_lifecycle::LifecycleNode {
   }
 
   // Special function: Reject inactive and negative-timeout goals.
-  rclcpp_action::GoalResponse goal_callback(
-      const rclcpp_action::GoalUUID &,
-      std::shared_ptr<const Action::Goal> goal) {
+  rclcpp_action::GoalResponse goal_callback(const rclcpp_action::GoalUUID &,
+                                            std::shared_ptr<const Action::Goal> goal) {
     if (!skill_active_.load() || goal->timeout_sec < 0.0F) {
       return rclcpp_action::GoalResponse::REJECT;
     }
@@ -104,8 +105,7 @@ class CountObjectsSkillServer final : public rclcpp_lifecycle::LifecycleNode {
   }
 
   // Special function: Accept queue-driven cancellation.
-  rclcpp_action::CancelResponse cancel_callback(
-      const std::shared_ptr<GoalHandle>) {
+  rclcpp_action::CancelResponse cancel_callback(const std::shared_ptr<GoalHandle>) {
     return rclcpp_action::CancelResponse::ACCEPT;
   }
 
@@ -129,9 +129,8 @@ class CountObjectsSkillServer final : public rclcpp_lifecycle::LifecycleNode {
     feedback->status = "Counting " + goal->category + " at " +
                        (goal->location.empty() ? "current view" : goal->location);
     goal_handle->publish_feedback(feedback);
-    const double timeout = goal->timeout_sec != 0.0F
-                               ? goal->timeout_sec
-                               : default_timeout_sec_;
+    const double timeout =
+        goal->timeout_sec != 0.0F ? goal->timeout_sec : default_timeout_sec_;
     if (!count_client_->wait_for_service(std::chrono::duration<double>(timeout))) {
       result->success = false;
       result->result_json = "{}";

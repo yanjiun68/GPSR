@@ -1,5 +1,0 @@
-string profile_id
----
-bool success
-string message
-receptionist_interfaces/PersonProfile profile

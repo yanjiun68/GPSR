@@ -3,10 +3,9 @@
 #include <deque>
 #include <map>
 #include <memory>
-#include <string>
-
 #include <rclcpp/rclcpp.hpp>
 #include <std_msgs/msg/string.hpp>
+#include <string>
 #include <voice_interfaces/srv/say_text.hpp>
 
 #include "robot_yasmin_tasks/runtime.hpp"
@@ -19,7 +18,8 @@ class CountPeopleBlackboardTTSNode final : public rclcpp::Node {
   CountPeopleBlackboardTTSNode()
       : rclcpp::Node("count_people_blackboard_tts_node"),
         blackboard_(std::make_shared<Blackboard>()) {
-    topic_ = declare_parameter<std::string>("human_quantities_topic", "/perception/human_quantities");
+    topic_ = declare_parameter<std::string>("human_quantities_topic",
+                                            "/perception/human_quantities");
     tts_name_ = declare_parameter<std::string>("tts_service_name", "/voice/tts/say");
     declare_parameter<bool>("speak_confirmed_only", true);
     declare_parameter<bool>("speak_empty_scene", false);
@@ -30,19 +30,21 @@ class CountPeopleBlackboardTTSNode final : public rclcpp::Node {
     blackboard_->set<std::string>(bb::COUNT_PEOPLE_RESULT_JSON, "{}");
     blackboard_->set<Json>(bb::DETECTED_PEOPLE, Json::array());
     subscription_ = create_subscription<std_msgs::msg::String>(
-        topic_, 10, std::bind(&CountPeopleBlackboardTTSNode::quantity_callback,
-                              this, std::placeholders::_1));
+        topic_, 10,
+        std::bind(&CountPeopleBlackboardTTSNode::quantity_callback, this,
+                  std::placeholders::_1));
     tts_client_ = create_client<voice_interfaces::srv::SayText>(tts_name_);
-    timer_ = create_wall_timer(std::chrono::milliseconds(100),
-                               std::bind(&CountPeopleBlackboardTTSNode::tts_timer,
-                                         this));
+    timer_ =
+        create_wall_timer(std::chrono::milliseconds(100),
+                          std::bind(&CountPeopleBlackboardTTSNode::tts_timer, this));
     RCLCPP_INFO(get_logger(),
                 "Count people blackboard TTS node ready: topic=%s, tts=%s",
                 topic_.c_str(), tts_name_.c_str());
   }
 
  private:
-  // Special function: Parse confirmed quantities and update every established blackboard key.
+  // Special function: Parse confirmed quantities and update every established
+  // blackboard key.
   void quantity_callback(const std_msgs::msg::String::SharedPtr message) {
     const auto payload = parse_json(message ? message->data : "", Json());
     if (!payload.is_object()) {
@@ -89,29 +91,32 @@ class CountPeopleBlackboardTTSNode final : public rclcpp::Node {
   bool should_queue(int count) const {
     if (count <= 0 && !get_parameter("speak_empty_scene").as_bool()) return false;
     if (get_parameter("speak_on_change_only").as_bool() &&
-        std::to_string(count) == last_fingerprint_) return false;
-    const auto elapsed = std::chrono::duration<double>(
-        std::chrono::steady_clock::now() - last_report_).count();
+        std::to_string(count) == last_fingerprint_)
+      return false;
+    const auto elapsed =
+        std::chrono::duration<double>(std::chrono::steady_clock::now() - last_report_)
+            .count();
     return elapsed >= get_parameter("min_report_interval_sec").as_double();
   }
 
   // Special function: Build exactly the singular/plural spoken people report.
   static std::string report_text(int count) {
-    static const std::vector<std::string> words{
-        "zero", "one", "two", "three", "four", "five", "six", "seven",
-        "eight", "nine", "ten"};
+    static const std::vector<std::string> words{"zero",  "one",  "two", "three",
+                                                "four",  "five", "six", "seven",
+                                                "eight", "nine", "ten"};
     if (count <= 0) return "I do not see any confirmed people right now.";
     if (count == 1) return "I can see one person.";
-    const auto number = count <= 10 ? words.at(static_cast<std::size_t>(count))
-                                    : std::to_string(count);
+    const auto number =
+        count <= 10 ? words.at(static_cast<std::size_t>(count)) : std::to_string(count);
     return "I can see " + number + " people.";
   }
 
-  // Special function: Drain queued text asynchronously without blocking subscription callbacks.
+  // Special function: Drain queued text asynchronously without blocking subscription
+  // callbacks.
   void tts_timer() {
     if (active_future_.valid()) {
-      if (active_future_.wait_for(std::chrono::seconds(0)) !=
-          std::future_status::ready) return;
+      if (active_future_.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
+        return;
       try {
         const auto response = active_future_.get();
         if (response && response->success) {
@@ -134,7 +139,8 @@ class CountPeopleBlackboardTTSNode final : public rclcpp::Node {
     speech_queue_.pop_front();
     auto request = std::make_shared<voice_interfaces::srv::SayText::Request>();
     request->text = active_text_;
-    // Section: Store only the shared future and avoid Humble's deprecated implicit conversion.
+    // Section: Store only the shared future and avoid Humble's deprecated implicit
+    // conversion.
     active_future_ = tts_client_->async_send_request(request).future.share();
   }
 

@@ -19,9 +19,9 @@
   <depend>interbotix_xs_msgs</depend>
   <depend>std_msgs</depend>
   <depend>builtin_interfaces</depend>
-  <depend>receptionist_interfaces</depend>
+  <depend>robot_ai_interfaces</depend>
   <exec_depend>ament_index_python</exec_depend>
-  <exec_depend>my_tts_system_interfaces</exec_depend>
+  <exec_depend>robot_ai_interfaces</exec_depend>
   <exec_depend>face_detection</exec_depend>
   <exec_depend>voice</exec_depend>
 

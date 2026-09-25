@@ -3,8 +3,8 @@
 import json
 
 import yasmin
-from receptionist_interfaces.action import CaptureNamedProfile
-from receptionist_interfaces.msg import GuestAppearance
+from robot_ai_interfaces.action import CaptureNamedProfile
+from robot_ai_interfaces.msg import GuestAppearance
 from std_msgs.msg import String
 from yasmin_ros import ActionState, MonitorState
 from yasmin_ros.basic_outcomes import ABORT, SUCCEED
@@ -195,7 +195,7 @@ def build_capture_goal(blackboard, goal_factory=CaptureNamedProfile.Goal):
         missing = ', '.join(missing_fields)
         raise CaptureInterfaceUnavailableError(
             'USER_ACTION_REQUIRED: generated CaptureNamedProfile.Goal lacks '
-            f'{missing}; extend receptionist_interfaces/action/CaptureNamedProfile.action '
+            f'{missing}; extend robot_ai_interfaces/action/CaptureNamedProfile.action '
             'and rebuild the interface.'
         )
     return goal

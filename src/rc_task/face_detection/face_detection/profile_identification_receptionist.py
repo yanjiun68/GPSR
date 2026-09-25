@@ -25,9 +25,9 @@ from rclpy.action import ActionServer, CancelResponse, GoalResponse
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
-from receptionist_interfaces.action import RecognizeHumanId
-from receptionist_interfaces.msg import GuestAppearance, RecognitionStatus
-from receptionist_interfaces.srv import LookupIdentityProfile
+from robot_ai_interfaces.action import RecognizeHumanId
+from robot_ai_interfaces.msg import GuestAppearance, RecognitionStatus
+from robot_ai_interfaces.srv import LookupIdentityProfile
 from std_msgs.msg import String
 
 

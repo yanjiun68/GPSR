@@ -18,7 +18,7 @@
 
   <!-- Runtime dependencies used by the Python YASMIN state machine. -->
   <exec_depend>rclpy</exec_depend>
-  <exec_depend>receptionist_interfaces</exec_depend>
+  <exec_depend>robot_ai_interfaces</exec_depend>
   <exec_depend>std_msgs</exec_depend>
   <exec_depend>voice_interfaces</exec_depend>
   <exec_depend>yasmin</exec_depend>

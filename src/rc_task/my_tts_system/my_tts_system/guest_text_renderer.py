@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 import rclpy
-from my_tts_system_interfaces.action import SpeakText
+from robot_ai_interfaces.action import SpeakText
 from rclpy.action import ActionClient
 from rclpy.node import Node
 from std_msgs.msg import Empty, String

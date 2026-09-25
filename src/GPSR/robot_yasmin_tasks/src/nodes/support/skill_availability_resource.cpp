@@ -1,5 +1,4 @@
 #include <memory>
-
 #include <rclcpp/executors/multi_threaded_executor.hpp>
 #include <rclcpp_lifecycle/lifecycle_node.hpp>
 
@@ -7,7 +6,8 @@ namespace robot_yasmin_tasks {
 
 class SkillAvailabilityResource final : public rclcpp_lifecycle::LifecycleNode {
  public:
-  using CallbackReturn = rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface::CallbackReturn;
+  using CallbackReturn =
+      rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface::CallbackReturn;
 
   // Special function: Preserve the lifecycle capability marker node name.
   SkillAvailabilityResource()

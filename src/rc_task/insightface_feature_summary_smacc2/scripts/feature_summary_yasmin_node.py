@@ -15,7 +15,7 @@ from collections import defaultdict
 import rclpy
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
-from receptionist_interfaces.msg import GuestAppearance
+from robot_ai_interfaces.msg import GuestAppearance
 from std_msgs.msg import String
 from voice_interfaces.srv import SayText
 from yasmin import Blackboard, State, StateMachine

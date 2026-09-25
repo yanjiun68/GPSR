@@ -53,9 +53,13 @@ class FixedInformationDialogueNode(Node):
     def _parse_request(data: str) -> Tuple[str, str, Dict[str, Any]]:
         data = data.strip()
         request_id = str(uuid.uuid4())
-        if data.startswith("{"):
+        # Section: Decode JSON containers explicitly so arrays cannot masquerade as questions.
+        if data.startswith(("{", "[")):
             try:
                 payload = json.loads(data)
+                # Section: Only object envelopes carry request IDs, text, and context fields.
+                if not isinstance(payload, dict):
+                    return request_id, "", {}
                 context = payload.get("context") or {}
                 return (
                     str(payload.get("request_id") or request_id),

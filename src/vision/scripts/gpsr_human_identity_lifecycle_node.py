@@ -15,8 +15,8 @@ from cv_bridge import CvBridge
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.lifecycle import LifecycleNode, State, TransitionCallbackReturn
 from rclpy.qos import qos_profile_sensor_data
-from receptionist_interfaces.msg import PersonProfile
-from receptionist_interfaces.srv import GetProfile
+from robot_ai_interfaces.msg import PersonProfile
+from robot_ai_interfaces.srv import GetProfile
 from sensor_msgs.msg import Image
 from ultralytics import YOLO
 

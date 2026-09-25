@@ -3,11 +3,10 @@
 #include <deque>
 #include <map>
 #include <memory>
-#include <sstream>
-#include <string>
-
 #include <rclcpp/rclcpp.hpp>
+#include <sstream>
 #include <std_msgs/msg/string.hpp>
+#include <string>
 #include <voice_interfaces/srv/say_text.hpp>
 
 #include "robot_yasmin_tasks/runtime.hpp"
@@ -20,7 +19,8 @@ class CountObjectsBlackboardTTSNode final : public rclcpp::Node {
   CountObjectsBlackboardTTSNode()
       : rclcpp::Node("count_objects_blackboard_tts_node"),
         blackboard_(std::make_shared<Blackboard>()) {
-    topic_ = declare_parameter<std::string>("object_quantities_topic", "/perception/object_quantities");
+    topic_ = declare_parameter<std::string>("object_quantities_topic",
+                                            "/perception/object_quantities");
     tts_name_ = declare_parameter<std::string>("tts_service_name", "/voice/tts/say");
     declare_parameter<bool>("speak_confirmed_only", true);
     declare_parameter<bool>("speak_empty_scene", false);
@@ -33,19 +33,21 @@ class CountObjectsBlackboardTTSNode final : public rclcpp::Node {
     blackboard_->set<std::string>(bb::REPORT_TEXT, "");
     blackboard_->set<std::string>(bb::COUNT_OBJECTS_RESULT_JSON, "{}");
     subscription_ = create_subscription<std_msgs::msg::String>(
-        topic_, 10, std::bind(&CountObjectsBlackboardTTSNode::quantity_callback,
-                              this, std::placeholders::_1));
+        topic_, 10,
+        std::bind(&CountObjectsBlackboardTTSNode::quantity_callback, this,
+                  std::placeholders::_1));
     tts_client_ = create_client<voice_interfaces::srv::SayText>(tts_name_);
-    timer_ = create_wall_timer(std::chrono::milliseconds(100),
-                               std::bind(&CountObjectsBlackboardTTSNode::tts_timer,
-                                         this));
+    timer_ =
+        create_wall_timer(std::chrono::milliseconds(100),
+                          std::bind(&CountObjectsBlackboardTTSNode::tts_timer, this));
     RCLCPP_INFO(get_logger(),
                 "Count object blackboard TTS node ready: topic=%s, tts=%s",
                 topic_.c_str(), tts_name_.c_str());
   }
 
  private:
-  // Special function: Normalize confirmed positive object quantities and queue their report.
+  // Special function: Normalize confirmed positive object quantities and queue their
+  // report.
   void quantity_callback(const std_msgs::msg::String::SharedPtr message) {
     const auto payload = parse_json(message ? message->data : "", Json());
     if (!payload.is_object()) {
@@ -53,7 +55,8 @@ class CountObjectsBlackboardTTSNode final : public rclcpp::Node {
       return;
     }
     if (get_parameter("speak_confirmed_only").as_bool() &&
-        !payload.value("confirmed", false)) return;
+        !payload.value("confirmed", false))
+      return;
     std::map<std::string, int> quantities;
     if (payload.contains("object_quantities") &&
         payload.at("object_quantities").is_object()) {
@@ -96,27 +99,28 @@ class CountObjectsBlackboardTTSNode final : public rclcpp::Node {
   bool should_queue(bool empty, const std::string &fingerprint) const {
     if (empty && !get_parameter("speak_empty_scene").as_bool()) return false;
     if (get_parameter("speak_on_change_only").as_bool() &&
-        fingerprint == last_fingerprint_) return false;
-    const auto elapsed = std::chrono::duration<double>(
-        std::chrono::steady_clock::now() - last_report_).count();
+        fingerprint == last_fingerprint_)
+      return false;
+    const auto elapsed =
+        std::chrono::duration<double>(std::chrono::steady_clock::now() - last_report_)
+            .count();
     return elapsed >= get_parameter("min_report_interval_sec").as_double();
   }
 
   // Special function: Apply the original small-number speech vocabulary.
   static std::string number_to_words(int count) {
-    static const std::vector<std::string> words{
-        "zero", "one", "two", "three", "four", "five", "six", "seven",
-        "eight", "nine", "ten"};
-    return count >= 0 && count <= 10
-               ? words.at(static_cast<std::size_t>(count))
-               : std::to_string(count);
+    static const std::vector<std::string> words{"zero",  "one",  "two", "three",
+                                                "four",  "five", "six", "seven",
+                                                "eight", "nine", "ten"};
+    return count >= 0 && count <= 10 ? words.at(static_cast<std::size_t>(count))
+                                     : std::to_string(count);
   }
 
   // Special function: Preserve the simple English label pluralization rules.
   static std::string pluralize(const std::string &name) {
-    if (name.size() >= 2 &&
-        (name.compare(name.size() - 2, 2, "ch") == 0 ||
-         name.compare(name.size() - 2, 2, "sh") == 0)) return name + "es";
+    if (name.size() >= 2 && (name.compare(name.size() - 2, 2, "ch") == 0 ||
+                             name.compare(name.size() - 2, 2, "sh") == 0))
+      return name + "es";
     if (!name.empty() && (name.back() == 's' || name.back() == 'x')) return name + "es";
     if (name.size() > 1 && name.back() == 'y' &&
         std::string("aeiou").find(name[name.size() - 2]) == std::string::npos) {
@@ -131,11 +135,13 @@ class CountObjectsBlackboardTTSNode final : public rclcpp::Node {
     return number_to_words(count) + " " + (count == 1 ? name : pluralize(name));
   }
 
-  // Special function: Build combined or per-type report lines with the same truncation order.
+  // Special function: Build combined or per-type report lines with the same truncation
+  // order.
   std::vector<std::string> build_report_lines(
       const std::map<std::string, int> &quantities) const {
     if (quantities.empty()) return {"I do not see any confirmed objects right now."};
-    std::vector<std::pair<std::string, int>> items(quantities.begin(), quantities.end());
+    std::vector<std::pair<std::string, int>> items(quantities.begin(),
+                                                   quantities.end());
     std::sort(items.begin(), items.end(), [](const auto &left, const auto &right) {
       return left.second != right.second ? left.second > right.second
                                          : left.first < right.first;
@@ -151,13 +157,16 @@ class CountObjectsBlackboardTTSNode final : public rclcpp::Node {
     if (get_parameter("report_style").as_string() == "per_type") {
       std::vector<std::string> lines;
       for (const auto &value : phrases) lines.push_back("I can see " + value + ".");
-      if (hidden > 0) lines.push_back("There are also " + std::to_string(hidden) +
-                                      " more object types in view.");
+      if (hidden > 0)
+        lines.push_back("There are also " + std::to_string(hidden) +
+                        " more object types in view.");
       return lines;
     }
     std::string joined;
-    if (phrases.size() == 1) joined = phrases[0];
-    else if (phrases.size() == 2) joined = phrases[0] + " and " + phrases[1];
+    if (phrases.size() == 1)
+      joined = phrases[0];
+    else if (phrases.size() == 2)
+      joined = phrases[0] + " and " + phrases[1];
     else {
       for (std::size_t index = 0; index < phrases.size(); ++index) {
         if (index > 0) joined += index + 1 == phrases.size() ? ", and " : ", ";
@@ -165,16 +174,17 @@ class CountObjectsBlackboardTTSNode final : public rclcpp::Node {
       }
     }
     std::string summary = "I can see " + joined + ".";
-    if (hidden > 0) summary += " I am skipping " + std::to_string(hidden) +
-                               " smaller object types to keep the report short.";
+    if (hidden > 0)
+      summary += " I am skipping " + std::to_string(hidden) +
+                 " smaller object types to keep the report short.";
     return {summary};
   }
 
   // Special function: Drain one queued TTS request at a time.
   void tts_timer() {
     if (active_future_.valid()) {
-      if (active_future_.wait_for(std::chrono::seconds(0)) !=
-          std::future_status::ready) return;
+      if (active_future_.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
+        return;
       try {
         const auto response = active_future_.get();
         if (response && response->success) {
@@ -197,7 +207,8 @@ class CountObjectsBlackboardTTSNode final : public rclcpp::Node {
     speech_queue_.pop_front();
     auto request = std::make_shared<voice_interfaces::srv::SayText::Request>();
     request->text = active_text_;
-    // Section: Store only the shared future and avoid Humble's deprecated implicit conversion.
+    // Section: Store only the shared future and avoid Humble's deprecated implicit
+    // conversion.
     active_future_ = tts_client_->async_send_request(request).future.share();
   }
 
