@@ -1,3 +1,4 @@
+// Section: People-count blackboard reporter that emits debounced spoken summaries.
 #include <algorithm>
 #include <chrono>
 #include <deque>
@@ -12,6 +13,8 @@
 
 namespace robot_yasmin_tasks {
 
+// Section: People-count ingestion, blackboard storage, change detection, and TTS
+// reporting.
 class CountPeopleBlackboardTTSNode final : public rclcpp::Node {
  public:
   // Special function: Create unchanged topic, TTS, blackboard, and timer interfaces.
@@ -159,6 +162,7 @@ class CountPeopleBlackboardTTSNode final : public rclcpp::Node {
 
 }  // namespace robot_yasmin_tasks
 
+// Section: Process startup and people-report callback execution.
 int main(int argc, char **argv) {
   // Section: Run the reporter in the standard single-node spin loop.
   rclcpp::init(argc, argv);

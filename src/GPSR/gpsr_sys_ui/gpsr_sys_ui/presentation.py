@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import math
 import textwrap
 from dataclasses import dataclass
@@ -62,6 +63,34 @@ def wrap_text(value: Any, width: int) -> List[str]:
     if not text:
         return ["-"]
     return textwrap.wrap(text, width=width, replace_whitespace=True, drop_whitespace=True) or ["-"]
+
+
+def format_parameters(value: Any) -> str:
+    """Special function: Render structured action parameters as stable compact text."""
+    if not isinstance(value, Mapping) or not value:
+        return "-"
+
+    # Section: JSON encoding keeps nested selectors, filters, booleans, and lists
+    # unambiguous while ordinary single-token strings stay easy to scan.
+    rendered: List[str] = []
+    for key in sorted(value, key=lambda item: str(item)):
+        parameter = value[key]
+        if isinstance(parameter, str) and parameter and not any(
+            character.isspace() for character in parameter
+        ):
+            encoded = parameter
+        else:
+            try:
+                encoded = json.dumps(
+                    parameter,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+            except (TypeError, ValueError):
+                encoded = str(parameter)
+        rendered.append(f"{key}={encoded}")
+    return " ".join(rendered) or "-"
 
 
 @dataclass(frozen=True)
@@ -132,6 +161,9 @@ def queue_rows(queue: Any) -> List[Dict[str, Any]]:
             "domain": raw.get("domain", "OTHER"),
             "skill": raw.get("skill", raw.get("action_type", "-")),
             "target": raw.get("target", "-"),
+            "params": format_parameters(
+                raw.get("parameters", raw.get("arguments", {}))
+            ),
             "state": raw.get("task_status", raw.get("state", "IN QUEUE")),
             "attempt": f"{attempt}/{retry_limit}",
             "current": bool(raw.get("current", False)),

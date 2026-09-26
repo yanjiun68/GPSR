@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
 
+# Section: POSIX file locking prevents multiple STT processes from competing for one microphone.
+import fcntl
 import os
 import subprocess
 import threading
 import time
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
-from typing import Optional
+from pathlib import Path
+from typing import Optional, TextIO
 
 import numpy as np
 import rclpy
@@ -25,6 +28,44 @@ try:
 except ImportError:
     # Section: Keep the existing on-demand STT APIs usable when the optional dependency is absent.
     webrtcvad = None
+
+
+# Section: All STT launch paths share this host-local microphone ownership lease.
+MICROPHONE_CAPTURE_LOCK_PATH = Path("/tmp/putrabot_microphone_capture.lock")
+
+
+def acquire_microphone_capture_lock() -> tuple[TextIO | None, str]:
+    """Special function: Claim exclusive host microphone ownership for this STT server."""
+    # Section: Open a stable lock file whose advisory kernel lock clears when its process exits.
+    lock_handle = MICROPHONE_CAPTURE_LOCK_PATH.open("a+", encoding="utf-8")
+    try:
+        # Section: Reject competing STT servers immediately instead of allowing concurrent ALSA capture.
+        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        # Section: Report the existing owner PID so an operator can find the conflicting launch.
+        lock_handle.seek(0)
+        owner_pid = lock_handle.read().strip() or "unknown"
+        lock_handle.close()
+        return None, owner_pid
+    # Section: Update diagnostic ownership only after this process has acquired the exclusive lease.
+    lock_handle.seek(0)
+    lock_handle.truncate()
+    lock_handle.write(str(os.getpid()))
+    lock_handle.flush()
+    return lock_handle, str(os.getpid())
+
+
+def release_microphone_capture_lock(lock_handle: TextIO | None) -> None:
+    """Special function: Release the microphone lease during normal STT shutdown."""
+    # Section: A missing handle means startup was rejected before this process owned microphone capture.
+    if lock_handle is None:
+        return
+    try:
+        # Section: Unlock before close so a replacement STT process can start immediately.
+        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
+    finally:
+        # Section: Closing guarantees kernel cleanup even if explicit unlock cannot report success.
+        lock_handle.close()
 
 
 class STTNode(Node):
@@ -98,6 +139,17 @@ class STTNode(Node):
         self.vad_end_silence_ms = int(self.get_parameter("vad_end_silence_ms").value)
         self.vad_mode = int(self.get_parameter("vad_mode").value)
 
+        # Section: Refuse a duplicate STT server before registering duplicate topic, service, and action endpoints.
+        self._microphone_capture_lock, owner_pid = acquire_microphone_capture_lock()
+        if self._microphone_capture_lock is None:
+            self.get_logger().error(
+                "[voice_stt] Microphone capture is already owned by PID "
+                f"{owner_pid}; do not start a second STT server. "
+                "Set start_voice_stt:=false on this secondary launch."
+            )
+            raise RuntimeError("duplicate microphone capture owner")
+
+        # Section: Initialize model and VAD state only after this process owns microphone capture.
         self._whisper_model = None
         self._whisper_model_name = None
         # Section: Use an isolated model cache because the VAD feature has its own GPU/precision settings.
@@ -175,7 +227,8 @@ class STTNode(Node):
             record_sec=float(request.record_sec) if request.record_sec > 0 else self.record_sec,
             mic_device=request.mic_device or self.mic_device,
             whisper_model=request.whisper_model or self.whisper_model_name,
-            whisper_language=request.whisper_language,
+            # Section: Use the configured English default when service clients omit their optional language field.
+            whisper_language=request.whisper_language or self.whisper_language,
             wav_path=request.wav_path or self.wav_path,
         )
 
@@ -567,7 +620,7 @@ class STTNode(Node):
             )
 
     def destroy_node(self):
-        """Stop optional background audio resources before ROS destroys this node."""
+        """Special function: Stop STT resources and release microphone ownership before ROS teardown."""
         # Section: Terminate the blocking arecord reader so shutdown does not leave the ALSA device occupied.
         self._vad_stop_event.set()
         if self._vad_process is not None and self._vad_process.poll() is None:
@@ -575,6 +628,9 @@ class STTNode(Node):
         if self._vad_thread is not None:
             self._vad_thread.join(timeout=2.0)
         self._vad_executor.shutdown(wait=False, cancel_futures=True)
+        # Section: Release the host-wide microphone lease only after all capture resources stop.
+        release_microphone_capture_lock(getattr(self, "_microphone_capture_lock", None))
+        self._microphone_capture_lock = None
         return super().destroy_node()
 
 
@@ -582,15 +638,24 @@ def main(args=None):
     """Initialize and spin the standalone STT ROS node."""
     # Section: Own the ROS context and action-server node for this process.
     rclpy.init(args=args)
-    node = STTNode()
+    node = None
     try:
+        # Section: Construct the server only after it obtains exclusive microphone ownership.
+        node = STTNode()
         rclpy.spin(node)
+    except RuntimeError as exc:
+        # Section: A rejected secondary instance exits without subscribing to or recording from the microphone.
+        rclpy.logging.get_logger("voice_stt").error(str(exc))
     except KeyboardInterrupt:
         pass
     finally:
-        node._transcribe_action.destroy()
-        node.destroy_node()
-        rclpy.shutdown()
+        # Section: Destroy action and node resources only when this process became the STT owner.
+        if node is not None:
+            node._transcribe_action.destroy()
+            node.destroy_node()
+        # Section: Shut down ROS after normal exit or rejected duplicate startup.
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == "__main__":

@@ -1,3 +1,4 @@
+// Section: ROS client adapters that execute GPSR skills and normalize their results.
 #include "robot_yasmin_tasks/clients.hpp"
 
 #include <action_msgs/msg/goal_status.hpp>
@@ -20,6 +21,19 @@ T json_value(const Json &object, const std::string &key, const T &fallback) {
   } catch (const Json::exception &) {
     return fallback;
   }
+}
+
+// Special function: Accept only an unambiguous affirmative answer for execution consent.
+bool is_affirmative_execution_confirmation(const std::string &transcript) {
+  // Section: A negative phrase always wins so phrases such as "not yes" cannot start robot motion.
+  static const std::regex negative(
+      R"(\b(no|nope|nah|negative|cancel|stop|do not|don't)\b)",
+      std::regex::icase);
+  static const std::regex affirmative(
+      R"(\b(yes|yeah|yep|affirmative|correct|confirm|proceed)\b)",
+      std::regex::icase);
+  return !std::regex_search(transcript, negative) &&
+         std::regex_search(transcript, affirmative);
 }
 
 // Special function: Recreate the Python count-client filter JSON construction.
@@ -169,6 +183,7 @@ std::pair<std::string, std::vector<std::string>> render_template(
 
 }  // namespace
 
+// Section: Speech adapter for template rendering and synchronous TTS service calls.
 SpeechClient::SpeechClient(const rclcpp::Node::SharedPtr &node, bool simulate,
                            std::string service_name)
     : node_(node), simulate_(simulate), service_name_(std::move(service_name)) {
@@ -246,6 +261,7 @@ SkillResultData SpeechClient::say(const Blackboard::SharedPtr &blackboard,
                            true);
 }
 
+// Section: Dialogue adapter for one prompt-and-transcript exchange over voice topics.
 DialogueClient::DialogueClient(const rclcpp::Node::SharedPtr &node,
                                const std::shared_ptr<SpeechClient> &speech,
                                bool simulate)
@@ -284,6 +300,13 @@ SkillResultData DialogueClient::ask_and_listen(const Blackboard::SharedPtr &blac
                                "No clear answer.", Json::object(), true);
     }
     blackboard->set<std::string>(bb::DIALOGUE_ANSWER, answer);
+    // Section: Require an affirmative simulated answer when this dialogue gates robot execution.
+    if (json_value<bool>(action.parameters, "require_affirmative_confirmation", false) &&
+        !is_affirmative_execution_confirmation(answer)) {
+      return make_skill_result(action.action_type, CANCELED,
+                               "Execution was not confirmed by the operator.",
+                               Json{{"answer", answer}}, false, true);
+    }
     return make_skill_result(action.action_type, SUCCESS, "Answer received.",
                              Json{{"answer", answer}});
   }
@@ -323,6 +346,13 @@ SkillResultData DialogueClient::ask_and_listen(const Blackboard::SharedPtr &blac
       const auto answer = latest_;
       lock.unlock();
       blackboard->set<std::string>(bb::DIALOGUE_ANSWER, answer);
+      // Section: Stop the queue before physical skills when the spoken answer is not affirmative.
+      if (json_value<bool>(action.parameters, "require_affirmative_confirmation", false) &&
+          !is_affirmative_execution_confirmation(answer)) {
+        return make_skill_result(action.action_type, CANCELED,
+                                 "Execution was not confirmed by the operator.",
+                                 Json{{"answer", answer}}, false, true);
+      }
       return make_skill_result(action.action_type, SUCCESS,
                                "Local STT answer received.", Json{{"answer", answer}});
     }
@@ -331,6 +361,7 @@ SkillResultData DialogueClient::ask_and_listen(const Blackboard::SharedPtr &blac
                            "No STT transcript received.", Json::object(), true);
 }
 
+// Section: Fixed-information adapter for correlated provider queries and answer speech.
 FixedInformationClient::FixedInformationClient(
     const rclcpp::Node::SharedPtr &node, const std::shared_ptr<SpeechClient> &speech,
     bool simulate)
@@ -470,6 +501,7 @@ SkillResultData FixedInformationClient::answer(const Blackboard::SharedPtr &blac
                            "Fixed-information answer spoken.", payload);
 }
 
+// Section: Navigation adapter for named poses, raw poses, and in-place scan rotations.
 Nav2Client::Nav2Client(const rclcpp::Node::SharedPtr &node, bool simulate,
                        std::string named_action, std::string pose_action,
                        std::string spin_action)
@@ -662,6 +694,7 @@ SkillResultData Nav2Client::spin(const Blackboard::SharedPtr &blackboard,
                                  Json{{"yaw", yaw_radians}}, true);
 }
 
+// Section: Perception adapter for count and local comparison service actions.
 PerceptionClient::PerceptionClient(const rclcpp::Node::SharedPtr &node, bool simulate,
                                    std::string object_action, std::string people_action)
     : node_(node),
@@ -845,6 +878,7 @@ SkillResultData PerceptionClient::extract_person_info(
   return make_skill_result(action.action_type, SUCCESS, "Person info extracted.", info);
 }
 
+// Section: Person-follow adapter for the persistent follow action provider.
 FollowPersonClient::FollowPersonClient(const rclcpp::Node::SharedPtr &node,
                                        std::string action_name)
     : node_(node), action_name_(std::move(action_name)) {
@@ -933,6 +967,8 @@ SkillResultData FollowPersonClient::follow(const Blackboard::SharedPtr &blackboa
                            outcome == CANCELED);
 }
 
+// Section: Remote GPSR skill-server adapter for object, attribute-person, and
+// guest-info actions.
 RemoteSkillClient::RemoteSkillClient(const rclcpp::Node::SharedPtr &node)
     : node_(node) {
   // Section: Keep lifecycle-owned action endpoint names unchanged.
@@ -1228,6 +1264,8 @@ SkillResultData RemoteSkillClient::extract_guest_info(
       outcome == CANCELED || outcome == INVALID_INPUT);
 }
 
+// Section: Manipulation adapter for pick, place, disposal, and handover action
+// providers.
 ManipulationClient::ManipulationClient(const rclcpp::Node::SharedPtr &node,
                                        bool simulate, std::string pick_action,
                                        std::string place_action,
@@ -1420,6 +1458,7 @@ SkillResultData ManipulationClient::handover(const Blackboard::SharedPtr &blackb
                            Json{{"object", held}, {"recipient", recipient}});
 }
 
+// Section: Person-guidance adapter for escort action requests and outcomes.
 GuidePersonClient::GuidePersonClient(const rclcpp::Node::SharedPtr &node, bool simulate,
                                      std::string action_name)
     : node_(node), simulate_(simulate), action_name_(std::move(action_name)) {
@@ -1483,6 +1522,8 @@ SkillResultData GuidePersonClient::guide(const Blackboard::SharedPtr &blackboard
       Json{{"person", action.target_person}, {"destination", destination}});
 }
 
+// Section: Lifecycle-resource adapter for executor-owned prepare, cleanup, and recovery
+// calls.
 LifecycleResourceClient::LifecycleResourceClient(const rclcpp::Node::SharedPtr &node,
                                                  double transition_timeout_sec,
                                                  double operation_margin_sec)

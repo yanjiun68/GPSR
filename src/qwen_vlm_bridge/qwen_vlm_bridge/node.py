@@ -41,11 +41,11 @@ class QwenTextPlannerNode(Node):
         """Special function: Configure ROS interfaces and start the persistent model worker."""
         super().__init__("qwen_text_planner")
 
-        # Section: Declare model and prompt settings compatible with the original test_text.py paths.
+        # Section: Declare model settings and the workspace-owned reviewed ActionQueue prompt.
         self.declare_parameter("model_path", "/home/yanjiun68/ai/models/UnifoLM-ER-1")
         self.declare_parameter(
             "system_prompt_path",
-            "/home/yanjiun68/ai/qwen3v1/system_prompt_actionqueue_test.txt",
+            "/home/yanjiun68/workspace/WS1/PutrabotUPM-project/src/qwen_vlm_bridge/config/system_prompt_actionqueue_test.txt",
         )
         self.declare_parameter("max_new_tokens", 256)
         self.declare_parameter("load_in_4bit", True)

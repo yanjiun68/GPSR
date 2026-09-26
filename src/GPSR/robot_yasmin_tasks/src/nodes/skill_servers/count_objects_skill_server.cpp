@@ -1,3 +1,5 @@
+// Section: Lifecycle action server that converts object-quantity observations into
+// count results.
 #include <algorithm>
 #include <atomic>
 #include <memory>
@@ -13,6 +15,8 @@
 
 namespace robot_yasmin_tasks {
 
+// Section: Lifecycle action handling for object-count requests and observation
+// aggregation.
 class CountObjectsSkillServer final : public rclcpp_lifecycle::LifecycleNode {
  public:
   using Action = robot_ai_interfaces::action::CountObjects;
@@ -177,6 +181,7 @@ class CountObjectsSkillServer final : public rclcpp_lifecycle::LifecycleNode {
 
 }  // namespace robot_yasmin_tasks
 
+// Section: Process startup and lifecycle action-server execution.
 int main(int argc, char **argv) {
   // Section: Preserve the four-thread executor used by the Python server.
   rclcpp::init(argc, argv);

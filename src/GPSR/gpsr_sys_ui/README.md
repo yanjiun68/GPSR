@@ -181,7 +181,7 @@ The UI never parses natural-language commands or reconstructs queue state from l
 
 The scheduler plan and executor status publishers are event-driven and transient-local. They publish without checking for UI subscribers and retain their latest snapshots, so the scheduler and executor run normally when `monitor_core` and the TUI are stopped. A monitor started after command acceptance receives the latest plan and queue status. The executor reports queue start, action selection, retry, action completion, and queue completion. The existing `ExecuteActionQueue` feedback fields receive the same cursor/action/status values.
 
-The Overview page shows the accepted ActionQueue as an ordered live task table, and the GPSR page shows the complete sequence with domain and retry details. Operator-facing task statuses are `IN QUEUE`, `RUNNING`, `RETRYING`, `COMPLETED`, `ABORTED`, and `SKIPPED`. When a queue aborts, the failed task and every unstarted remainder are marked `ABORTED` because none of them can continue.
+The Overview page shows the accepted ActionQueue as an ordered live task table, and the GPSR page shows the complete sequence with domain, action parameters, and retry details. Parameters are retained as structured monitor-state data and rendered as compact `key=value` text, including nested selectors and filters. Operator-facing task statuses are `IN QUEUE`, `RUNNING`, `RETRYING`, `COMPLETED`, `ABORTED`, and `SKIPPED`. When a queue aborts, the failed task and every unstarted remainder are marked `ABORTED` because none of them can continue.
 
 ```text
 Scheduler plan/state ─┐

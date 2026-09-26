@@ -1,3 +1,5 @@
+// Section: Voice-command orchestration between TTS, STT, scheduler, and clarification
+// topics.
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -19,6 +21,8 @@
 
 namespace robot_yasmin_tasks {
 
+// Section: Voice intake, command correlation, scheduler-state gating, and clarification
+// handling.
 class GpsrVoiceCommandNode final : public rclcpp::Node {
  public:
   // Special function: Create unchanged voice, scheduler, and command interfaces.
@@ -176,7 +180,11 @@ class GpsrVoiceCommandNode final : public rclcpp::Node {
       return;
     }
     std::string response_text;
-    if (result.contains("execution") && result.at("execution").is_object()) {
+    // Section: A declined execution confirmation rejects only this command and reopens voice intake.
+    if (result.value("request_new_command", false)) {
+      response_text =
+          "I will not execute that command. Please provide another GPSR command.";
+    } else if (result.contains("execution") && result.at("execution").is_object()) {
       response_text = result.at("execution").value("success", false)
                           ? "I received the command."
                           : "The command is rejected.";
@@ -268,6 +276,7 @@ class GpsrVoiceCommandNode final : public rclcpp::Node {
 
 }  // namespace robot_yasmin_tasks
 
+// Section: Process startup and concurrent voice callback execution.
 int main(int argc, char **argv) {
   // Section: Preserve the four-thread executor used by voice service waits and
   // callbacks.

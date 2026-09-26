@@ -1,9 +1,12 @@
+// Section: Shared runtime contracts, serialization, outcomes, and pose conversion
+// helpers.
 #include "robot_yasmin_tasks/runtime.hpp"
 
 #include <limits>
 
 namespace robot_yasmin_tasks {
 
+// Section: Shared outcome and JSON serialization helpers used by every GPSR component.
 yasmin::Outcomes skill_outcomes() {
   // Section: Keep ordering aligned with outcomes.py for viewer and test parity.
   return {SUCCESS,       FAILED,      CANCELED,           TIMEOUT,
@@ -99,6 +102,8 @@ bool cancel_requested(const Blackboard::SharedPtr &blackboard) {
   return callback ? callback() : false;
 }
 
+// Section: Navigation pose conversion helpers that validate the shared map-frame
+// schema.
 std::optional<geometry_msgs::msg::PoseStamped> pose_from_json(const Json &raw) {
   // Section: Require the existing map-frame position/quaternion schema.
   if (!raw.is_object() || raw.value("frame_id", std::string{}) != "map" ||

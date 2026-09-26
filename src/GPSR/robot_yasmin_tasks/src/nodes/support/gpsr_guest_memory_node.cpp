@@ -1,3 +1,4 @@
+// Section: Persistent in-process GPSR guest and found-entity memory service node.
 #include <algorithm>
 #include <cctype>
 #include <chrono>
@@ -31,6 +32,8 @@ using FoundRecord = robot_ai_interfaces::msg::FoundEntityRecord;
 using GuestRecord = robot_ai_interfaces::msg::GpsrGuestRecord;
 
 // Special function: Normalize lookup keys exactly once at the memory boundary.
+// Section: Memory-key normalization, JSON merge helpers, and persistent guest-entity
+// service storage.
 std::string normalize_key(std::string value, const std::size_t limit) {
   if (value.size() > limit) value.resize(limit);
   value.erase(value.begin(),
@@ -424,6 +427,7 @@ class GpsrGuestMemoryNode final : public rclcpp::Node {
 
 }  // namespace robot_yasmin_tasks
 
+// Section: Process startup and guest-memory service callback execution.
 int main(int argc, char **argv) {
   // Section: Run the process-owned RAM service until ROS shutdown.
   rclcpp::init(argc, argv);

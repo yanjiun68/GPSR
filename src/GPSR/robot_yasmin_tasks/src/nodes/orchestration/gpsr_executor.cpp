@@ -1,3 +1,5 @@
+// Section: ActionQueue executor that creates, runs, and reports GPSR skill state
+// machines.
 #include <yaml-cpp/yaml.h>
 
 #include <atomic>
@@ -19,6 +21,8 @@
 
 namespace robot_yasmin_tasks {
 
+// Section: ActionQueue admission, lifecycle coordination, state-machine execution, and
+// status reporting.
 class GpsrExecutor final : public rclcpp::Node {
  public:
   using Action = robot_ai_interfaces::action::ExecuteActionQueue;
@@ -38,6 +42,8 @@ class GpsrExecutor final : public rclcpp::Node {
         declare_parameter<std::string>("follow_person_action", "/person_follow/master");
     const auto person_search_config =
         declare_parameter<std::string>("find_person_search_config_file", "");
+    const auto object_search_config =
+        declare_parameter<std::string>("find_object_search_config_file", "");
     const auto lifecycle_timeout =
         declare_parameter<double>("lifecycle_transition_timeout_sec", 60.0);
     const auto lifecycle_margin =
@@ -64,6 +70,7 @@ class GpsrExecutor final : public rclcpp::Node {
     clients_.manipulation = std::make_shared<ManipulationClient>(self, false);
     clients_.guide = std::make_shared<GuidePersonClient>(self, false);
     load_person_search_policy(person_search_config);
+    load_object_search_policy(object_search_config);
     lifecycle_ = std::make_shared<LifecycleResourceClient>(self, lifecycle_timeout,
                                                            lifecycle_margin);
 
@@ -121,6 +128,70 @@ class GpsrExecutor final : public rclcpp::Node {
       if (!headings.empty()) clients_.person_search.scan_headings_deg = headings;
     } catch (const std::exception &error) {
       RCLCPP_WARN(get_logger(), "Unable to load person-search policy '%s': %s",
+                  config_file.c_str(), error.what());
+    }
+  }
+
+  // Special function: Load the object-search room route and scan policy without
+  // changing safe compiled defaults when configuration is unavailable.
+  void load_object_search_policy(const std::string &config_file) {
+    // Section: An empty path intentionally selects the compiled compatibility policy.
+    if (config_file.empty()) return;
+    try {
+      const auto root = YAML::LoadFile(config_file);
+      std::vector<std::string> waypoints;
+      const auto rooms = root["rooms"];
+      if (rooms && rooms.IsMap()) {
+        for (const auto &room : rooms) {
+          const auto viewpoints = room.second["viewpoints"];
+          if (!viewpoints || !viewpoints.IsSequence()) continue;
+          for (const auto &viewpoint : viewpoints) {
+            const auto name = viewpoint.as<std::string>();
+            if (std::find(waypoints.begin(), waypoints.end(), name) ==
+                waypoints.end()) {
+              waypoints.push_back(name);
+            }
+          }
+        }
+      }
+      if (!waypoints.empty()) clients_.object_search.global_waypoints = waypoints;
+
+      // Section: The installed object policy provides tiered scan headings and one
+      // bounded rotation budget.
+      const auto scan = root["scan"];
+      if (scan && scan["action_timeout_sec"]) {
+        clients_.object_search.scan_timeout_sec =
+            scan["action_timeout_sec"].as<double>();
+      }
+      std::vector<double> headings;
+      for (const auto *tier :
+           {"fast_angles_deg", "extended_angles_deg", "exhaustive_angles_deg"}) {
+        if (!scan || !scan[tier]) continue;
+        const auto values = scan[tier].as<std::vector<double>>();
+        headings.insert(headings.end(), values.begin(), values.end());
+      }
+      if (!headings.empty() && headings.front() == 0.0) {
+        headings.erase(headings.begin());
+      }
+      if (!headings.empty()) clients_.object_search.scan_headings_deg = headings;
+
+      // Section: A local miss waits only for the configured confirmation window so
+      // global searches can continue through every waypoint within the mission budget.
+      const auto verification = root["verification"];
+      if (verification && verification["confirmation_timeout_sec"]) {
+        clients_.object_search.observation_timeout_sec =
+            verification["confirmation_timeout_sec"].as<double>();
+      }
+
+      // Section: Reuse the object approach navigation budget for named waypoint
+      // travel because both operations depend on the same Nav2 availability.
+      const auto approach = root["approach"];
+      if (approach && approach["navigation_timeout_sec"]) {
+        clients_.object_search.navigation_timeout_sec =
+            approach["navigation_timeout_sec"].as<double>();
+      }
+    } catch (const std::exception &error) {
+      RCLCPP_WARN(get_logger(), "Unable to load object-search policy '%s': %s",
                   config_file.c_str(), error.what());
     }
   }
@@ -296,6 +367,7 @@ class GpsrExecutor final : public rclcpp::Node {
 
 }  // namespace robot_yasmin_tasks
 
+// Section: Process startup and multithreaded ROS callback execution.
 int main(int argc, char **argv) {
   // Section: Preserve the executor's four-thread ROS callback capacity.
   rclcpp::init(argc, argv);

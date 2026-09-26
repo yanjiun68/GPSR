@@ -1,3 +1,4 @@
+// Section: Object-count blackboard reporter that emits debounced spoken summaries.
 #include <algorithm>
 #include <chrono>
 #include <deque>
@@ -13,6 +14,8 @@
 
 namespace robot_yasmin_tasks {
 
+// Section: Object-count ingestion, blackboard storage, change detection, and TTS
+// reporting.
 class CountObjectsBlackboardTTSNode final : public rclcpp::Node {
  public:
   // Special function: Create unchanged reporting interfaces and blackboard defaults.
@@ -227,6 +230,7 @@ class CountObjectsBlackboardTTSNode final : public rclcpp::Node {
 
 }  // namespace robot_yasmin_tasks
 
+// Section: Process startup and object-report callback execution.
 int main(int argc, char **argv) {
   // Section: Run the reporter in the standard single-node spin loop.
   rclcpp::init(argc, argv);

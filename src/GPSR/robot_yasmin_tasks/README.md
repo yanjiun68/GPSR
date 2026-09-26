@@ -31,13 +31,18 @@ source install/setup.bash
 ## Run Spoken GPSR
 
 ```bash
-ros2 launch robot_yasmin_tasks gpsr_executor.launch.py
+ros2 launch robot_yasmin_tasks gpsr_executor.launch.py use_local_voice:=true
 ```
 
 The launch starts `voice_tts`, `voice_stt`, `gpsr_lifecycle_manager`, `gpsr_executor`, and
 `gpsr_voice_command`. Every symbolic action is prepared and cleaned through the manager.
 Actions with persistent dependencies have an empty lifecycle-node group; transient perception
 actions require the managed skill processes from the full runtime below.
+
+Do not run this standalone executor together with `gpsr_scheduler.launch.py` or
+`gpsr_managed_runtime.launch.py`: those integrated launches already own the scheduler,
+executor, lifecycle manager, and `voice_tts`. The executor launch defaults
+`use_local_voice:=false` so it cannot create a second voice owner accidentally.
 
 ## Managed FIND_OBJECT Runtime
 
@@ -51,11 +56,12 @@ target-specific status is retained on `/gpsr/find_object/target_status` as JSON 
 `std_msgs/msg/String`; it reports the target, search phase, detection and verification
 state, confidence, final result code, object ID, room, and viewpoint.
 
-Lifecycle `ACTIVE` is only a transition state, not the perception-readiness barrier. Before
-search navigation starts, the mission requires `/perception/object_detector_ready`, one
-complete detection frame, aligned depth, and color `CameraInfo`. Configuration performs one
-non-published YOLO warm-up inference; live readiness is asserted only after the first real
-camera inference. The default readiness allowance is 20 seconds.
+Lifecycle `ACTIVE` is only a transition state, not the perception-readiness barrier. The
+executor first navigates to a waypoint from `config/find_object_search.yaml`, then submits a
+bounded strict-location observation to `/gpsr/find_object`. Configuration performs one
+non-published detector warm-up inference; live readiness is asserted only after the first
+real camera inference. The local observation allowance follows the configured confirmation
+window (3 seconds by default).
 
 The lifecycle manager uses one 60-second absolute deadline for a complete group operation.
 The executor waits an additional 10-second response margin. If prepare remains uncertain,
@@ -65,7 +71,7 @@ The competition scheduler publishes its command-cycle state on `/gpsr/state`, li
 human transcripts only in `WAITING_FOR_COMMAND`, and uses `/nav/navigate_named_pose` to
 confirm initial arrival at and final return to the configured `instruction_point`.
 
-## Separate Person Search Routes
+## Waypoint Search Routes
 
 ```text
 FIND_PERSON
@@ -90,6 +96,10 @@ GLOBAL -> kitchen -> living_room -> dining_room -> bedroom -> entrance -> exit
 
 Edit `person_search.global_waypoints` to change the shared route. Navigation failures skip
 the unreachable waypoint; perception failure, cancellation, and timeout remain terminal.
+
+`FIND_OBJECT` follows the same navigate-observe-scan pattern. Its global route, scan
+headings, navigation timeout, and local observation timeout come from
+`config/find_object_search.yaml`; an explicit location creates a one-waypoint strict route.
 
 Open `docs/find_search_visualizer.html` in a browser for a hardware-free interactive model
 of strict/global object and person searches, hidden target positions, and failure branches.

@@ -1,14 +1,56 @@
 #!/usr/bin/env python3
 
+# Section: Standard-library imports provide a process-lifetime exclusive audio lease.
+import fcntl
+import os
 import subprocess
 import threading
 import time
 from pathlib import Path
+from typing import TextIO
 
 import rclpy
 from robot_ai_interfaces.action import SpeakText
 from rclpy.action import ActionServer, CancelResponse, GoalResponse
 from rclpy.node import Node
+
+
+# Section: Match voice_tts so every Piper-backed TTS endpoint shares one audio owner.
+AUDIO_PLAYBACK_LOCK_PATH = Path('/tmp/putrabot_audio_playback.lock')
+
+
+def acquire_audio_playback_lock() -> tuple[TextIO | None, str]:
+    """Special function: Claim exclusive host audio playback ownership for this Piper server."""
+    # Section: Open a stable lock file whose advisory lock is released automatically on process exit.
+    lock_handle = AUDIO_PLAYBACK_LOCK_PATH.open('a+', encoding='utf-8')
+    try:
+        # Section: Reject concurrent speakers rather than allowing two Piper processes to use ALSA.
+        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        # Section: Return the recorded owner PID so the rejected launch identifies its conflict.
+        lock_handle.seek(0)
+        owner_pid = lock_handle.read().strip() or 'unknown'
+        lock_handle.close()
+        return None, owner_pid
+    # Section: Record the current process after it owns the exclusive audio lease.
+    lock_handle.seek(0)
+    lock_handle.truncate()
+    lock_handle.write(str(os.getpid()))
+    lock_handle.flush()
+    return lock_handle, str(os.getpid())
+
+
+def release_audio_playback_lock(lock_handle: TextIO | None) -> None:
+    """Special function: Release the Piper audio lease during shutdown."""
+    # Section: A missing lock means startup was intentionally rejected.
+    if lock_handle is None:
+        return
+    try:
+        # Section: Unlock before closing so a replacement TTS server can start immediately.
+        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
+    finally:
+        # Section: Close the descriptor even when an unlock report fails.
+        lock_handle.close()
 
 
 class PiperTTSNode(Node):
@@ -35,6 +77,15 @@ class PiperTTSNode(Node):
         self.sample_rate = self.get_parameter('sample_rate').get_parameter_value().integer_value
         self.speaker_id = self.get_parameter('speaker_id').get_parameter_value().integer_value
         self.use_cuda = self.get_parameter('use_cuda').get_parameter_value().bool_value
+
+        # Section: Refuse a duplicate TTS server before it creates a second action endpoint.
+        self._audio_playback_lock, owner_pid = acquire_audio_playback_lock()
+        if self._audio_playback_lock is None:
+            self.get_logger().error(
+                'Audio playback is already owned by PID '
+                f'{owner_pid}; disable the secondary TTS launch.'
+            )
+            raise RuntimeError('duplicate audio playback owner')
 
         self._goal_lock = threading.Lock()
         self._process_lock = threading.Lock()
@@ -208,13 +259,35 @@ class PiperTTSNode(Node):
             process.kill()
             process.wait(timeout=1.0)
 
+    def destroy_node(self) -> bool:
+        """Special function: Release exclusive audio ownership before ROS shutdown."""
+        # Section: Keep the host-wide audio lock for the full lifetime of this action server.
+        release_audio_playback_lock(getattr(self, '_audio_playback_lock', None))
+        self._audio_playback_lock = None
+        return super().destroy_node()
+
 
 def main(args=None):
+    """Special function: Start one Piper action server only when it owns audio playback."""
+    # Section: Initialize ROS before constructing the guarded action-server node.
     rclpy.init(args=args)
-    node = PiperTTSNode()
-    rclpy.spin(node)
-    node.destroy_node()
-    rclpy.shutdown()
+    node = None
+    try:
+        # Section: Construct the server only after it acquires the shared host audio lease.
+        node = PiperTTSNode()
+        rclpy.spin(node)
+    except RuntimeError as exc:
+        # Section: Exit a rejected secondary TTS launch without exposing an action server.
+        rclpy.logging.get_logger('piper_tts_node').error(str(exc))
+    except KeyboardInterrupt:
+        pass
+    finally:
+        # Section: Destroy the node only when this process successfully became the TTS owner.
+        if node is not None:
+            node.destroy_node()
+        # Section: Always release the ROS context after normal or rejected startup.
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == '__main__':

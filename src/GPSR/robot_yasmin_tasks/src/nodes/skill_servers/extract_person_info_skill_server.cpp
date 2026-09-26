@@ -1,3 +1,5 @@
+// Section: Lifecycle action server that reads GPSR guest memory and returns requested
+// person fields.
 #include <algorithm>
 #include <atomic>
 #include <cctype>
@@ -38,6 +40,8 @@ Json parse_json_object(const std::string &raw) {
 }
 
 // Special function: Normalize extraction field aliases used by natural-language plans.
+// Section: Field normalization and lifecycle request handling for guest-memory
+// extraction.
 std::string normalize_field(std::string value) {
   std::transform(value.begin(), value.end(), value.begin(),
                  [](unsigned char character) {
@@ -366,6 +370,7 @@ class ExtractPersonInfoServer final : public rclcpp_lifecycle::LifecycleNode {
 
 }  // namespace robot_yasmin_tasks
 
+// Section: Process startup and lifecycle action-server execution.
 int main(int argc, char **argv) {
   // Section: Four executor threads keep service responses live during action execution.
   rclcpp::init(argc, argv);

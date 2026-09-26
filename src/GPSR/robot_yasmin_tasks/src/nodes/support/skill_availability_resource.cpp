@@ -1,9 +1,12 @@
+// Section: Minimal lifecycle resource that advertises GPSR skill availability.
 #include <memory>
 #include <rclcpp/executors/multi_threaded_executor.hpp>
 #include <rclcpp_lifecycle/lifecycle_node.hpp>
 
 namespace robot_yasmin_tasks {
 
+// Section: Lifecycle availability marker callbacks for dependencies without runtime
+// work.
 class SkillAvailabilityResource final : public rclcpp_lifecycle::LifecycleNode {
  public:
   using CallbackReturn =
@@ -41,6 +44,7 @@ class SkillAvailabilityResource final : public rclcpp_lifecycle::LifecycleNode {
 
 }  // namespace robot_yasmin_tasks
 
+// Section: Process startup and lifecycle availability callback execution.
 int main(int argc, char **argv) {
   // Section: Preserve lifecycle service responsiveness with a multithreaded executor.
   rclcpp::init(argc, argv);

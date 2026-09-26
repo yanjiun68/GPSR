@@ -33,6 +33,11 @@ def generate_launch_description() -> LaunchDescription:
     default_find_person_search_config_file = PathJoinSubstitution(
         [FindPackageShare("robot_yasmin_tasks"), "config", "find_person_search.yaml"]
     )
+    # Section: Object find uses its own installed room and scan waypoint policy.
+    find_object_search_config_file = LaunchConfiguration("find_object_search_config_file")
+    default_find_object_search_config_file = PathJoinSubstitution(
+        [FindPackageShare("robot_yasmin_tasks"), "config", "find_object_search.yaml"]
+    )
 
     # Section: Optional integrated runtime nodes.
     start_executor = LaunchConfiguration("start_executor")
@@ -188,6 +193,7 @@ def generate_launch_description() -> LaunchDescription:
             "navigate_to_named_pose_action": navigate_to_named_pose_action,
             "follow_person_action": follow_person_action,
             "find_person_search_config_file": find_person_search_config_file,
+            "find_object_search_config_file": find_object_search_config_file,
             "lifecycle_transition_timeout_sec": ParameterValue(lifecycle_transition_timeout_sec, value_type=float),
             "lifecycle_operation_timeout_margin_sec": ParameterValue(lifecycle_operation_timeout_margin_sec, value_type=float),
             "startup_dependency_poll_sec": ParameterValue(startup_dependency_poll_sec, value_type=float),
@@ -489,6 +495,10 @@ def generate_launch_description() -> LaunchDescription:
         name="voice_stt",
         output="screen",
         condition=IfCondition(start_voice_stt),
+        parameters=[{
+            # Section: Force the scheduler-owned Faster-Whisper STT path to transcribe English.
+            "whisper_language": "en",
+        }],
     )
 
     # Section: Initial spoken command reception remains at the robot's current position.
@@ -617,6 +627,7 @@ def generate_launch_description() -> LaunchDescription:
             DeclareLaunchArgument("reset_state_service", default_value="/gpsr/reset_state", description="Guarded service that re-arms recovery from scheduler ERROR."),
             DeclareLaunchArgument("skill_registry_file", default_value=default_skill_registry_file, description="Authoritative executable primitive capability registry."),
             DeclareLaunchArgument("find_person_search_config_file", default_value=default_find_person_search_config_file, description="Shared YAML waypoint policy for name and attribute person searches."),
+            DeclareLaunchArgument("find_object_search_config_file", default_value=default_find_object_search_config_file, description="YAML waypoint and scan policy for object searches."),
             DeclareLaunchArgument("lifecycle_transition_timeout_sec", default_value="60.0", description="Absolute manager deadline for one lifecycle group operation."),
             DeclareLaunchArgument("lifecycle_operation_timeout_margin_sec", default_value="10.0", description="Executor wait margin beyond the manager lifecycle deadline."),
             DeclareLaunchArgument("startup_dependency_poll_sec", default_value="5.0", description="Bounded retry interval while the executor waits for lifecycle-manager services."),

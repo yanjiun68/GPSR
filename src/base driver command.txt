@@ -78,4 +78,12 @@ ros2 action send_goal --feedback \
 # REAL TIME INSPECT PLAN
 -------------------------
 ros2 topic echo --once /gpsr/task_plan std_msgs/msg/String   --field data --full-length   | jq '.command_context.action_queue'
+
+ros2 topic echo /gpsr/task_plan \
+  std_msgs/msg/String \
+  --qos-durability transient_local \
+  --field data | jq .
 =========================
+
+
+

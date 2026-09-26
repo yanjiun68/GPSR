@@ -1,3 +1,5 @@
+// Section: Lifecycle object-search server coordinating perception, navigation, depth,
+// and target reporting.
 #include <yaml-cpp/yaml.h>
 
 #include <algorithm>
@@ -34,6 +36,8 @@ using DetectionArray = putrabot_interfaces::msg::ObjectDetections;
 using Json = nlohmann::json;
 
 // Special function: Normalize detector and planner symbols to the same vocabulary.
+// Section: Search-query normalization, perception readiness, navigation, and
+// object-result handling.
 std::string clean_symbol(std::string value) {
   value.erase(value.begin(),
               std::find_if(value.begin(), value.end(), [](unsigned char character) {
@@ -707,6 +711,7 @@ class FindObjectServer final : public rclcpp_lifecycle::LifecycleNode {
 
 }  // namespace robot_yasmin_tasks
 
+// Section: Process startup and lifecycle object-search action-server execution.
 int main(int argc, char **argv) {
   // Section: Four executor threads keep perception callbacks responsive during action
   // work.

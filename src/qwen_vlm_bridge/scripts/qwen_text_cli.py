@@ -32,7 +32,7 @@ def main() -> None:
     source.add_argument("--message", help="Path to a user-message text file.")
     parser.add_argument(
         "--system",
-        default="/home/yanjiun68/ai/qwen3v1/system_prompt_actionqueue_test.txt",
+        default="/home/yanjiun68/workspace/WS1/PutrabotUPM-project/src/qwen_vlm_bridge/config/system_prompt_actionqueue_test.txt",
         help="Path to the Qwen system-prompt file.",
     )
     parser.add_argument(

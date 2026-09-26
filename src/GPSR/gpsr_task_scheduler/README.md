@@ -60,6 +60,18 @@ source install/setup.bash
 ros2 launch gpsr_task_scheduler gpsr_scheduler.launch.py dry_run:=false command_input_mode:=topic
 ```
 
+Section: Runtime ownership.
+
+`gpsr_scheduler.launch.py` owns exactly one `voice_tts` and one `voice_stt` process by default.
+Do not additionally start `voice.launch.py`, `gpsr_executor.launch.py`, or another task voice
+launch with its voice switches enabled. If an external voice launch is intentionally the owner,
+use `start_voice_tts:=false start_voice_stt:=false` on the scheduler.
+
+The scheduler does not start a base driver. Start exactly one navigation/base bringup separately
+(for example `gpsr_base_driver.launch.py` or `drivers_bringup.launch.py`), never both. A duplicate
+TTS, STT, or base-driver process now exits before it advertises ROS endpoints or opens the audio
+or Arduino hardware.
+
 Section: Full GPSR scheduler, executor, and CV perception launch.
 
 ```bash
@@ -190,6 +202,11 @@ Both person routes are compound search skills. An explicit task location sets
 `search_scope=STRICT_LOCATION`; a location-free command sets `search_scope=GLOBAL` and the
 executor loops through `find_person_search.yaml`. The planner therefore does not prepend a
 separate `NAVIGATE` step to either person-finding action.
+
+`FIND_OBJECT` uses the same compound-skill boundary: the executor navigates through
+`find_object_search.yaml` before each local observation, while an explicit task location
+produces one strict-location navigation leg. The planner therefore keeps navigation inside
+the single `FIND_OBJECT` action instead of adding a duplicate `NAVIGATE` step.
 
 `start_find_person_pipeline` controls face identity and verbal confirmation.
 `start_find_person_attribute_pipeline` independently controls the shared human detector,

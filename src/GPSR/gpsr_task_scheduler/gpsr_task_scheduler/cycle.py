@@ -121,6 +121,16 @@ class GpsrCycleController:
             self._state = SchedulerState.RETURNING_TO_COMMAND_START
             return True
 
+    def cancel_before_execution(self, command_id: str) -> bool:
+        """Special function: Reopen command intake when the operator declines execution consent."""
+        # Section: No robot action has started, so cancellation must not consume a mission command or trigger return navigation.
+        with self._lock:
+            if not self._matches(command_id, SchedulerState.EXECUTING):
+                return False
+            self._active_command_id = ""
+            self._state = SchedulerState.WAITING_FOR_COMMAND
+            return True
+
     def finish_return(
         self,
         command_id: str,

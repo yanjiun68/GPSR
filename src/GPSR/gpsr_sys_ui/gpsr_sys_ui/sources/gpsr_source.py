@@ -70,9 +70,9 @@ def action_domain(action_type: Any) -> str:
 
 def action_target(item: Mapping[str, Any]) -> str:
     """Special function: Select a display target from explicit ActionStep target fields."""
-    # Section: Scheduler plans retain primitive targets inside arguments until ROS conversion.
-    arguments = item.get("arguments", item.get("parameters", {}))
-    arguments = arguments if isinstance(arguments, Mapping) else {}
+    # Section: Scheduler plans retain primitive targets inside arguments while ROS
+    # transport can retain the same values inside parameters_json.
+    arguments = action_parameters(item)
     for key in ("target_location", "target_object", "target_person", "target_category"):
         value = str(item.get(key, arguments.get(key, "")) or "").strip()
         if value:
@@ -83,6 +83,76 @@ def action_target(item: Mapping[str, Any]) -> str:
         if value:
             return value
     return "-"
+
+
+def _parameter_mapping(value: Any) -> dict[str, Any]:
+    """Special function: Decode one structured or serialized parameter object safely."""
+    # Section: Native dictionaries are copied so normalization never mutates producer data.
+    if isinstance(value, Mapping):
+        return dict(value)
+    # Section: ActionStep transport may expose the same parameters as serialized JSON.
+    if isinstance(value, str) and value.strip():
+        try:
+            decoded = json.loads(value)
+        except json.JSONDecodeError:
+            return {}
+        return dict(decoded) if isinstance(decoded, Mapping) else {}
+    return {}
+
+
+def action_parameters(item: Mapping[str, Any]) -> dict[str, Any]:
+    """Special function: Preserve the complete displayable parameter map for one action."""
+    # Section: Merge transport JSON, normalized parameters, and scheduler arguments in
+    # increasing order of authority.
+    parameters: dict[str, Any] = {}
+    for key in ("parameters_json", "parameters", "arguments"):
+        parameters.update(_parameter_mapping(item.get(key)))
+    # Section: ActionStep target fields remain parameters from the operator's point of
+    # view even when the producer transports them in dedicated message fields.
+    for key in (
+        "target_location",
+        "target_object",
+        "target_person",
+        "target_category",
+    ):
+        value = item.get(key)
+        if value not in (None, ""):
+            parameters.setdefault(key, value)
+    return parameters
+
+
+def merge_queue_items(planned: Any, runtime: Any) -> list[Any]:
+    """Special function: Overlay executor state without discarding scheduler parameters."""
+    planned_items = planned if isinstance(planned, list) else []
+    runtime_items = runtime if isinstance(runtime, list) else []
+    if not runtime_items:
+        return list(planned_items)
+
+    # Section: Prefer stable step identifiers, then fall back to queue position for
+    # older executor snapshots.
+    planned_by_step = {
+        str(item.get("step_id")): item
+        for item in planned_items
+        if isinstance(item, Mapping) and str(item.get("step_id", ""))
+    }
+    merged_items: list[Any] = []
+    for index, runtime_item in enumerate(runtime_items):
+        if not isinstance(runtime_item, Mapping):
+            merged_items.append(runtime_item)
+            continue
+        step_id = str(runtime_item.get("step_id", ""))
+        base = planned_by_step.get(step_id)
+        if base is None and index < len(planned_items):
+            candidate = planned_items[index]
+            base = candidate if isinstance(candidate, Mapping) else None
+        merged = dict(base or {})
+        merged.update(runtime_item)
+        parameters = action_parameters(base or {})
+        parameters.update(action_parameters(runtime_item))
+        if parameters:
+            merged["parameters"] = parameters
+        merged_items.append(merged)
+    return merged_items
 
 
 def task_display_status(state: Any, queue_state: Any = "") -> str:
@@ -142,12 +212,13 @@ class GpsrStateModel:
         executor_matches = bool(self.executor) and (
             not command_id or not executor_task_id or executor_task_id == command_id
         )
-        source_items = self.executor.get("items") if executor_matches else None
-        if not isinstance(source_items, list):
-            source_items = context.get("action_queue", [])
-        if not isinstance(source_items, list) or not source_items:
-            # Section: The public plan steps remain a safe fallback for older command contexts.
-            source_items = self.plan.get("steps", [])
+        # Section: Resolve the scheduler-owned parameter-rich queue before applying
+        # executor-owned live state.
+        planned_items = context.get("action_queue", [])
+        if not isinstance(planned_items, list) or not planned_items:
+            planned_items = self.plan.get("steps", [])
+        runtime_items = self.executor.get("items") if executor_matches else None
+        source_items = merge_queue_items(planned_items, runtime_items)
         source_items = source_items if isinstance(source_items, list) else []
         current_index = int(self.executor.get("current_index", -1) or 0) if executor_matches else -1
         queue_state_raw = self.executor.get("queue_state", "IN_QUEUE") if executor_matches else (
@@ -166,6 +237,7 @@ class GpsrStateModel:
                 "domain": action_domain(item.get("action_type", item.get("skill_name", ""))),
                 "skill": str(item.get("action_type", item.get("skill_name", ""))),
                 "target": action_target(item),
+                "parameters": action_parameters(item),
                 "state": state,
                 "task_status": task_display_status(state, queue_state),
                 "raw_state": str(raw_state),

@@ -53,6 +53,17 @@ struct PersonSearchPolicyData {
   double mission_timeout_sec{300.0};
 };
 
+// Section: Immutable navigation policy used by the compound object-search skill.
+struct ObjectSearchPolicyData {
+  std::vector<std::string> global_waypoints{
+      "kitchen", "dining_room", "living_room", "bedroom", "entrance"};
+  std::vector<double> scan_headings_deg{60.0, -60.0, 120.0, -120.0, 180.0};
+  double observation_timeout_sec{3.0};
+  double navigation_timeout_sec{90.0};
+  double scan_timeout_sec{20.0};
+  double mission_timeout_sec{300.0};
+};
+
 // Section: Runtime dependencies shared by skill factory instances.
 struct SkillClients {
   std::shared_ptr<SpeechClient> speech;
@@ -65,6 +76,7 @@ struct SkillClients {
   std::shared_ptr<ManipulationClient> manipulation;
   std::shared_ptr<GuidePersonClient> guide;
   PersonSearchPolicyData person_search;
+  ObjectSearchPolicyData object_search;
 };
 
 // Special function: Build the state machine corresponding to one canonical primitive.

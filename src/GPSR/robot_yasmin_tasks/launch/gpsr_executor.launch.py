@@ -3,9 +3,10 @@
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.conditions import IfCondition
-from launch.substitutions import LaunchConfiguration
+from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
+from launch_ros.substitutions import FindPackageShare
 
 
 def generate_launch_description() -> LaunchDescription:
@@ -14,9 +15,17 @@ def generate_launch_description() -> LaunchDescription:
     use_voice_command = LaunchConfiguration("use_voice_command")
     command_input_timeout_sec = LaunchConfiguration("command_input_timeout_sec")
     start_lifecycle_manager = LaunchConfiguration("start_lifecycle_manager")
+    # Section: Standalone execution uses the same installed waypoint policies as the scheduler.
+    find_person_search_config_file = PathJoinSubstitution(
+        [FindPackageShare("robot_yasmin_tasks"), "config", "find_person_search.yaml"]
+    )
+    find_object_search_config_file = PathJoinSubstitution(
+        [FindPackageShare("robot_yasmin_tasks"), "config", "find_object_search.yaml"]
+    )
     return LaunchDescription(
         [
-            DeclareLaunchArgument("use_local_voice", default_value="true", description="Start local voice TTS/STT nodes."),
+            # Section: The integrated GPSR scheduler owns voice by default; standalone use must opt in.
+            DeclareLaunchArgument("use_local_voice", default_value="false", description="Start local voice TTS/STT nodes only for standalone executor use."),
             DeclareLaunchArgument("use_voice_command", default_value="true", description="Start spoken GPSR command intake."),
             DeclareLaunchArgument(
                 "command_input_timeout_sec",
@@ -47,7 +56,16 @@ def generate_launch_description() -> LaunchDescription:
                 condition=IfCondition(start_lifecycle_manager),
             ),
             # Section: Transient skill nodes are instantiated UNCONFIGURED by gpsr_lifecycle_skills.launch.py.
-            Node(package="robot_yasmin_tasks", executable="gpsr_executor", name="gpsr_executor", output="screen"),
+            Node(
+                package="robot_yasmin_tasks",
+                executable="gpsr_executor",
+                name="gpsr_executor",
+                output="screen",
+                parameters=[{
+                    "find_person_search_config_file": find_person_search_config_file,
+                    "find_object_search_config_file": find_object_search_config_file,
+                }],
+            ),
             Node(
                 package="robot_yasmin_tasks",
                 executable="gpsr_voice_command",

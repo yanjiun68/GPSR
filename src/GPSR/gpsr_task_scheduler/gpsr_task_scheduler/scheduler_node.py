@@ -866,7 +866,34 @@ class GpsrTaskSchedulerNode(Node):
         self.cycle.finish_planning(command_id, True)
         self.publish_cycle_state()
         executable_plan = self.without_embedded_return(planned)
+        # Section: Bind the production summary helper explicitly so lightweight cycle harnesses preserve the real execution gate.
+        executable_plan = GpsrTaskSchedulerNode.with_execution_summary(self, executable_plan)
         queue_result = self.submit_action_queue(command_id, executable_plan, timeout_sec)
+        # Section: A declined confirmation never reaches physical skills or the automatic return-navigation path.
+        if GpsrTaskSchedulerNode.execution_confirmation_declined(queue_result):
+            self.cycle.cancel_before_execution(command_id)
+            self.clear_command_context(command_id)
+            self.publish_cycle_state()
+            return {
+                "accepted": False,
+                "success": False,
+                "command_id": command_id,
+                "message": "Execution cancelled because the operator did not confirm the plan.",
+                "completed_steps": 0,
+                "failed_step": "confirm_accepted_plan",
+                "rejection_reason": "execution_confirmation_declined",
+                "request_new_command": True,
+                "plan": planned,
+                "execution": queue_result,
+                "return": {
+                    "success": True,
+                    "completed_steps": 0,
+                    "message": "Return navigation was not required.",
+                    "outcome": "not_required",
+                },
+                "post_return_report": None,
+                "state": self.cycle.snapshot().state.value,
+            }
         self.cycle.finish_execution(command_id)
         self.publish_cycle_state()
 
@@ -953,6 +980,107 @@ class GpsrTaskSchedulerNode(Node):
             if str(step.get("step_id", "")) != "return_to_instruction_point"
         ]
         return executable
+
+    def with_execution_summary(self, planned: dict[str, Any]) -> dict[str, Any]:
+        """Special function: Prepend an accepted-plan announcement before all physical work."""
+        # Section: Copy every task step so the public plan remains an unmodified record of accepted intent.
+        executable = dict(planned)
+        task_steps = [copy.deepcopy(step) for step in planned.get("steps", [])]
+        summary_step_id = "announce_accepted_plan"
+        confirmation_step_id = "confirm_accepted_plan"
+        # Section: Make the existing dependency contract explicitly wait for affirmative execution consent.
+        for step in task_steps:
+            dependencies = list(step.get("dependencies", []))
+            if confirmation_step_id not in dependencies:
+                dependencies.append(confirmation_step_id)
+            step["dependencies"] = dependencies
+        # Section: Production uses SchedulerConfig while lightweight orchestration harnesses retain bounded compatibility defaults.
+        config = getattr(self, "config", None)
+        say_timeout = float(config.timeout_for("SAY")) if config is not None else 30.0
+        say_retries = int(config.retries_for("SAY")) if config is not None else 0
+        confirmation_timeout = float(config.timeout_for("ASK_AND_LISTEN")) if config is not None else 30.0
+        # Section: Put deterministic speech and confirmation steps first so no external language model can alter executable intent.
+        executable["steps"] = [{
+            "step_id": summary_step_id,
+            "skill_name": "SAY",
+            "arguments": {"text": GpsrTaskSchedulerNode.execution_summary_text(task_steps)},
+            "dependencies": [],
+            "timeout": say_timeout,
+            "retry_count": say_retries,
+            "result_variable": None,
+        }, {
+            "step_id": confirmation_step_id,
+            "skill_name": "ASK_AND_LISTEN",
+            "arguments": {
+                "question": "Do you confirm that I should proceed? Please say yes or no.",
+                "require_affirmative_confirmation": True,
+            },
+            "dependencies": [summary_step_id],
+            "timeout": confirmation_timeout,
+            "retry_count": 0,
+            "result_variable": "execution_confirmation",
+        }] + task_steps
+        return executable
+
+    @staticmethod
+    def execution_confirmation_declined(queue_result: dict[str, Any]) -> bool:
+        """Special function: Identify the dedicated confirmation step's non-affirmative result."""
+        # Section: Only the synthetic dialogue gate can skip return navigation; ordinary task failures retain recovery behavior.
+        for result in queue_result.get("results", []):
+            if not isinstance(result, dict):
+                continue
+            if (
+                str(result.get("action_type", "")) == "ASK_AND_LISTEN"
+                and str(result.get("outcome", "")) == "canceled"
+                and str(result.get("message", "")) == "Execution was not confirmed by the operator."
+            ):
+                return True
+        return False
+
+    @staticmethod
+    def execution_summary_text(steps: list[dict[str, Any]]) -> str:
+        """Special function: Render a concise spoken summary from already validated task steps."""
+        # Section: Convert every planned action into stable operator-facing language without reinterpreting the command.
+        descriptions = [
+            GpsrTaskSchedulerNode.execution_summary_step(step)
+            for step in steps
+        ]
+        descriptions = [description for description in descriptions if description]
+        if not descriptions:
+            return "I have accepted the command. There are no actions to perform."
+        return "I have accepted the command. I will " + "; then ".join(descriptions) + "."
+
+    @staticmethod
+    def execution_summary_step(step: dict[str, Any]) -> str:
+        """Special function: Describe one validated action using only its scheduled arguments."""
+        # Section: Normalize common target fields before applying the deterministic action vocabulary.
+        action = str(step.get("skill_name", "")).strip().upper()
+        arguments = dict(step.get("arguments", {}))
+        location = str(arguments.get("target_location", "")).strip()
+        object_name = str(
+            arguments.get("object_name") or arguments.get("target_object")
+            or arguments.get("category") or ""
+        ).strip()
+        person_name = str(
+            arguments.get("person_name") or arguments.get("target_person") or ""
+        ).strip()
+        if action == "NAVIGATE":
+            return f"go to {location}" if location else "navigate to the requested location"
+        if action == "FIND_OBJECT":
+            return f"find {object_name}" if object_name else "find the requested object"
+        if action == "COUNT_OBJECTS":
+            return f"count {object_name}" if object_name else "count the requested objects"
+        if action == "COUNT_PEOPLE":
+            return "count people"
+        if action in {"FIND_PERSON", "FIND_PERSON_BY_ATTRIBUTE"}:
+            return f"find {person_name}" if person_name else "find the requested person"
+        if action == "FOLLOW_PERSON":
+            return f"follow {person_name}" if person_name else "follow the requested person"
+        if action == "GUIDE_PERSON":
+            return f"guide {person_name} to {location}" if person_name and location else "guide the requested person"
+        if action == "SAY":
+            return "make the requested announcement"
+        return action.lower().replace("_", " ") if action else "perform the requested action"
 
     def submit_return_to_instruction_point(self, command_id: str) -> dict[str, Any]:
         """Special function: Request return navigation through the existing queue executor."""

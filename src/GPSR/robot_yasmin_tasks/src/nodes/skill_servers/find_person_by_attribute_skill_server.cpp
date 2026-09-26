@@ -1,3 +1,5 @@
+// Section: Lifecycle attribute-person search server that scores tracked observations
+// and stores matches.
 #include <algorithm>
 #include <atomic>
 #include <cctype>
@@ -29,6 +31,8 @@ using ObservationArray = robot_ai_interfaces::msg::TrackedPersonAppearanceArray;
 using Json = nlohmann::json;
 
 // Special function: Normalize spoken selector values for deterministic comparisons.
+// Section: Selector normalization, appearance scoring, guest-memory persistence, and
+// action handling.
 std::string normalize(std::string value) {
   std::transform(value.begin(), value.end(), value.begin(),
                  [](unsigned char character) {
@@ -405,6 +409,7 @@ class FindPersonByAttributeServer final : public rclcpp_lifecycle::LifecycleNode
 
 }  // namespace robot_yasmin_tasks
 
+// Section: Process startup and lifecycle attribute-search action-server execution.
 int main(int argc, char **argv) {
   // Section: Concurrent callbacks keep perception and memory futures live during action
   // work.

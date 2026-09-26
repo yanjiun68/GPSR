@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 
+# Section: Standard-library imports provide a process-lifetime exclusive audio lease.
+import fcntl
+import os
 import subprocess
+from pathlib import Path
+from typing import TextIO
 
 import rclpy
 from diagnostic_msgs.msg import DiagnosticStatus
@@ -10,6 +15,44 @@ from rclpy.node import Node
 from voice_interfaces.action import SpeakText
 from voice_interfaces.srv import SayText
 from ament_index_python.packages import get_package_share_directory
+
+
+# Section: Every TTS implementation cooperates on this one host-local playback lock.
+AUDIO_PLAYBACK_LOCK_PATH = Path("/tmp/putrabot_audio_playback.lock")
+
+
+def acquire_audio_playback_lock() -> tuple[TextIO | None, str]:
+    """Special function: Claim exclusive host audio playback ownership for this TTS server."""
+    # Section: Open a stable lock file whose advisory lock is released automatically on process exit.
+    lock_handle = AUDIO_PLAYBACK_LOCK_PATH.open("a+", encoding="utf-8")
+    try:
+        # Section: Never wait for another TTS server because a second server is an ownership error.
+        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        # Section: Return the recorded owner PID so the rejected launch is actionable for operators.
+        lock_handle.seek(0)
+        owner_pid = lock_handle.read().strip() or "unknown"
+        lock_handle.close()
+        return None, owner_pid
+    # Section: Replace stale diagnostics only after this process has obtained the exclusive lease.
+    lock_handle.seek(0)
+    lock_handle.truncate()
+    lock_handle.write(str(os.getpid()))
+    lock_handle.flush()
+    return lock_handle, str(os.getpid())
+
+
+def release_audio_playback_lock(lock_handle: TextIO | None) -> None:
+    """Special function: Release the audio lease during normal TTS shutdown."""
+    # Section: A missing handle means startup was rejected before this process owned playback.
+    if lock_handle is None:
+        return
+    try:
+        # Section: Unlock explicitly so a replacement server can start immediately after shutdown.
+        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
+    finally:
+        # Section: Close the descriptor regardless of unlock outcome to release kernel ownership.
+        lock_handle.close()
 
 
 class TTSNode(Node):
@@ -41,6 +84,16 @@ class TTSNode(Node):
             self.get_parameter("piper_model_path").get_parameter_value().string_value
             or default_model_path
         )
+
+        # Section: Refuse a duplicate provider before registering duplicate ROS service/action endpoints.
+        self._audio_playback_lock, owner_pid = acquire_audio_playback_lock()
+        if self._audio_playback_lock is None:
+            self.get_logger().error(
+                "[voice_tts] Audio playback is already owned by PID "
+                f"{owner_pid}; do not start a second TTS server. "
+                "Set start_voice_tts:=false on this secondary launch."
+            )
+            raise RuntimeError("duplicate audio playback owner")
 
         # Service server
         self._srv = self.create_service(SayText, self.service_name, self._handle_say)
@@ -207,20 +260,36 @@ class TTSNode(Node):
         status.add("failures", str(self._failure_count))
         return status
 
+    def destroy_node(self) -> bool:
+        """Special function: Release exclusive audio ownership before ROS resources are destroyed."""
+        # Section: The file lock protects every supported TTS launch path on this host.
+        release_audio_playback_lock(getattr(self, "_audio_playback_lock", None))
+        self._audio_playback_lock = None
+        return super().destroy_node()
+
 
 def main(args=None):
     """Initialize and spin the standalone TTS ROS node."""
     # Section: Own the ROS context and action-server node for this process.
     rclpy.init(args=args)
-    node = TTSNode()
+    node = None
     try:
+        # Section: Construct the server only after it acquires host-wide audio ownership.
+        node = TTSNode()
         rclpy.spin(node)
+    except RuntimeError as exc:
+        # Section: A rejected secondary instance exits cleanly without advertising duplicate endpoints.
+        rclpy.logging.get_logger("voice_tts").error(str(exc))
     except KeyboardInterrupt:
         pass
     finally:
-        node._say_action.destroy()
-        node.destroy_node()
-        rclpy.shutdown()
+        # Section: Destroy action and node resources only when this process actually became the owner.
+        if node is not None:
+            node._say_action.destroy()
+            node.destroy_node()
+        # Section: Shut down the ROS context even when duplicate ownership rejected construction.
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == "__main__":

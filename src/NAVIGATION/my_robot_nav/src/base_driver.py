@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# Section: Standard-library imports provide a port-specific exclusive driver lease.
+import fcntl
+import hashlib
+import os
 import rclpy
 from rclpy.node import Node
 from std_msgs.msg import Int32MultiArray
@@ -6,11 +10,60 @@ import re
 import serial
 import threading
 import time
+from pathlib import Path
+from typing import TextIO
+
+
+def base_driver_lock_path(port: str) -> Path:
+    """Special function: Derive one stable lock file for a physical Arduino serial port."""
+    # Section: Resolve symlinks so equivalent /dev paths cannot start separate drivers.
+    canonical_port = os.path.realpath(str(port))
+    # Section: Hash only the canonical device path to keep the temporary filename filesystem-safe.
+    port_digest = hashlib.sha256(canonical_port.encode('utf-8')).hexdigest()[:16]
+    return Path('/tmp') / f'putrabot_base_driver_{port_digest}.lock'
+
+
+def acquire_base_driver_lock(port: str) -> tuple[TextIO | None, str]:
+    """Special function: Claim the exclusive serial-port ownership used by one base-driver process."""
+    # Section: Open the port-specific lock whose advisory kernel lock clears if this process exits.
+    lock_handle = base_driver_lock_path(port).open('a+', encoding='utf-8')
+    try:
+        # Section: Reject a second driver immediately before either process opens the Arduino serial port.
+        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        # Section: Read the current owner diagnostic before closing the unsuccessful lock handle.
+        lock_handle.seek(0)
+        owner_pid = lock_handle.read().strip() or 'unknown'
+        lock_handle.close()
+        return None, owner_pid
+    # Section: Record the current owner PID only after exclusive serial ownership is secured.
+    lock_handle.seek(0)
+    lock_handle.truncate()
+    lock_handle.write(str(os.getpid()))
+    lock_handle.flush()
+    return lock_handle, str(os.getpid())
+
+
+def release_base_driver_lock(lock_handle: TextIO | None) -> None:
+    """Special function: Release the exclusive serial-port lease during orderly driver shutdown."""
+    # Section: A missing lock means this process never became the base-driver owner.
+    if lock_handle is None:
+        return
+    try:
+        # Section: Unlock before close so a replacement launch can immediately claim the Arduino port.
+        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
+    finally:
+        # Section: Closing guarantees cleanup if explicit unlock cannot report success.
+        lock_handle.close()
+
 
 class BaseDriver(Node):
+    """Special function: Own one Arduino base serial port and exchange wheel commands and ticks."""
+
     def __init__(self):
+        """Special function: Initialize one guarded base driver before creating ROS I/O."""
         super().__init__('base_driver')
-        # Params
+        # Section: Declare and read all serial and command freshness parameters.
         self.declare_parameter('port', '/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0')
         self.declare_parameter('baud', 115200)
         self.declare_parameter('reconnect_interval_sec', 1.0)
@@ -20,6 +73,16 @@ class BaseDriver(Node):
         self.reconnect_interval_sec = float(self.get_parameter('reconnect_interval_sec').value)
         self.targets_timeout_sec = float(self.get_parameter('targets_timeout_sec').value)
 
+        # Section: Reject a competing driver before either process opens the same physical serial device.
+        self._base_driver_lock, owner_pid = acquire_base_driver_lock(self.port)
+        if self._base_driver_lock is None:
+            self.get_logger().error(
+                f'Base serial port {self.port} is already owned by PID {owner_pid}; '
+                'stop the duplicate driver launch.'
+            )
+            raise RuntimeError('duplicate base driver owner')
+
+        # Section: Initialize serial state only after this process owns the physical Arduino port.
         self.ser = None
         self.serial_lock = threading.Lock()
         self.latest_targets = [0, 0, 0, 0]
@@ -36,6 +99,7 @@ class BaseDriver(Node):
         self.timer = self.create_timer(0.05, self.update) # 20Hz
 
     def connect_serial(self):
+        """Special function: Open the exclusively owned Arduino serial port with retry throttling."""
         now_mono = time.monotonic()
         if (now_mono - self.last_connect_attempt_at) < self.reconnect_interval_sec:
             return
@@ -56,6 +120,7 @@ class BaseDriver(Node):
             self.ser = None
 
     def parse_tick_line(self, line):
+        """Special function: Parse one four-wheel encoder reply while rejecting malformed values."""
         parts = re.findall(r'-?\d+', line)
         if len(parts) < 4:
             return None
@@ -71,6 +136,7 @@ class BaseDriver(Node):
 
     @staticmethod
     def is_noise_line(line):
+        """Special function: Recognize serial acknowledgements that are not encoder replies."""
         if not line:
             return True
         if line.upper() == 'OK':
@@ -80,6 +146,7 @@ class BaseDriver(Node):
         return False
 
     def read_encoder_reply(self, deadline_s):
+        """Special function: Read the next valid encoder reply before the bounded deadline."""
         while time.monotonic() < deadline_s:
             line = self.ser.readline().decode('utf-8', errors='ignore').strip()
             if self.is_noise_line(line):
@@ -97,6 +164,7 @@ class BaseDriver(Node):
         return None, None
 
     def mark_serial_error(self, context, error):
+        """Special function: Count serial faults and reset the connection after repeated failures."""
         self.serial_error_count += 1
         self.get_logger().error(f'{context}: {error}')
         if self.serial_error_count >= 3:
@@ -109,6 +177,7 @@ class BaseDriver(Node):
             self.serial_error_count = 0
 
     def targets_cb(self, msg):
+        """Special function: Cache the newest valid motor target for the serial timer."""
         if len(msg.data) != 4:
             return
 
@@ -118,6 +187,7 @@ class BaseDriver(Node):
         self.last_target_update_at = time.monotonic()
 
     def get_active_targets(self):
+        """Special function: Convert stale wheel commands into a safe zero-velocity target."""
         if (time.monotonic() - self.last_target_update_at) > self.targets_timeout_sec:
             if self.latest_targets != [0, 0, 0, 0]:
                 self.get_logger().warn(
@@ -129,6 +199,7 @@ class BaseDriver(Node):
         return list(self.latest_targets)
 
     def send_targets_locked(self, targets, now_mono, force=False):
+        """Special function: Send one rate-limited wheel target while the serial mutex is held."""
         if len(targets) != 4:
             return
         if not force and self.last_sent_targets == targets and (now_mono - self.last_targets_sent_at) < 0.2:
@@ -140,6 +211,7 @@ class BaseDriver(Node):
         self.last_targets_sent_at = now_mono
 
     def send_stop_locked(self, repeats=3):
+        """Special function: Send repeated zero targets while the serial mutex is held."""
         if not self.ser:
             return
         stop_targets = [0, 0, 0, 0]
@@ -148,6 +220,7 @@ class BaseDriver(Node):
             time.sleep(0.02)
 
     def update(self):
+        """Special function: Run one exclusive serial command-and-encoder transaction."""
         with self.serial_lock:
             if not self.ser:
                 self.get_logger().warn('Serial not connected, retrying...', throttle_duration_sec=5.0)
@@ -176,6 +249,7 @@ class BaseDriver(Node):
                 self.mark_serial_error('Serial update failure', e)
 
     def destroy_node(self):
+        """Special function: Stop the base, close serial, and release the port ownership lease."""
         with self.serial_lock:
             try:
                 self.send_stop_locked()
@@ -187,17 +261,30 @@ class BaseDriver(Node):
                 except Exception:
                     pass
                 self.ser = None
-        super().destroy_node()
+        # Section: Release the physical-port lock only after this node has stopped serial traffic.
+        release_base_driver_lock(getattr(self, '_base_driver_lock', None))
+        self._base_driver_lock = None
+        return super().destroy_node()
 
 def main(args=None):
+    """Special function: Run one guarded base driver and exit cleanly on duplicate ownership."""
+    # Section: Initialize ROS before constructing the port-owning driver node.
     rclpy.init(args=args)
-    node = BaseDriver()
+    node = None
     try:
+        # Section: Construct the driver only after its port lease is available.
+        node = BaseDriver()
         rclpy.spin(node)
+    except RuntimeError as exc:
+        # Section: A rejected duplicate exits without opening or commanding the Arduino port.
+        rclpy.logging.get_logger('base_driver').error(str(exc))
     except KeyboardInterrupt:
         pass
     finally:
-        node.destroy_node()
+        # Section: Destroy resources only when this process successfully became the driver owner.
+        if node is not None:
+            node.destroy_node()
+        # Section: Close the ROS context after normal or rejected startup.
         if rclpy.ok():
             rclpy.shutdown()
 

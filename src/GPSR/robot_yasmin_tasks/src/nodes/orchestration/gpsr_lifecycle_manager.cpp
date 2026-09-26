@@ -1,3 +1,5 @@
+// Section: Lifecycle registry manager for preparing, cleaning, and inspecting GPSR
+// resources.
 #include <algorithm>
 #include <ament_index_cpp/get_package_share_directory.hpp>
 #include <chrono>
@@ -22,6 +24,8 @@
 
 namespace robot_yasmin_tasks {
 
+// Section: Registry data and lifecycle service orchestration for managed GPSR
+// dependencies.
 struct SkillLifecycleSpec {
   std::string name;
   std::string conflict_group;
@@ -466,6 +470,7 @@ class GpsrLifecycleManager final : public rclcpp::Node {
 
 }  // namespace robot_yasmin_tasks
 
+// Section: Process startup and lifecycle-service callback execution.
 int main(int argc, char **argv) {
   // Section: Preserve the four-thread reentrant lifecycle executor.
   rclcpp::init(argc, argv);

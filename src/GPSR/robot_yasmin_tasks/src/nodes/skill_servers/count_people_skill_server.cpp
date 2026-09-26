@@ -1,3 +1,5 @@
+// Section: Lifecycle action server that converts human-quantity observations into count
+// results.
 #include <atomic>
 #include <memory>
 #include <rclcpp/executors/multi_threaded_executor.hpp>
@@ -12,6 +14,8 @@
 
 namespace robot_yasmin_tasks {
 
+// Section: Lifecycle action handling for people-count requests and observation
+// aggregation.
 class CountPeopleSkillServer final : public rclcpp_lifecycle::LifecycleNode {
  public:
   using Action = robot_ai_interfaces::action::CountPeople;
@@ -169,6 +173,7 @@ class CountPeopleSkillServer final : public rclcpp_lifecycle::LifecycleNode {
 
 }  // namespace robot_yasmin_tasks
 
+// Section: Process startup and lifecycle action-server execution.
 int main(int argc, char **argv) {
   // Section: Preserve the original multi-threaded server executor.
   rclcpp::init(argc, argv);
