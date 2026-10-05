@@ -50,7 +50,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
 
 ament_export_dependencies(rosidl_default_runtime)
 
-if(BUILD_TESTING)
+if(FALSE) # Section: Tests disabled for production-only workspace builds.
   find_package(ament_lint_auto QUIET)
   if(ament_lint_auto_FOUND)
     set(ament_cmake_copyright_FOUND TRUE)

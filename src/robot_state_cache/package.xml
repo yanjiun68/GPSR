@@ -1,0 +1,27 @@
+<?xml version="1.0"?>
+<!-- Section: Package metadata for the reusable bounded state-cache library and ROS adapter. -->
+<package format="3">
+  <name>robot_state_cache</name>
+  <version>0.1.0</version>
+  <description>Fixed-size circular history with sample-and-hold publication and freshness tracking.</description>
+  <maintainer email="yanjiun68@example.com">yanjiun68</maintainer>
+  <license>Apache-2.0</license>
+
+  <!-- Section: Build and runtime dependencies stay limited to standard ROS 2 interfaces. -->
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <exec_depend>ament_index_python</exec_depend>
+  <depend>diagnostic_msgs</depend>
+  <depend>rclcpp</depend>
+  <depend>std_msgs</depend>
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+
+  <!-- Section: GTest exercises both the ROS-independent cache and the ROS timer adapter. -->
+  <test_depend>ament_cmake_gtest</test_depend>
+  <test_depend>ament_lint_auto</test_depend>
+  <test_depend>ament_lint_common</test_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

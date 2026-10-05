@@ -1,0 +1,71 @@
+er_flow_tracking_node:
+  ros__parameters:
+    # -------- Camera input --------
+    aligned_color_topic: /camera/aligned_color_to_depth/image_raw
+    depth_topic: /camera/depth/image_raw
+    depth_info_topic: /camera/depth/camera_info
+
+    # -------- Command + output ROS topics --------
+    command_topic: /astra_ai/command
+    result_topic: /astra_ai/result
+    status_topic: /astra_ai/status
+    depth_output_topic: /astra_ai/target_depth
+    roi_output_topic: /astra_ai/target_roi
+    tracking_image_topic: /astra_ai/tracking_image
+
+    # -------- UnifoLM-ER-Flow model paths --------
+    # Official HF model:
+    #   unitreerobotics/UnifoLM-ER-Flow
+    #
+    # Section: Use the exact locally installed Qwen3-VL ER-Flow checkpoint.
+    model_path: /home/yanjiun68/ai/models/UnifoLM-ER-Flow
+
+    # Section: Load matching processor metadata from the same checkpoint.
+    processor_path: /home/yanjiun68/ai/models/UnifoLM-ER-Flow
+
+    # Optional local Unitree source repository, for your own reference/integration:
+    #   ~/unifolm-wla
+    #
+    # The ROS node directly loads the HF-compatible ER-Flow checkpoint through
+    # Transformers and therefore does not require this repo path as a parameter.
+
+    # Section: Let Accelerate place the model on the RTX 4060 while preserving checkpoint precision.
+    device_map: auto
+    dtype: bfloat16
+    max_new_tokens: 128
+    # Section: Keep model weights below 5 GiB on GPU and offload the remainder to system RAM.
+    gpu_max_memory_gib: 5
+    cpu_max_memory_gib: 8
+    # Section: Require BitsAndBytes NF4 weights, BF16 compute, and nested quantization.
+    quantization_mode: nf4
+    use_double_quant: true
+
+    # Empty = use package prompt:
+    # share/astra_er_flow_perception/prompts/er_flow_target_prompt.txt
+    prompt_file: ""
+
+    # ER-Flow is expensive, so it reacquires periodically.
+    # The lightweight tracker runs on frames between model calls.
+    # At 30 FPS, 15 frames ~= one semantic reacquisition every 0.5 s,
+    # excluding model inference latency.
+    inference_interval_frames: 15
+    min_model_confidence: 0.20
+
+    # -------- Real-time template tracker --------
+    search_expansion: 2.0
+    tracker_match_threshold: 0.35
+    template_update_rate: 0.04
+
+    # -------- Depth ROI --------
+    # Astra uint16 depth is typically millimetres -> metres.
+    depth_scale: 0.001
+    min_depth_m: 0.15
+    max_depth_m: 10.0
+
+    # Use the central 70% of the ROI to reduce background contamination.
+    roi_inner_fraction: 0.70
+    min_valid_depth_pixels: 20
+
+    # -------- Synchronization --------
+    sync_queue_size: 10
+    sync_slop: 0.05

@@ -3,6 +3,7 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <cstdint>
 #include <iomanip>
 #include <memory>
 #include <mutex>
@@ -39,6 +40,11 @@ class GpsrVoiceCommandNode final : public rclcpp::Node {
     declare_parameter<double>("record_sec", 6.0);
     declare_parameter<double>("listen_timeout_sec", 12.0);
     declare_parameter<double>("clarification_listen_timeout_sec", 20.0);
+    // Section: Match dialogue-client echo suppression before this node requests STT.
+    const auto post_tts_guard_ms =
+        std::max<std::int64_t>(
+            0, declare_parameter<std::int64_t>("post_tts_guard_ms", 400));
+    post_tts_guard_ = std::chrono::milliseconds{post_tts_guard_ms};
     declare_parameter<std::string>("prompt_text",
                                    "Please give me a GPSR command after the beep.");
     tts_ = create_client<voice_interfaces::srv::SayText>("/voice/tts/say");
@@ -94,7 +100,15 @@ class GpsrVoiceCommandNode final : public rclcpp::Node {
 
   // Special function: Prompt, listen, and submit exactly one correlated transcript.
   void run_cycle() {
-    say(get_parameter("prompt_text").as_string());
+    // Section: Do not arm command STT unless the complete prompt playback succeeded.
+    if (!say(get_parameter("prompt_text").as_string())) {
+      RCLCPP_WARN(get_logger(), "GPSR command prompt failed; leaving command intake idle.");
+      std::lock_guard<std::mutex> lock(state_mutex_);
+      busy_ = false;
+      return;
+    }
+    // Section: Allow speaker reverberation to decay before the first command recording.
+    wait_for_post_tts_guard();
     while (rclcpp::ok()) {
       {
         std::lock_guard<std::mutex> lock(state_mutex_);
@@ -179,9 +193,11 @@ class GpsrVoiceCommandNode final : public rclcpp::Node {
       }).detach();
       return;
     }
+    const bool retry_command_registration =
+        result.value("request_new_command", false);
     std::string response_text;
     // Section: A declined execution confirmation rejects only this command and reopens voice intake.
-    if (result.value("request_new_command", false)) {
+    if (retry_command_registration) {
       response_text =
           "I will not execute that command. Please provide another GPSR command.";
     } else if (result.contains("execution") && result.at("execution").is_object()) {
@@ -192,21 +208,32 @@ class GpsrVoiceCommandNode final : public rclcpp::Node {
       response_text = "The command is rejected.";
     }
     if (!response_text.empty()) say(response_text);
-    std::lock_guard<std::mutex> lock(state_mutex_);
-    awaiting_result_ = false;
-    busy_ = false;
-    active_command_id_.clear();
-    clarification_attempt_ = 0;
+    {
+      // Section: Release the completed command before attempting a fresh registry entry.
+      std::lock_guard<std::mutex> lock(state_mutex_);
+      awaiting_result_ = false;
+      busy_ = false;
+      active_command_id_.clear();
+      clarification_attempt_ = 0;
+    }
+    // Section: Prompt for a fresh command immediately after a declined confirmation;
+    // the state gate keeps this harmless if the scheduler has not yet republished ready.
+    if (retry_command_registration) {
+      RCLCPP_INFO(get_logger(), "Command was canceled; re-arming GPSR command intake.");
+      start_once();
+    }
   }
 
   // Special function: Speak and transcribe one clarification without guessing a slot.
   void run_clarification(const std::string &id, int attempt,
                          const std::string &prompt) {
-    const auto transcript =
-        say(prompt)
-            ? transcribe_once(std::max(
-                  1.0, get_parameter("clarification_listen_timeout_sec").as_double()))
-            : "";
+    std::string transcript;
+    // Section: A clarification can record only after its full spoken prompt and echo guard.
+    if (say(prompt)) {
+      wait_for_post_tts_guard();
+      transcript = transcribe_once(std::max(
+          1.0, get_parameter("clarification_listen_timeout_sec").as_double()));
+    }
     std_msgs::msg::String reply;
     reply.data =
         Json{{"command_id", id}, {"attempt", attempt}, {"transcript", transcript}}
@@ -246,7 +273,21 @@ class GpsrVoiceCommandNode final : public rclcpp::Node {
     auto request = std::make_shared<voice_interfaces::srv::SayText::Request>();
     request->text = text;
     auto future = tts_->async_send_request(request);
-    return wait_future(future, 8.0);
+    if (!wait_future(future, 8.0)) return false;
+    try {
+      // Section: A ready future is insufficient; STT must wait for successful playback.
+      const auto response = future.get();
+      return response && response->success;
+    } catch (const std::exception &) {
+      return false;
+    }
+  }
+
+  // Special function: Keep microphone capture closed for the configured acoustic guard.
+  void wait_for_post_tts_guard() const {
+    // Section: A non-positive guard intentionally permits immediate STT for test deployments.
+    if (post_tts_guard_.count() <= 0) return;
+    std::this_thread::sleep_for(post_tts_guard_);
   }
 
   std::mutex state_mutex_;
@@ -261,6 +302,8 @@ class GpsrVoiceCommandNode final : public rclcpp::Node {
   bool busy_{false};
   bool awaiting_result_{false};
   bool listening_{false};
+  // Section: Shared post-playback delay for initial commands and clarification replies.
+  std::chrono::milliseconds post_tts_guard_{400};
   std::string active_command_id_;
   int clarification_attempt_{0};
   rclcpp::Client<voice_interfaces::srv::SayText>::SharedPtr tts_;

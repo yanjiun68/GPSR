@@ -31,7 +31,9 @@ from rclpy.qos import qos_profile_sensor_data
 from rclpy.time import Time
 from robot_ai_interfaces.action import ResolveVisualTarget
 from sensor_msgs.msg import CameraInfo, Image
+from std_msgs.msg import Float32
 from tf2_ros import Buffer, TransformException, TransformListener
+from vision.msg import RoiResult
 
 # Section: Importing tf2_geometry_msgs registers PointStamped transformations with tf2_ros.
 import tf2_geometry_msgs  # noqa: F401
@@ -410,8 +412,13 @@ class QwenRoiDepthResolver(Node):
         super().__init__("qwen_roi_depth_resolver")
 
         # Section: Sensor and coordinate-frame parameters must match the aligned RGB-D pipeline.
-        self.declare_parameter("depth_topic", "/camera/camera/aligned_depth_to_color/image_raw")
-        self.declare_parameter("camera_info_topic", "/camera/camera/color/camera_info")
+        self.declare_parameter("depth_topic", "/camera/depth/image_raw")
+        self.declare_parameter("camera_info_topic", "/camera/depth/camera_info")
+        # Section: A typed Qwen ROI automatically triggers depth sampling without an action client.
+        self.declare_parameter("roi_topic", "/vision/roi/result")
+        self.declare_parameter("roi_depth_topic", "/vision/roi/depth")
+        self.declare_parameter("roi_point_topic", "/vision/roi/point")
+        self.declare_parameter("publish_selected_roi_depth", True)
         self.declare_parameter("action_name", "/vision/resolve_qwen_roi")
         self.declare_parameter("map_frame", "map")
         self.declare_parameter("base_frame", "base_link")
@@ -471,10 +478,30 @@ class QwenRoiDepthResolver(Node):
             qos_profile_sensor_data,
             callback_group=self._callback_group,
         )
+        # Section: Reliable typed ROIs carry the exact selected bounding box and source-image stamp.
+        self._roi_sub = self.create_subscription(
+            RoiResult,
+            str(self.get_parameter("roi_topic").value),
+            self._roi_callback,
+            10,
+            callback_group=self._callback_group,
+        )
 
         # Section: Published poses let RViz and operators inspect exactly what will enter the queue.
         self._target_pose_pub = self.create_publisher(PoseStamped, "/vision/qwen_target_pose", 10)
         self._approach_pose_pub = self.create_publisher(PoseStamped, "/vision/qwen_approach_pose", 10)
+        # Section: The scalar topic is the selected bounding-box distance in metres for simple consumers.
+        self._roi_depth_pub = self.create_publisher(
+            Float32,
+            str(self.get_parameter("roi_depth_topic").value),
+            10,
+        )
+        # Section: The stamped 3D point preserves the depth frame and synchronized observation time.
+        self._roi_point_pub = self.create_publisher(
+            PointStamped,
+            str(self.get_parameter("roi_point_topic").value),
+            10,
+        )
 
         # Section: The action boundary provides cancellation and explicit perception failure codes.
         self._action_server = ActionServer(
@@ -487,11 +514,13 @@ class QwenRoiDepthResolver(Node):
             callback_group=self._callback_group,
         )
         self.get_logger().info(
-            "Qwen ROI resolver ready: action=%s depth=%s camera_info=%s"
+            "Qwen ROI resolver ready: action=%s roi=%s depth=%s camera_info=%s output=%s"
             % (
                 str(self.get_parameter("action_name").value),
+                str(self.get_parameter("roi_topic").value),
                 str(self.get_parameter("depth_topic").value),
                 str(self.get_parameter("camera_info_topic").value),
+                str(self.get_parameter("roi_depth_topic").value),
             )
         )
 
@@ -514,6 +543,65 @@ class QwenRoiDepthResolver(Node):
         # Section: Camera calibration is small and normally constant for the complete runtime.
         with self._cache_lock:
             self._latest_camera_info = message
+
+    def _roi_callback(self, message: RoiResult) -> None:
+        """Special function: Publish metric depth and a stamped point for each valid selected Qwen ROI."""
+        # Section: Disabled publication and non-selected status messages must never create stale depth output.
+        if not bool(self.get_parameter("publish_selected_roi_depth").value):
+            return
+        if str(message.status).strip().casefold() != "ok" or not bool(message.tracking_valid):
+            return
+        # Section: A usable typed ROI must identify a non-empty rectangle in a known source image.
+        if (
+            int(message.roi.width) <= 0
+            or int(message.roi.height) <= 0
+            or int(message.image_width) <= 0
+            or int(message.image_height) <= 0
+        ):
+            return
+        # Section: Match the bbox source stamp to registered depth instead of sampling an unrelated latest frame.
+        depth_observation, depth_error = self._select_depth(message.header.stamp)
+        if depth_observation is None:
+            self.get_logger().warning(f"Selected ROI depth unavailable: {depth_error}", throttle_duration_sec=2.0)
+            return
+        # Section: Copy calibration under the shared cache lock before doing image conversion work.
+        with self._cache_lock:
+            camera_info = self._latest_camera_info
+        if camera_info is None or len(camera_info.k) != 9 or float(camera_info.k[0]) <= 0.0:
+            self.get_logger().warning(
+                "Selected ROI depth unavailable: calibrated CameraInfo has not arrived.",
+                throttle_duration_sec=2.0,
+            )
+            return
+        # Section: Convert RegionOfInterest offset/size into the exclusive-edge format used by the sampler.
+        roi_left = float(message.roi.x_offset)
+        roi_top = float(message.roi.y_offset)
+        roi_right = roi_left + float(message.roi.width)
+        roi_bottom = roi_top + float(message.roi.height)
+        try:
+            depth_m, scaled_roi, sample, camera_xyz = self._resolve_depth_region(
+                (roi_left, roi_top, roi_right, roi_bottom),
+                (int(message.image_width), int(message.image_height)),
+                depth_observation,
+                camera_info,
+                None,
+            )
+        except Exception as exc:
+            self.get_logger().warning(f"Selected ROI depth rejected: {exc}", throttle_duration_sec=2.0)
+            return
+        # Section: Publish the robust bbox depth as a directly consumable metric scalar.
+        depth_message = Float32()
+        depth_message.data = float(sample.depth_m)
+        self._roi_depth_pub.publish(depth_message)
+        # Section: Publish the same observation as a calibrated camera-frame point with the depth stamp.
+        source_frame = str(depth_observation.message.header.frame_id or camera_info.header.frame_id).strip()
+        point_message = PointStamped()
+        point_message.header.stamp = depth_observation.message.header.stamp
+        point_message.header.frame_id = source_frame
+        point_message.point.x, point_message.point.y, point_message.point.z = camera_xyz
+        self._roi_point_pub.publish(point_message)
+        # Section: The optional display shows the precise pixels supporting this automatically published result.
+        self._show_roi_debug(depth_m, scaled_roi, sample, str(message.target_id))
 
     def _goal_callback(self, goal: ResolveVisualTarget.Goal) -> GoalResponse:
         """Special function: Reject structurally unsafe ROI requests before allocating execution work."""
@@ -654,13 +742,31 @@ class QwenRoiDepthResolver(Node):
         mask_native: np.ndarray | None,
     ) -> tuple[np.ndarray, tuple[int, int, int, int], DepthSample, tuple[float, float, float]]:
         """Special function: Convert one depth observation into robust ROI depth and camera-frame coordinates."""
-        # Section: Decode the sensor image and scale the caller's Qwen coordinate system into depth pixels.
+        # Section: Keep the action request adapter thin so topic and action paths share identical sampling policy.
+        return self._resolve_depth_region(
+            (goal.roi_x_min, goal.roi_y_min, goal.roi_x_max, goal.roi_y_max),
+            (int(goal.coordinate_width), int(goal.coordinate_height)),
+            depth_observation,
+            camera_info,
+            mask_native,
+        )
+
+    def _resolve_depth_region(
+        self,
+        roi: tuple[float, float, float, float],
+        coordinate_size: tuple[int, int],
+        depth_observation: DepthObservation,
+        camera_info: CameraInfo,
+        mask_native: np.ndarray | None,
+    ) -> tuple[np.ndarray, tuple[int, int, int, int], DepthSample, tuple[float, float, float]]:
+        """Special function: Apply the shared robust sampler to an ROI from either topic or action input."""
+        # Section: Decode the sensor image and scale the caller's coordinate system into depth pixels.
         depth_native = self._bridge.imgmsg_to_cv2(depth_observation.message, desired_encoding="passthrough")
         depth_m = depth_to_meters(depth_native, depth_observation.message.encoding)
         image_height, image_width = depth_m.shape[:2]
         scaled_roi = scale_and_clip_roi(
-            (goal.roi_x_min, goal.roi_y_min, goal.roi_x_max, goal.roi_y_max),
-            (int(goal.coordinate_width), int(goal.coordinate_height)),
+            roi,
+            coordinate_size,
             (int(image_width), int(image_height)),
         )
         # Section: Masks are resized for each observation so a camera-resolution change remains safe.

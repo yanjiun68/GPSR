@@ -3,6 +3,7 @@
 
 #include "robot_yasmin_tasks/clients.hpp"
 
+#include <cstdint>
 #include <yasmin/state.hpp>
 #include <yasmin/state_machine.hpp>
 
@@ -42,8 +43,34 @@ class SimpleSkillSM : public yasmin::StateMachine {
                 ValidationCall validator = {});
 };
 
+// Section: Normalized person-search contracts keep scheduler semantics separate from
+// ROS transport-specific selector JSON.
+struct PersonAttributeData {
+  std::string type;
+  std::string value;
+  double minimum_confidence{0.0};
+};
+
+struct PersonQueryData {
+  std::optional<std::string> name;
+  std::optional<std::string> location;
+  std::vector<PersonAttributeData> attributes;
+  std::string verification_mode;
+};
+
+struct PersonCandidateData {
+  std::string tracking_session_id;
+  std::int32_t track_id{-1};
+  std::string track_key;
+  geometry_msgs::msg::PoseStamped pose;
+  double confidence{0.0};
+  std::string verification_source;
+};
+
 // Section: Immutable navigation policy used by compound person-search skills.
 struct PersonSearchPolicyData {
+  // Section: One bounded semantic rescan is the default person-search recovery.
+  std::uint32_t max_not_found_retries{1};
   std::vector<std::string> global_waypoints{
       "kitchen", "living_room", "dining_room", "bedroom", "entrance", "exit"};
   std::vector<double> scan_headings_deg{60.0, -60.0, 120.0, -120.0, 180.0};
@@ -55,6 +82,8 @@ struct PersonSearchPolicyData {
 
 // Section: Immutable navigation policy used by the compound object-search skill.
 struct ObjectSearchPolicyData {
+  // Section: A semantic retry repeats one complete route only after NOT_FOUND.
+  std::uint32_t max_not_found_retries{1};
   std::vector<std::string> global_waypoints{
       "kitchen", "dining_room", "living_room", "bedroom", "entrance"};
   std::vector<double> scan_headings_deg{60.0, -60.0, 120.0, -120.0, 180.0};

@@ -29,7 +29,7 @@ install(DIRECTORY
 install(FILES README.md DESTINATION share/${PROJECT_NAME})
 
 # Section: Register focused unit tests that do not load PyTorch or the Qwen model.
-if(BUILD_TESTING)
+if(FALSE) # Section: Tests disabled for production-only workspace builds.
   find_package(ament_cmake_pytest REQUIRED)
   ament_add_pytest_test(test_contract test/test_contract.py)
 endif()

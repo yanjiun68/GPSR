@@ -40,6 +40,8 @@
   <depend>cv_bridge</depend>
   <!-- The Astra adapter launches the camera driver and reports stream health. -->
   <exec_depend>astra_camera</exec_depend>
+  <!-- The Qwen ROI launch uses colour-to-depth registration before sampling a selected bbox. -->
+  <exec_depend>astra_er_flow_perception</exec_depend>
   <exec_depend>diagnostic_msgs</exec_depend>
   <depend>image_transport</depend>
   <depend>OpenCV</depend>

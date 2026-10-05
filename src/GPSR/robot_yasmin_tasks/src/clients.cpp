@@ -25,12 +25,15 @@ T json_value(const Json &object, const std::string &key, const T &fallback) {
 
 // Special function: Accept only an unambiguous affirmative answer for execution consent.
 bool is_affirmative_execution_confirmation(const std::string &transcript) {
-  // Section: A negative phrase always wins so phrases such as "not yes" cannot start robot motion.
+  // Section: A negative phrase always wins so phrases such as "reject confirm"
+  // cannot start robot motion.
   static const std::regex negative(
-      R"(\b(no|nope|nah|negative|cancel|stop|do not|don't)\b)",
+      R"(\b(no|nope|nah|negative|reject|rejected|cancel|stop|do not|don't)\b)",
       std::regex::icase);
+  // Section: Require the prompt's distinctive consent word instead of short yes/no
+  // tokens, which are more prone to false recognition from ambient speech.
   static const std::regex affirmative(
-      R"(\b(yes|yeah|yep|affirmative|correct|confirm|proceed)\b)",
+      R"(\b(confirm|confirmed)\b)",
       std::regex::icase);
   return !std::regex_search(transcript, negative) &&
          std::regex_search(transcript, affirmative);
@@ -264,8 +267,10 @@ SkillResultData SpeechClient::say(const Blackboard::SharedPtr &blackboard,
 // Section: Dialogue adapter for one prompt-and-transcript exchange over voice topics.
 DialogueClient::DialogueClient(const rclcpp::Node::SharedPtr &node,
                                const std::shared_ptr<SpeechClient> &speech,
-                               bool simulate)
-    : node_(node), speech_(speech), simulate_(simulate) {
+                               bool simulate,
+                               std::chrono::milliseconds post_tts_guard)
+    : node_(node), speech_(speech), simulate_(simulate),
+      post_tts_guard_(std::max(post_tts_guard, std::chrono::milliseconds{0})) {
   // Section: Match the Python depth-10 voice topic endpoints.
   if (node_ && !simulate_) {
     start_pub_ =
@@ -319,6 +324,25 @@ SkillResultData DialogueClient::ask_and_listen(const Blackboard::SharedPtr &blac
     const auto speech_result = speech_->say(blackboard, speech_action);
     if (speech_result.outcome != SUCCESS) {
       return speech_result;
+    }
+    // Section: SayText returns only after playback exits; keep the microphone closed
+    // through the remaining acoustic echo/reverberation interval before STT starts.
+    const auto guard_deadline =
+        std::chrono::steady_clock::now() + post_tts_guard_;
+    while (std::chrono::steady_clock::now() < guard_deadline) {
+      // Section: Do not make a cancellation wait for the acoustic guard to expire.
+      if (cancel_requested(blackboard)) {
+        return make_skill_result(action.action_type, CANCELED,
+                                 "Dialogue canceled during the post-TTS guard.",
+                                 Json::object(), false, true);
+      }
+      const auto remaining = guard_deadline - std::chrono::steady_clock::now();
+      // Section: Convert the short polling cap to the clock duration before comparison.
+      const auto polling_cap =
+          std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+              std::chrono::milliseconds{25});
+      std::this_thread::sleep_for(
+          std::min(remaining, polling_cap));
     }
   }
   std::uint64_t initial_sequence;
@@ -975,12 +999,138 @@ RemoteSkillClient::RemoteSkillClient(const rclcpp::Node::SharedPtr &node)
   find_object_client_ =
       rclcpp_action::create_client<robot_ai_interfaces::action::FindObject>(
           node_, "/gpsr/find_object");
+  // Section: Name-only FIND_PERSON uses the interactive raised-hand action server.
+  find_person_client_ =
+      rclcpp_action::create_client<robot_ai_interfaces::action::FindPerson>(
+          node_, "/gpsr/find_person");
   find_attribute_client_ =
       rclcpp_action::create_client<robot_ai_interfaces::action::FindPersonByAttribute>(
           node_, "/gpsr/find_person_by_attribute");
   extract_client_ =
       rclcpp_action::create_client<robot_ai_interfaces::action::ExtractGuestInfo>(
           node_, "/gpsr/extract_guest_info");
+}
+
+// Section: Remote GPSR adapter for interactive name and name-plus-attribute searches.
+SkillResultData RemoteSkillClient::find_person(
+    const Blackboard::SharedPtr &blackboard, const ActionStepData &action) {
+  // Section: Preserve the explicit name selector and reject ambiguous empty requests.
+  std::string target_name = !action.target_person.empty()
+                                ? action.target_person
+                                : json_value<std::string>(
+                                      action.parameters, "person_name", "");
+  if (target_name.empty() && action.parameters.contains("selector") &&
+      action.parameters.at("selector").is_object()) {
+    const auto &selector = action.parameters.at("selector");
+    if (selector.value("type", std::string{}) == "name")
+      target_name = selector.value("value", std::string{});
+  }
+  if (target_name.empty()) {
+    return make_skill_result(action.action_type, INVALID_INPUT,
+                             "FIND_PERSON requires a non-empty person name.",
+                             Json::object(), false, true);
+  }
+  const double timeout = action.timeout_sec != 0.0
+                             ? action.timeout_sec
+                             : json_value<double>(action.parameters, "timeout_sec", 300.0);
+  if (!find_person_client_->wait_for_action_server(
+          std::chrono::duration<double>(std::min(timeout, 5.0)))) {
+    return make_skill_result(
+        action.action_type, SKILL_UNAVAILABLE,
+        "Find-person action unavailable: /gpsr/find_person", Json::object(), true);
+  }
+  robot_ai_interfaces::action::FindPerson::Goal goal;
+  goal.person_name = target_name;
+  goal.location = !action.target_location.empty()
+                      ? action.target_location
+                      : json_value<std::string>(action.parameters, "location", "");
+  // Section: The description transports optional visible predicates without changing
+  // the established FindPerson action definition.
+  Json description = action.parameters.value("person_query", Json::object());
+  if (!description.is_object()) description = Json::object();
+  description["name"] = target_name;
+  // Section: Accept both the normalized attributes array and legacy selector objects.
+  Json attributes = action.parameters.value("attributes", Json::array());
+  if ((!attributes.is_array() || attributes.empty()) &&
+      action.parameters.contains("selector") &&
+      action.parameters.at("selector").is_object()) {
+    const auto &selector = action.parameters.at("selector");
+    attributes = selector.contains("all") ? selector.at("all")
+                                           : Json::array({selector});
+  }
+  if (!attributes.is_array()) attributes = Json::array();
+  attributes.erase(std::remove_if(attributes.begin(), attributes.end(),
+                                   [](const Json &attribute) {
+                                     return attribute.is_object() &&
+                                            attribute.value("type", std::string{}) == "name";
+                                   }),
+                   attributes.end());
+  description["attributes"] = attributes;
+  goal.description = dump_json(description);
+  goal.timeout_sec = static_cast<float>(timeout);
+
+  auto goal_future = find_person_client_->async_send_goal(goal);
+  if (!wait_future(goal_future, std::min(timeout, 5.0), blackboard)) {
+    const bool canceled = cancel_requested(blackboard);
+    return make_skill_result(action.action_type, canceled ? CANCELED : TIMEOUT,
+                             "Find-person goal acceptance timed out.", Json::object(),
+                             !canceled, canceled);
+  }
+  auto handle = goal_future.get();
+  if (!handle) {
+    return make_skill_result(action.action_type, SKILL_UNAVAILABLE,
+                             "Find-person goal was rejected.", Json::object(), true);
+  }
+  auto result_future = find_person_client_->async_get_result(handle);
+  if (!wait_future(result_future, timeout, blackboard)) {
+    find_person_client_->async_cancel_goal(handle);
+    const bool canceled = cancel_requested(blackboard);
+    return make_skill_result(action.action_type, canceled ? CANCELED : TIMEOUT,
+                             canceled ? "Find-person goal canceled."
+                                      : "Find-person action timed out.",
+                             Json::object(), !canceled, canceled);
+  }
+  const auto wrapped = result_future.get();
+  const auto result = wrapped.result;
+  if (!result) {
+    return make_skill_result(action.action_type, RECOVERABLE_FAILURE,
+                             "Find-person returned no result.", Json::object(), true);
+  }
+  Json payload{{"found", result->found},
+               {"person_id", result->person_id},
+               {"person_pose", pose_to_json(result->person_pose)},
+               {"verification", "RAISED_HAND_RESPONSE"},
+               {"perception_source", "TRACKED_PERSON_APPEARANCE"}};
+  if (result->found) {
+    blackboard->set<std::string>(bb::TARGET_PERSON, result->person_id);
+    blackboard->set<geometry_msgs::msg::PoseStamped>(bb::TARGET_POSE,
+                                                     result->person_pose);
+    blackboard->set<Json>(bb::PERSON_REF,
+                          Json{{"person_id", result->person_id},
+                               {"name", target_name},
+                               {"location", goal.location},
+                               {"verification", "RAISED_HAND_RESPONSE"},
+                               {"source", "TRACKED_PERSON_APPEARANCE"}});
+    return make_skill_result(action.action_type, SUCCESS, result->message, payload);
+  }
+  if (result->message.rfind("PERSON_NOT_FOUND:", 0) == 0) {
+    payload["failure_status"] = "PERSON_NOT_FOUND";
+  } else if (result->message.rfind("GESTURE_TIMEOUT:", 0) == 0) {
+    payload["failure_status"] = "GESTURE_TIMEOUT";
+  } else if (result->message.rfind("IDENTITY_NOT_CONFIRMED:", 0) == 0) {
+    payload["failure_status"] = "IDENTITY_NOT_CONFIRMED";
+  } else if (result->message.rfind("PERCEPTION_FAILED:", 0) == 0) {
+    payload["failure_status"] = "PERCEPTION_FAILED";
+  }
+  std::string outcome = NOT_FOUND;
+  bool recoverable = true;
+  if (result->message.rfind("GESTURE_TIMEOUT:", 0) == 0) {
+    outcome = TIMEOUT;
+  } else if (result->message.rfind("PERCEPTION_FAILED:", 0) == 0) {
+    outcome = RECOVERABLE_FAILURE;
+  }
+  return make_skill_result(action.action_type, outcome, result->message, payload,
+                           recoverable, false);
 }
 
 SkillResultData RemoteSkillClient::find_object(const Blackboard::SharedPtr &blackboard,
@@ -1185,12 +1335,26 @@ SkillResultData RemoteSkillClient::find_person_by_attribute(
   const std::set<std::string> valid{SUCCESS,   FAILED,  INVALID_INPUT,
                                     NOT_FOUND, TIMEOUT, CANCELED};
   const auto outcome = valid.count(result->outcome) ? result->outcome : FAILED;
+  // Section: Preserve machine-readable policy status even though the legacy action
+  // carries its detailed status in the message field.
+  std::string failure_status;
+  if (result->message.rfind("PERCEPTION_FAILED:", 0) == 0) {
+    failure_status = "PERCEPTION_FAILED";
+  } else if (result->message.rfind("ambiguous_person:", 0) == 0) {
+    failure_status = "AMBIGUOUS_PERSON";
+  } else if (result->message.rfind("attribute_not_found:", 0) == 0) {
+    failure_status = "ATTRIBUTE_NOT_FOUND";
+  } else if (result->message.rfind("PERSON_NOT_FOUND:", 0) == 0) {
+    failure_status = "PERSON_NOT_FOUND";
+  }
+  Json result_payload{{"person_ref", person_ref},
+                      {"observation", observation},
+                      {"memory_id", result->memory_id},
+                      {"memory_revision", result->memory_revision}};
+  if (!failure_status.empty()) result_payload["failure_status"] = failure_status;
   return make_skill_result(
       action.action_type, outcome, result->message,
-      Json{{"person_ref", person_ref},
-           {"observation", observation},
-           {"memory_id", result->memory_id},
-           {"memory_revision", result->memory_revision}},
+      result_payload,
       outcome == FAILED || outcome == NOT_FOUND || outcome == TIMEOUT,
       outcome == CANCELED || outcome == INVALID_INPUT);
 }

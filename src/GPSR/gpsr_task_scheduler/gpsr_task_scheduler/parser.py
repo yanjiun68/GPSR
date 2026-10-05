@@ -134,18 +134,39 @@ def _person_selector(
         for item in filters
         if item.get("feature") == "pose" and item.get("value")
     ]
-    clothing_values = [
-        str(item.get("value", ""))
-        for item in filters
-        if item.get("feature") == "shirt_color" and item.get("value")
-    ]
+    clothing_predicates: list[dict[str, str]] = []
+    for item in filters:
+        if item.get("feature") != "shirt_color" or not item.get("value"):
+            continue
+        value = str(item["value"])
+        # Section: Preserve a negative shirt-color request for the server's S_err path.
+        is_negative = bool(
+            re.search(
+                rf"\b(?:not\s+wearing|without)\s+(?:a\s+)?{re.escape(value.replace('_', ' '))}\s+shirt\b",
+                text,
+            )
+        )
+        clothing_predicates.append(
+            {"type": "shirt_color", "operator": "not" if is_negative else "equals", "value": value}
+        )
     wearable_predicates: list[dict[str, str]] = []
     unavailable_wearables: list[str] = []
+    visible_nouns = {"glasses": "glasses", "hat": "hat", "face_mask": "mask"}
     for feature, phrases in {
             "glasses": ("wearing glasses", "with glasses", "has glasses"),
             "hat": ("wearing a hat", "wearing hat", "with a hat", "with hat"),
             "face_mask": ("wearing a mask", "wearing mask", "with a mask", "with mask"),
     }.items():
+        # Section: Negative visible attributes are dispatched to the skill's S_err
+        # report-and-return path instead of being silently parsed as a positive match.
+        if re.search(
+            rf"\b(?:not\s+wearing|without|not\s+with)\s+(?:a\s+)?{visible_nouns[feature]}\b",
+            text,
+        ):
+            wearable_predicates.append(
+                {"type": feature, "operator": "not", "value": "yes"}
+            )
+            continue
         if not any(re.search(rf"\b{re.escape(phrase)}\b", text) for phrase in phrases):
             continue
         # Section: Model-gated wearables are accepted only when configuration enables YES.
@@ -165,7 +186,7 @@ def _person_selector(
         ]
     predicates: list[dict[str, str]] = []
     predicates.extend({"type": "gesture" if value in {"right_hand_raised", "left_hand_raised", "waving"} else "pose", "operator": "equals", "value": value} for value in pose_values)
-    predicates.extend({"type": "shirt_color", "operator": "equals", "value": value} for value in clothing_values)
+    predicates.extend(clothing_predicates)
     predicates.extend(wearable_predicates)
 
     # Section: Reject combined or multiple selectors instead of choosing a hidden precedence.

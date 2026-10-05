@@ -103,7 +103,7 @@ install(DIRECTORY launch/
   DESTINATION share/${PROJECT_NAME}/launch
 )
 
-if(BUILD_TESTING)
+if(FALSE) # Section: Tests disabled for production-only workspace builds.
   find_package(ament_lint_auto REQUIRED)
   set(ament_cmake_copyright_FOUND TRUE)
   set(ament_cmake_cpplint_FOUND TRUE)

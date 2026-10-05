@@ -51,6 +51,8 @@ def generate_launch_description() -> LaunchDescription:
     start_voice_stt = LaunchConfiguration("start_voice_stt")
     start_voice_command = LaunchConfiguration("start_voice_command")
     command_input_timeout_sec = LaunchConfiguration("command_input_timeout_sec")
+    # Section: Use one echo guard setting for the GPSR dialogue handoff and STT node.
+    post_tts_guard_ms = LaunchConfiguration("post_tts_guard_ms")
     # Section: Keep a bounded voice reply window inside the scheduler dialogue deadline.
     max_clarification_attempts = LaunchConfiguration("max_clarification_attempts")
     clarification_timeout_sec = LaunchConfiguration("clarification_timeout_sec")
@@ -123,6 +125,15 @@ def generate_launch_description() -> LaunchDescription:
     start_shared_human_pose = OrSubstitution(
         start_count_people_pipeline,
         start_find_person_attribute_pipeline,
+    )
+    # Section: Name-only FIND_PERSON also needs the shared pose/appearance track stream.
+    start_shared_human_appearance = OrSubstitution(
+        start_count_people_pipeline,
+        # Section: ROS Humble accepts exactly two operands per OrSubstitution.
+        OrSubstitution(
+            start_find_person_pipeline,
+            start_find_person_attribute_pipeline,
+        ),
     )
     # Section: Name and attribute searches reuse exactly one managed YOLO person tracker.
     start_shared_human_identity = OrSubstitution(
@@ -197,6 +208,8 @@ def generate_launch_description() -> LaunchDescription:
             "lifecycle_transition_timeout_sec": ParameterValue(lifecycle_transition_timeout_sec, value_type=float),
             "lifecycle_operation_timeout_margin_sec": ParameterValue(lifecycle_operation_timeout_margin_sec, value_type=float),
             "startup_dependency_poll_sec": ParameterValue(startup_dependency_poll_sec, value_type=float),
+            # Section: GPSR waits this interval after completed playback before issuing STT.
+            "post_tts_guard_ms": ParameterValue(post_tts_guard_ms, value_type=int),
         }],
     )
 
@@ -380,7 +393,7 @@ def generate_launch_description() -> LaunchDescription:
         name="human_skeleton_detection_node",
         namespace="",
         output="screen",
-        condition=IfCondition(start_shared_human_pose),
+        condition=IfCondition(start_shared_human_appearance),
         parameters=[{
             "image_topic": rgb_topic,
             "model_path": default_pose_model_path,
@@ -413,7 +426,7 @@ def generate_launch_description() -> LaunchDescription:
         name="gpsr_tracked_appearance_node",
         namespace="",
         output="screen",
-        condition=IfCondition(start_find_person_attribute_pipeline),
+        condition=IfCondition(start_shared_human_appearance),
         parameters=[{
             "image_topic": rgb_topic,
             "identity_topic": "/human_identity/recognized_people",
@@ -438,6 +451,34 @@ def generate_launch_description() -> LaunchDescription:
             "memory_save_service": "/gpsr/guest_memory/save",
             "confirmation_min_frames": ParameterValue(confirmation_min_frames, value_type=int),
             "enabled_wearable_predicates": ["glasses"],
+            # Section: VLM is an opt-in semantic fallback after tracked deterministic matching.
+            "enable_vlm_fallback": True,
+            "vlm_query_topic": "/perception/person_vlm_query",
+            "vlm_result_topic": "/perception/person_vlm_result",
+            "vlm_minimum_confidence": 0.55,
+            # Section: S_err reports unsupported negative visible attributes then
+            # returns through the same configured instruction-point navigation path.
+            "tts_service": tts_action,
+            "navigation_action": navigate_to_named_pose_action,
+            "instruction_point": instruction_point,
+        }],
+    )
+
+    # Section: Name searches use the same persistent tracks as attribute searches and
+    # verify identity through a bounded raised-hand interaction.
+    find_person_skill_server = LifecycleNode(
+        package="robot_yasmin_tasks",
+        executable="find_person_skill_server",
+        name="find_person_skill_server",
+        namespace="",
+        output="screen",
+        condition=IfCondition(start_shared_human_identity),
+        parameters=[{
+            "action_name": "/gpsr/find_person",
+            "appearance_topic": "/appearance/tracked_people",
+            "tts_service": "/voice/tts/say",
+            "gesture_confidence_threshold": 0.55,
+            "gesture_min_stable_frames": 3,
         }],
     )
 
@@ -479,6 +520,23 @@ def generate_launch_description() -> LaunchDescription:
         }],
     )
 
+    # Section: GUIDE_PERSON owns its sequential Nav2/TTS state machine and is
+    # activated only by the GPSR lifecycle manager for a guide ActionStep.
+    guide_person_skill_server = LifecycleNode(
+        package="robot_yasmin_tasks",
+        executable="guide_person_skill_server",
+        name="guide_person_skill_server",
+        namespace="",
+        output="screen",
+        condition=IfCondition(start_executor),
+        parameters=[{
+            "action_name": "/person_guide/control",
+            "navigation_action": navigate_to_named_pose_action,
+            "tts_service": "/voice/tts/say",
+            "max_navigation_retries": 1,
+        }],
+    )
+
     # Section: Optional local TTS service used by SAY/report skills.
     voice_tts_node = Node(
         package="voice",
@@ -496,8 +554,10 @@ def generate_launch_description() -> LaunchDescription:
         output="screen",
         condition=IfCondition(start_voice_stt),
         parameters=[{
-            # Section: Force the scheduler-owned Faster-Whisper STT path to transcribe English.
+            # Section: Keep the scheduler-owned Whisper STT path in English.
             "whisper_language": "en",
+            # Section: Retain STT-side protection for direct topic requests outside GPSR dialogue.
+            "post_tts_guard_ms": ParameterValue(post_tts_guard_ms, value_type=int),
         }],
     )
 
@@ -521,6 +581,8 @@ def generate_launch_description() -> LaunchDescription:
                 clarification_listen_timeout_sec,
                 value_type=float,
             ),
+            # Section: Keep command-intake STT closed until TTS playback and echo guard finish.
+            "post_tts_guard_ms": ParameterValue(post_tts_guard_ms, value_type=int),
         }],
     )
 
@@ -620,7 +682,7 @@ def generate_launch_description() -> LaunchDescription:
     return LaunchDescription(
         [
             DeclareLaunchArgument("use_sim_time", default_value="false", description="Use simulation time."),
-            DeclareLaunchArgument("dry_run", default_value="true", description="Print/publish the ordered plan without invoking hardware skills."),
+            DeclareLaunchArgument("dry_run", default_value="false", description="Print/publish the ordered plan without invoking hardware skills."),
             DeclareLaunchArgument("command_input_mode", default_value="topic", description="Input mode for commands: topic or action."),
             DeclareLaunchArgument("command_topic", default_value="/gpsr/command", description="Plain text GPSR command input topic."),
             DeclareLaunchArgument("schedule_command_service", default_value="/gpsr/schedule_command", description="Service endpoint for one-shot GPSR command scheduling."),
@@ -646,6 +708,7 @@ def generate_launch_description() -> LaunchDescription:
             DeclareLaunchArgument("start_voice_stt", default_value="true", description="Start local STT used by verbal FIND_PERSON confirmation."),
             DeclareLaunchArgument("start_voice_command", default_value="true", description="Start bounded spoken GPSR command reception at the current robot position."),
             DeclareLaunchArgument("command_input_timeout_sec", default_value="12.0", description="Seconds in each spoken GPSR command listening window before re-arming."),
+            DeclareLaunchArgument("post_tts_guard_ms", default_value="400", description="Milliseconds to wait after TTS playback before GPSR starts STT."),
             DeclareLaunchArgument("max_clarification_attempts", default_value="2", description="Maximum spoken clarification replies per incomplete GPSR command."),
             DeclareLaunchArgument("clarification_timeout_sec", default_value="40.0", description="Seconds allowed for each clarification TTS and STT exchange."),
             DeclareLaunchArgument("clarification_listen_timeout_sec", default_value="20.0", description="Seconds allowed for one request-scoped STT clarification result."),
@@ -714,8 +777,10 @@ def generate_launch_description() -> LaunchDescription:
             gpsr_human_identity_node,
             gpsr_tracked_appearance_node,
             find_person_by_attribute_skill_server,
+            find_person_skill_server,
             extract_person_info_skill_server,
             find_object_skill_server,
+            guide_person_skill_server,
             voice_tts_node,
             voice_stt_node,
             gpsr_voice_command_node,

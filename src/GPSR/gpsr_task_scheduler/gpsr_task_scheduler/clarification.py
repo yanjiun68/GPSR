@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from difflib import SequenceMatcher
 import re
 from dataclasses import dataclass
 from typing import Any
@@ -28,6 +29,31 @@ PROMPTS = {
 }
 
 
+# Section: Fuzzy matching is limited to object-target task families and never auto-admits a plan.
+FUZZY_OBJECT_INTENTS = frozenset({
+    "FIND_OBJECT",
+    "COUNT_OBJECTS",
+    "PICK_OBJECT",
+    "PLACE_OBJECT",
+    "DELIVER_OBJECT",
+})
+
+
+# Section: These replies explicitly accept the one suggestion already shown to the operator.
+AFFIRMATIVE_SUGGESTION_REPLIES = frozenset({
+    "yes",
+    "yes please",
+    "yeah",
+    "yep",
+    "correct",
+    "that is correct",
+    "that's correct",
+    "right",
+    "confirm",
+    "confirmed",
+})
+
+
 @dataclass(frozen=True, slots=True)
 class Completeness:
     """Special function: Preserve a classified command and its recognized semantic slots."""
@@ -38,6 +64,7 @@ class Completeness:
     intent: str
     target: str
     location: str
+    suggestion: ObjectSuggestion | None = None
 
     @property
     def complete(self) -> bool:
@@ -58,12 +85,171 @@ class ClarificationSession:
     validation: dict[str, Any]
 
 
+@dataclass(frozen=True, slots=True)
+class ObjectSuggestion:
+    """Special function: Carry one conservative fuzzy object suggestion."""
+
+    source: str
+    suggested_target: str
+    score: float
+
+    def to_dict(self) -> dict[str, Any]:
+        """Special function: Serialize a suggestion for ROS JSON and diagnostic output."""
+        # Section: Keep the public payload stable and round scores for readable logs.
+        return {
+            "input": self.source,
+            "suggested_target": self.suggested_target,
+            "score": round(float(self.score), 3),
+        }
+
+
 def _classification(missing: set[str]) -> tuple[str, str]:
     """Special function: Select the exact prompt for the missing semantic fields."""
     if not missing:
         return "COMPLETE", ""
     status = f"MISSING_{next(iter(missing)).upper()}" if len(missing) == 1 else "MULTIPLE_MISSING"
     return status, PROMPTS[status]
+
+
+def _classification_with_suggestion(
+    missing: set[str],
+    suggestion: ObjectSuggestion | None,
+) -> tuple[str, str]:
+    """Special function: Add a confirmation prompt without changing completeness rules."""
+    # Section: Preserve the existing status contract when there is no safe suggestion.
+    status, prompt = _classification(missing)
+    if suggestion is None or "target" not in missing:
+        return status, prompt
+    # Section: Require an explicit confirmation or replacement before planning can continue.
+    suggested_label = suggestion.suggested_target.replace("_", " ")
+    suggestion_prompt = (
+        f'I could not match "{suggestion.source}" to a configured object. '
+        f'Did you mean "{suggested_label}"? Reply "yes" to confirm, '
+        "or provide another object."
+    )
+    if status == "MISSING_TARGET":
+        return status, suggestion_prompt
+    return status, f"{suggestion_prompt} {prompt}"
+
+
+def _object_target_words(clause: str, config: SchedulerConfig) -> list[str]:
+    """Special function: Extract likely unknown object words from one object-action clause."""
+    # Section: Start after the action verb so command words cannot become suggestions.
+    action = re.search(
+        r"\b(?:find|locate|look\s+for|count|pick\s+up|pick|take|place|put|deliver|bring)\b",
+        str(clause or "").casefold(),
+    )
+    if action is None:
+        return []
+    # Section: Stop at the first location, destination, relation, or next-clause marker.
+    remainder = str(clause or "").casefold()[action.end():]
+    remainder = re.split(
+        r"\b(?:in|at|from|on|to|into|onto|near|beside|while|then|after|before)\b",
+        remainder,
+        maxsplit=1,
+    )[0]
+    words = re.findall(r"[a-z0-9']+", remainder)
+    # Section: Remove grammatical and already-supported visual descriptors before matching.
+    descriptors = {
+        "a", "an", "the", "one", "two", "three", "some", "any",
+        *{
+            str(value).casefold().replace("_", " ")
+            for values in config.supported_object_features.values()
+            for value in values
+        },
+    }
+    return [word for word in words if word not in descriptors]
+
+
+def _fuzzy_object_suggestion(
+    clause: str,
+    intent: str,
+    config: SchedulerConfig,
+) -> ObjectSuggestion | None:
+    """Special function: Find one high-confidence configured object or category candidate."""
+    # Section: Never suggest a visual target for person, navigation, or dialogue commands.
+    if intent not in FUZZY_OBJECT_INTENTS:
+        return None
+    words = _object_target_words(clause, config)
+    if not words:
+        return None
+    # Section: Build displayable candidates from the authoritative object aliases and categories.
+    candidates: dict[str, str] = {}
+    for alias, canonical in config.object_aliases.items():
+        candidates[" ".join(str(alias).replace("_", " ").split())] = (
+            " ".join(str(canonical).replace("_", " ").split())
+        )
+    for category in config.known_categories:
+        label = " ".join(str(category).replace("_", " ").split())
+        candidates.setdefault(label, label)
+    if not candidates:
+        return None
+    # Section: Compare one-to-four-word windows so multi-word RoboCup items remain supported.
+    best_by_target: dict[str, tuple[float, str]] = {}
+    for start in range(len(words)):
+        for width in range(1, min(4, len(words) - start) + 1):
+            source = " ".join(words[start:start + width])
+            for alias, target in candidates.items():
+                score = SequenceMatcher(None, source, alias).ratio()
+                previous = best_by_target.get(target)
+                if previous is None or score > previous[0]:
+                    best_by_target[target] = (score, source)
+    ranked = sorted(
+        [
+            (score, source, target)
+            for target, (score, source) in best_by_target.items()
+        ],
+        reverse=True,
+    )
+    if not ranked:
+        return None
+    # Section: Short words need a stronger score to avoid unsafe accidental matches.
+    best_score, source, target = ranked[0]
+    threshold = 0.82 if len(source.replace(" ", "")) <= 4 else 0.74
+    if best_score < threshold:
+        return None
+    # Section: Ambiguous near-ties are rejected instead of silently choosing one target.
+    second_score = ranked[1][0] if len(ranked) > 1 else 0.0
+    if len(ranked) > 1 and best_score - second_score < 0.08:
+        return None
+    return ObjectSuggestion(source, target, best_score)
+
+
+def _suggestion_data(
+    suggestion: ObjectSuggestion | dict[str, Any] | None,
+) -> tuple[str, str] | None:
+    """Special function: Read suggestion fields from internal or serialized state."""
+    # Section: Clarification callbacks receive JSON dictionaries while unit paths may use dataclasses.
+    if isinstance(suggestion, ObjectSuggestion):
+        return suggestion.source, suggestion.suggested_target
+    if isinstance(suggestion, dict):
+        source = str(suggestion.get("input") or "").strip()
+        target = str(suggestion.get("suggested_target") or "").strip()
+        if source and target:
+            return source, target
+    return None
+
+
+def _is_affirmative_suggestion_reply(response: str) -> bool:
+    """Special function: Recognize only concise explicit confirmations."""
+    # Section: Punctuation and case are ignored, but open-ended replies are not auto-accepted.
+    normalized = " ".join(re.findall(r"[a-z']+", str(response or "").casefold()))
+    return normalized in AFFIRMATIVE_SUGGESTION_REPLIES
+
+
+def _replace_suggested_target(
+    instruction: str,
+    source: str,
+    target: str,
+) -> str:
+    """Special function: Replace the original misspelling with the confirmed canonical target."""
+    # Section: Replace only the first bounded occurrence so unrelated speech is preserved.
+    source_phrase = " ".join(str(source).replace("_", " ").split())
+    target_phrase = " ".join(str(target).replace("_", " ").split())
+    if not source_phrase or not target_phrase:
+        return str(instruction or "")
+    pattern = rf"(?<!\w){re.escape(source_phrase)}(?!\w)"
+    return re.sub(pattern, target_phrase, str(instruction or ""), count=1, flags=re.IGNORECASE)
 
 
 def _explicit_unknown_place(clause: str, intent: str, config: SchedulerConfig) -> bool:
@@ -88,6 +274,7 @@ def assess_command(instruction: str, config: SchedulerConfig) -> Completeness:
     first_intent = ""
     first_target = ""
     first_location = ""
+    suggestion: ObjectSuggestion | None = None
     original = str(instruction or "")
     for clause in clauses:
         # Section: Resolve only explicitly named entities and active-clause antecedents.
@@ -138,17 +325,33 @@ def assess_command(instruction: str, config: SchedulerConfig) -> Completeness:
         # Section: TAKE can operate on an already held item; BRING needs a source unless a prior FIND supplied it.
         if intent == "DELIVER_OBJECT" and not re.search(r"\btake\b", clause) and not memory.get("object") and not _location_after_marker(clause, "from", config) and not unknown_place:
             missing.add("location")
+        # Section: Offer only a high-confidence object candidate when the target slot is missing.
+        if "target" in missing and suggestion is None:
+            suggestion = _fuzzy_object_suggestion(clause, intent, config)
         if object_target:
             memory["object"] = object_target
         if person_target:
             memory["person"] = person_target
         if location:
             memory["location"] = location
-    status, prompt = _classification(missing)
-    return Completeness(status, tuple(sorted(missing)), prompt, first_intent, first_target, first_location)
+    status, prompt = _classification_with_suggestion(missing, suggestion)
+    return Completeness(
+        status,
+        tuple(sorted(missing)),
+        prompt,
+        first_intent,
+        first_target,
+        first_location,
+        suggestion,
+    )
 
 
-def merge_clarification(original: str, response: str, config: SchedulerConfig) -> str:
+def merge_clarification(
+    original: str,
+    response: str,
+    config: SchedulerConfig,
+    suggestion: ObjectSuggestion | dict[str, Any] | None = None,
+) -> str:
     """Special function: Fill only missing slots or accept a complete restatement."""
     original = str(original or "").strip()
     response = str(response or "").strip()
@@ -156,6 +359,11 @@ def merge_clarification(original: str, response: str, config: SchedulerConfig) -
         return original
     old = assess_command(original, config)
     new = assess_command(response, config)
+    # Section: A concise affirmative confirms only the suggestion attached to this session.
+    suggestion_values = _suggestion_data(suggestion or old.suggestion)
+    if suggestion_values and _is_affirmative_suggestion_reply(response):
+        source, target = suggestion_values
+        return _replace_suggested_target(original, source, target)
     # Section: A complete replacement command always supersedes the partial one.
     if new.complete:
         return response
@@ -186,6 +394,12 @@ def merge_clarification(original: str, response: str, config: SchedulerConfig) -
                 merged = f"{merged.rstrip(' .')} {place}"
         return merged
     if "target" in old.missing_fields and target:
+        # Section: A recognized replacement answers the suggestion without duplicating the target.
+        if suggestion_values:
+            source, _suggested_target = suggestion_values
+            replaced = _replace_suggested_target(merged, source, target)
+            if replaced != merged:
+                return replaced
         spoken_target = target.replace("_", " ")
         if re.search(r"\b(?:it|him|her|them|something)\b", merged, re.IGNORECASE):
             merged = re.sub(r"\b(?:it|him|her|them|something)\b", spoken_target, merged, count=1, flags=re.IGNORECASE)

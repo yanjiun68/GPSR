@@ -41,6 +41,8 @@ def schedule_command(
             "status": completeness.status,
             "missing_fields": list(completeness.missing_fields),
             "clarification_prompt": completeness.prompt,
+            # Section: Preserve a candidate so the voice bridge can request explicit confirmation.
+            "suggestion": completeness.suggestion.to_dict() if completeness.suggestion else None,
             "partial": {
                 "intent": completeness.intent,
                 "target": completeness.target,

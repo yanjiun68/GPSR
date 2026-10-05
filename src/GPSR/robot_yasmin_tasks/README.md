@@ -75,19 +75,26 @@ confirm initial arrival at and final return to the configured `instruction_point
 
 ```text
 FIND_PERSON
-    -> name selector only
-    -> registered face match when visual identity is available
-    -> mandatory ask-and-listen confirmation when vision cannot confirm the name
+    -> name-only or name-plus-visible-attribute query
+    -> persistent tracked-person observations
+    -> mandatory spoken raised-hand request and stable track transition
 
 FIND_PERSON_BY_ATTRIBUTE
-    -> pose, gesture, or any-person selector only
-    -> real /perception/human_poses evidence
+    -> deterministic tracked pose/gesture/appearance evidence first
+    -> structured VLM fallback only for unresolved visible attributes
 ```
 
 Both routes load `config/find_person_search.yaml` and own their Nav2 waypoint loop:
 
 ```text
 STRICT_LOCATION -> requested waypoint -> local person search -> result
+
+The attribute server publishes unresolved candidate tracks on
+`/perception/person_vlm_query` only after deterministic matching fails. A VLM adapter
+may answer on `/perception/person_vlm_result` with a correlated JSON object such as
+`{"request_id":"...","status":"MATCH_FOUND","track_key":"session:4","confidence":0.89}`.
+The adapter is perception-only; the server validates the track key and confidence before
+persisting the candidate, and no VLM message is connected to a motion interface.
 
 GLOBAL -> kitchen -> living_room -> dining_room -> bedroom -> entrance -> exit
              |             |               |
@@ -100,9 +107,32 @@ the unreachable waypoint; perception failure, cancellation, and timeout remain t
 `FIND_OBJECT` follows the same navigate-observe-scan pattern. Its global route, scan
 headings, navigation timeout, and local observation timeout come from
 `config/find_object_search.yaml`; an explicit location creates a one-waypoint strict route.
+The `retry.max_not_found_retries` policy repeats one complete route only after a clean
+`NOT_FOUND` pass. The production value is `1`, meaning at most two complete passes.
+Timeout, cancellation, perception, lifecycle, and navigation failures do not consume this
+semantic retry, and `skill_retries.FIND_OBJECT` remains `0` so the executor cannot create a
+second full two-pass mission.
 
 Open `docs/find_search_visualizer.html` in a browser for a hardware-free interactive model
 of strict/global object and person searches, hidden target positions, and failure branches.
+
+## Standalone FIND_OBJECT Launch Test
+
+Use the dedicated test launch for a hardware-free lifecycle and action check. It includes the
+production `find_object_skill.launch.py`, publishes synthetic detector readiness and matching
+`bottle` frames, then sends one `/gpsr/find_object` goal:
+
+```bash
+ros2 launch robot_yasmin_tasks test_find_object_skill.launch.py
+```
+
+The test should report a successful `FindObject` result. To test a real camera and detector instead,
+disable the synthetic streams and enable the detector:
+
+```bash
+ros2 launch robot_yasmin_tasks test_find_object_skill.launch.py \
+  publish_test_detections:=false start_object_detector:=true send_test_goal:=false
+```
 
 ## GPSR tracked appearance and guest memory
 

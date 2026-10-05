@@ -2,6 +2,8 @@
 // factories.
 #include "robot_yasmin_tasks/skills.hpp"
 
+#include <cstdint>
+#include <sstream>
 #include <stdexcept>
 
 namespace robot_yasmin_tasks {
@@ -34,6 +36,25 @@ ValidationCall require_any_field(std::vector<std::string> names) {
   };
 }
 
+// Special function: Validate a name query whether it arrives as a direct field or
+// as the scheduler's normalized selector object.
+ValidationCall validate_find_person_query() {
+  return [](const Blackboard::SharedPtr &, const ActionStepData &action) {
+    if (!action.target_person.empty() ||
+        (action.parameters.is_object() &&
+         !action.parameters.value("person_name", std::string{}).empty())) {
+      return std::make_pair(true, std::string{});
+    }
+    const auto selector = action.parameters.value("selector", Json::object());
+    if (selector.is_object() && selector.value("type", std::string{}) == "name" &&
+        !selector.value("value", std::string{}).empty()) {
+      return std::make_pair(true, std::string{});
+    }
+    return std::make_pair(false,
+                          std::string("FIND_PERSON requires a non-empty name selector."));
+  };
+}
+
 // Special function: Validate the complete attribute-selector contract before ROS
 // dispatch.
 std::pair<bool, std::string> validate_attribute_selector(const Blackboard::SharedPtr &,
@@ -54,8 +75,6 @@ std::pair<bool, std::string> validate_attribute_selector(const Blackboard::Share
   if (!predicates.is_array() || predicates.empty()) {
     return {false, "At least one attribute selector is required."};
   }
-  static const std::set<std::string> supported{
-      "pose", "gesture", "any_person", "shirt_color", "glasses", "hat", "face_mask"};
   static const std::set<std::string> affirmative{"yes", "true", "wearing", "1"};
   for (const auto &predicate : predicates) {
     if (!predicate.is_object()) {
@@ -68,12 +87,25 @@ std::pair<bool, std::string> validate_attribute_selector(const Blackboard::Share
     if (type == "name") {
       return {false, "FIND_PERSON_BY_ATTRIBUTE cannot accept a name selector."};
     }
-    if (supported.count(type) == 0U) {
-      return {false, "Unsupported person attribute selector: " +
-                         (type.empty() ? std::string("empty") : type) + "."};
+    // Section: Unknown visible attributes are routed to the structured VLM fallback;
+    // only an empty selector type is invalid at the scheduler boundary.
+    if (type.empty()) {
+      return {false, "Unsupported person attribute selector: empty."};
     }
     if (type != "any_person" && value.empty()) {
       return {false, "Attribute selector requires a non-empty value."};
+    }
+    const bool negative_visible_attribute =
+        type == "glasses" || type == "hat" || type == "face_mask" ||
+        type == "shirt_color";
+    const bool negative_operator =
+        predicate.value("operator", std::string("equals")) == "not" ||
+        predicate.value("operator", std::string("equals")) == "not_equals" ||
+        predicate.value("operator", std::string("equals")) == "is_not";
+    // Section: Keep negative visible attributes valid through dispatch so the
+    // lifecycle server can execute its explicit S_err report-and-return state.
+    if (negative_visible_attribute && negative_operator) {
+      continue;
     }
     if ((type == "glasses" || type == "hat" || type == "face_mask") &&
         affirmative.count(value) == 0U) {
@@ -126,26 +158,68 @@ double scan_delta_radians(double desired_deg, double current_deg) {
   return delta * 3.14159265358979323846 / 180.0;
 }
 
-// Special function: Execute a PersonWaypointSearchSM-style route around one local
-// perception callback.
-SkillResultData search_with_waypoint_route(
-    const Blackboard::SharedPtr &blackboard, const ActionStepData &original,
-    const std::vector<std::string> &global_waypoints,
-    const std::vector<double> &scan_headings_deg, double observation_timeout_sec,
-    double navigation_timeout_sec, double scan_timeout_sec,
-    double default_mission_timeout_sec, const std::string &entity_name,
-    const std::string &preferred_location, const SkillClients &clients,
-    const SkillClientCall &local_search) {
-  // Section: Resolve strict-location versus global route semantics before any
-  // movement or perception request.
+// Section: Explicit pass-level records keep retry diagnostics separate from the
+// backward-compatible top-level result fields.
+struct SearchPassDiagnostics {
+  std::uint32_t pass_index{0};
+  Json searched_waypoints{Json::array()};
+  Json navigation_failures{Json::array()};
+  Json scan_failures{Json::array()};
+  bool complete_search{true};
+};
+
+// Section: One pass result carries both the existing skill result and its policy data.
+struct SearchPassResult {
+  SkillResultData result;
+  SearchPassDiagnostics diagnostics;
+};
+
+// Special function: Serialize one complete search pass for queue diagnostics.
+Json search_pass_to_json(const SearchPassDiagnostics &diagnostics) {
+  return Json{{"pass_index", diagnostics.pass_index},
+              {"searched_waypoints", diagnostics.searched_waypoints},
+              {"navigation_failures", diagnostics.navigation_failures},
+              {"scan_failures", diagnostics.scan_failures},
+              {"complete_search", diagnostics.complete_search}};
+}
+
+// Special function: Add pass metadata without removing payload fields from the
+// perception action result.
+void attach_search_pass_payload(SkillResultData &result,
+                                const SearchPassDiagnostics &diagnostics) {
+  if (!result.payload.is_object()) result.payload = Json::object();
+  result.payload["search_pass_index"] = diagnostics.pass_index;
+  result.payload["searched_waypoints"] = diagnostics.searched_waypoints;
+  result.payload["navigation_failures"] = diagnostics.navigation_failures;
+  result.payload["scan_failures"] = diagnostics.scan_failures;
+  result.payload["search_pass_complete"] = diagnostics.complete_search;
+}
+
+// Special function: Produce a compact route string for deterministic transition logs.
+std::string describe_search_route(const std::vector<std::string> &waypoints) {
+  std::ostringstream stream;
+  stream << "[";
+  for (std::size_t index = 0; index < waypoints.size(); ++index) {
+    if (index != 0U) stream << ",";
+    stream << waypoints[index];
+  }
+  stream << "]";
+  return stream.str();
+}
+
+// Special function: Resolve strict-location and global route semantics once for all
+// passes of one FIND_OBJECT mission.
+std::pair<bool, std::vector<std::string>> resolve_search_route(
+    const ActionStepData &original, const std::vector<std::string> &global_waypoints,
+    const std::string &preferred_location, const std::string &entity_name,
+    std::string &error_message, std::string &scope) {
+  // Section: Read location aliases from both normalized fields and legacy parameters.
   std::string requested = original.target_location;
-  if (requested.empty()) {
+  if (requested.empty())
     requested = original.parameters.value("target_location", std::string{});
-  }
-  if (requested.empty()) {
+  if (requested.empty())
     requested = original.parameters.value("location", std::string{});
-  }
-  auto scope = original.parameters.value(
+  scope = original.parameters.value(
       "search_scope",
       requested.empty() ? std::string("GLOBAL") : std::string("STRICT_LOCATION"));
   std::transform(scope.begin(), scope.end(), scope.begin(), ::toupper);
@@ -161,44 +235,52 @@ SkillResultData search_with_waypoint_route(
       waypoints.insert(waypoints.begin(), preferred_location);
     }
   } else {
-    return make_skill_result(
-        original.action_type, INVALID_INPUT,
-        scope == "GLOBAL"
-            ? "GLOBAL " + entity_name + " search cannot include target_location."
-            : "STRICT_LOCATION " + entity_name +
-                  " search requires target_location.",
-        Json::object(), false, true);
+    error_message = scope == "GLOBAL"
+                        ? "GLOBAL " + entity_name +
+                              " search cannot include target_location."
+                        : "STRICT_LOCATION " + entity_name +
+                              " search requires target_location.";
+    return {false, {}};
   }
   if (waypoints.empty()) {
-    return make_skill_result(original.action_type, INVALID_INPUT,
-                             entity_name + " search route contains no waypoints.",
-                             Json::object(), false, true);
+    error_message = entity_name + " search route contains no waypoints.";
+    return {false, {}};
   }
+  return {true, std::move(waypoints)};
+}
 
-  // Section: One absolute deadline bounds navigation, observation, and scanning
-  // together.
-  const double mission_timeout = original.timeout_sec > 0.0
-                                     ? original.timeout_sec
-                                     : default_mission_timeout_sec;
-  const auto deadline = std::chrono::steady_clock::now() +
-                        std::chrono::duration<double>(std::max(0.1, mission_timeout));
+// Special function: Execute exactly one complete route traversal under the shared
+// mission deadline.
+SearchPassResult run_search_pass(
+    const Blackboard::SharedPtr &blackboard, const ActionStepData &original,
+    const std::vector<std::string> &waypoints,
+    const std::vector<double> &scan_headings_deg, double observation_timeout_sec,
+    double navigation_timeout_sec, double scan_timeout_sec,
+    const std::chrono::steady_clock::time_point &mission_deadline,
+    std::uint32_t pass_index, const std::string &entity_name,
+    const SkillClients &clients, const SkillClientCall &local_search) {
+  SearchPassDiagnostics diagnostics;
+  diagnostics.pass_index = pass_index;
+  auto finalize = [&diagnostics](SkillResultData result) {
+    attach_search_pass_payload(result, diagnostics);
+    return SearchPassResult{std::move(result), diagnostics};
+  };
   Json visited = Json::array();
-  Json navigation_failures = Json::array();
-  Json scan_failures = Json::array();
+  std::vector<double> headings{0.0};
+  headings.insert(headings.end(), scan_headings_deg.begin(), scan_headings_deg.end());
   for (std::size_t index = 0; index < waypoints.size(); ++index) {
     if (cancel_requested(blackboard)) {
-      return make_skill_result(original.action_type, CANCELED,
-                               entity_name + " search canceled.", Json::object(),
-                               false, true);
+      return finalize(make_skill_result(original.action_type, CANCELED,
+                                        entity_name + " search canceled.",
+                                        Json::object(), false, true));
     }
-    auto remaining =
-        std::chrono::duration<double>(deadline - std::chrono::steady_clock::now())
+    const auto remaining =
+        std::chrono::duration<double>(mission_deadline - std::chrono::steady_clock::now())
             .count();
     if (remaining <= 0.0) {
-      return make_skill_result(original.action_type, TIMEOUT,
-                               entity_name +
-                                   " search exceeded its mission deadline.",
-                               Json{{"searched_waypoints", visited}}, true);
+      return finalize(make_skill_result(
+          original.action_type, TIMEOUT,
+          entity_name + " search exceeded its mission deadline.", Json::object(), true));
     }
     ActionStepData navigation = original;
     navigation.action_type = NAVIGATE;
@@ -210,43 +292,44 @@ SkillResultData search_with_waypoint_route(
     if (navigation_result.outcome == CANCELED || navigation_result.outcome == TIMEOUT) {
       auto result = navigation_result;
       result.action_type = original.action_type;
-      return result;
+      return finalize(std::move(result));
     }
     if (navigation_result.outcome != SUCCESS) {
-      navigation_failures.push_back(
+      diagnostics.navigation_failures.push_back(
           Json{{"waypoint", waypoints[index]}, {"message", navigation_result.message}});
+      // Section: A route with an unreachable waypoint is not a clean semantic pass;
+      // retain the existing terminal result but do not consume a NOT_FOUND retry.
+      diagnostics.complete_search = false;
       continue;
     }
     visited.push_back(waypoints[index]);
+    diagnostics.searched_waypoints = visited;
 
     // Section: Observe on arrival and after each configured absolute scan heading.
     double current_heading = 0.0;
-    std::vector<double> headings{0.0};
-    headings.insert(headings.end(), scan_headings_deg.begin(),
-                    scan_headings_deg.end());
     for (const double desired_heading : headings) {
-      remaining =
-          std::chrono::duration<double>(deadline - std::chrono::steady_clock::now())
-              .count();
-      if (remaining <= 0.0) {
-        return make_skill_result(original.action_type, TIMEOUT,
-                                 entity_name +
-                                     " search exceeded its mission deadline.",
-                                 Json{{"searched_waypoints", visited}}, true);
+      const auto scan_remaining = std::chrono::duration<double>(
+          mission_deadline - std::chrono::steady_clock::now()).count();
+      if (scan_remaining <= 0.0) {
+        return finalize(make_skill_result(
+            original.action_type, TIMEOUT,
+            entity_name + " search exceeded its mission deadline.", Json::object(), true));
       }
       if (desired_heading != 0.0) {
         const auto spin = clients.navigation->spin(
             blackboard, original, scan_delta_radians(desired_heading, current_heading),
-            std::min(scan_timeout_sec, remaining));
+            std::min(scan_timeout_sec, scan_remaining));
         if (spin.outcome == CANCELED || spin.outcome == TIMEOUT) {
           auto result = spin;
           result.action_type = original.action_type;
-          return result;
+          return finalize(std::move(result));
         }
         if (spin.outcome != SUCCESS) {
-          scan_failures.push_back(Json{{"waypoint", waypoints[index]},
-                                       {"heading_deg", desired_heading},
-                                       {"message", spin.message}});
+          diagnostics.scan_failures.push_back(
+              Json{{"waypoint", waypoints[index]},
+                   {"heading_deg", desired_heading},
+                   {"message", spin.message}});
+          diagnostics.complete_search = false;
           break;
         }
         current_heading = desired_heading;
@@ -254,44 +337,132 @@ SkillResultData search_with_waypoint_route(
       ActionStepData local = original;
       local.target_location = waypoints[index];
       local.parameters["active_search_waypoint"] = waypoints[index];
-      // Section: Each server request is a bounded local observation because this
-      // state machine owns the global route.
+      // Section: Keep perception local while this compound state owns route and retry policy.
       local.parameters["search_scope"] = "STRICT_LOCATION";
       local.timeout_sec = std::min(
           observation_timeout_sec,
-          std::chrono::duration<double>(deadline - std::chrono::steady_clock::now())
+          std::chrono::duration<double>(mission_deadline -
+                                        std::chrono::steady_clock::now())
               .count());
       auto perception = local_search(blackboard, local);
       if (perception.outcome == SUCCESS) {
         perception.action_type = original.action_type;
-        perception.payload["searched_waypoints"] = visited;
-        perception.payload["navigation_failures"] = navigation_failures;
-        perception.payload["scan_failures"] = scan_failures;
-        return perception;
+        return finalize(std::move(perception));
       }
       if (perception.outcome != NOT_FOUND) {
         perception.action_type = original.action_type;
-        return perception;
+        return finalize(std::move(perception));
       }
     }
   }
-  // Section: Distinguish an exhausted route from a route with no reachable waypoint.
+  diagnostics.searched_waypoints = visited;
+  // Section: Preserve FAILED when no waypoint was reachable and NOT_FOUND after a
+  // reachable route was exhausted.
   if (visited.empty()) {
-    return make_skill_result(original.action_type, FAILED,
-                             "No configured " + entity_name +
-                                 "-search waypoint was reachable.",
-                             Json{{"searched_waypoints", visited},
-                                  {"navigation_failures", navigation_failures}},
-                             true);
+    return finalize(make_skill_result(
+        original.action_type, FAILED,
+        "No configured " + entity_name + "-search waypoint was reachable.",
+        Json::object(), true));
   }
-  return make_skill_result(
+  return finalize(make_skill_result(
       original.action_type, NOT_FOUND,
-      entity_name +
-          " was not found after all configured waypoints were searched.",
-      Json{{"searched_waypoints", visited},
-           {"navigation_failures", navigation_failures},
-           {"scan_failures", scan_failures}},
-      true);
+      entity_name + " was not found after all configured waypoints were searched.",
+      Json::object(), true));
+}
+
+// Special function: Execute one or more complete passes while retrying only a clean
+// NOT_FOUND result.
+SkillResultData search_with_waypoint_route(
+    const Blackboard::SharedPtr &blackboard, const ActionStepData &original,
+    const std::vector<std::string> &global_waypoints,
+    const std::vector<double> &scan_headings_deg, double observation_timeout_sec,
+    double navigation_timeout_sec, double scan_timeout_sec,
+    double default_mission_timeout_sec, std::uint32_t max_not_found_retries,
+    const std::string &entity_name, const std::string &preferred_location,
+    const SkillClients &clients, const SkillClientCall &local_search) {
+  std::string route_error;
+  std::string scope;
+  const auto route = resolve_search_route(original, global_waypoints, preferred_location,
+                                          entity_name, route_error, scope);
+  if (!route.first) {
+    return make_skill_result(original.action_type, INVALID_INPUT, route_error,
+                             Json::object(), false, true);
+  }
+  const auto &waypoints = route.second;
+  const double mission_timeout = original.timeout_sec > 0.0
+                                     ? original.timeout_sec
+                                     : default_mission_timeout_sec;
+  // Section: One absolute deadline is shared by every semantic search pass.
+  const auto mission_deadline = std::chrono::steady_clock::now() +
+                                std::chrono::duration_cast<
+                                    std::chrono::steady_clock::duration>(
+                                    std::chrono::duration<double>(
+                                        std::max(0.1, mission_timeout)));
+  const auto total_passes = max_not_found_retries + 1U;
+  const char *search_label = entity_name == "Object" ? "FIND_OBJECT" : "FIND_PERSON";
+  RCLCPP_INFO(rclcpp::get_logger("gpsr_search"),
+              "[%s] Starting search pass 1/%u scope=%s route=%s", search_label,
+              total_passes,
+              scope.c_str(), describe_search_route(waypoints).c_str());
+
+  Json pass_payloads = Json::array();
+  Json all_searched_waypoints = Json::array();
+  Json all_navigation_failures = Json::array();
+  Json all_scan_failures = Json::array();
+  SearchPassResult latest;
+  std::uint32_t completed_passes = 0;
+  std::uint32_t retries_used = 0;
+  for (std::uint32_t pass_index = 1; pass_index <= total_passes; ++pass_index) {
+    if (pass_index > 1U) {
+      if (cancel_requested(blackboard)) {
+        return make_skill_result(original.action_type, CANCELED,
+                                 entity_name + " search canceled.",
+                                 Json{{"search_passes_completed", completed_passes}},
+                                 false, true);
+      }
+      if (std::chrono::steady_clock::now() >= mission_deadline) {
+        return make_skill_result(
+            original.action_type, TIMEOUT,
+            entity_name + " search exceeded its mission deadline.",
+            Json{{"search_passes_completed", completed_passes}}, true);
+      }
+      RCLCPP_INFO(rclcpp::get_logger("gpsr_search"),
+                  "[%s] Starting search pass %u/%u after NOT_FOUND", search_label,
+                  pass_index, total_passes);
+    }
+    latest = run_search_pass(
+        blackboard, original, waypoints, scan_headings_deg, observation_timeout_sec,
+        navigation_timeout_sec, scan_timeout_sec, mission_deadline, pass_index,
+        entity_name, clients, local_search);
+    ++completed_passes;
+    pass_payloads.push_back(search_pass_to_json(latest.diagnostics));
+    for (const auto &waypoint : latest.diagnostics.searched_waypoints)
+      all_searched_waypoints.push_back(waypoint);
+    for (const auto &failure : latest.diagnostics.navigation_failures)
+      all_navigation_failures.push_back(failure);
+    for (const auto &failure : latest.diagnostics.scan_failures)
+      all_scan_failures.push_back(failure);
+
+    auto result = latest.result;
+    if (!result.payload.is_object()) result.payload = Json::object();
+    result.payload["search_passes_completed"] = completed_passes;
+    result.payload["not_found_retries_used"] = retries_used;
+    result.payload["max_not_found_retries"] = max_not_found_retries;
+    result.payload["search_passes"] = pass_payloads;
+    result.payload["searched_waypoints"] = all_searched_waypoints;
+    result.payload["navigation_failures"] = all_navigation_failures;
+    result.payload["scan_failures"] = all_scan_failures;
+    if (result.outcome == SUCCESS) return result;
+    if (result.outcome != NOT_FOUND) return result;
+    if (!latest.diagnostics.complete_search || pass_index == total_passes) {
+      RCLCPP_INFO(rclcpp::get_logger("gpsr_search"),
+                  "[%s] Search pass %u exhausted: target not found", search_label,
+                  pass_index);
+      return result;
+    }
+    ++retries_used;
+  }
+  return latest.result;
 }
 
 // Special function: Execute the former PersonWaypointSearchSM mission around
@@ -308,7 +479,7 @@ SkillResultData find_person_by_attribute_with_route(
       clients.person_search.observation_timeout_sec,
       clients.person_search.navigation_timeout_sec,
       clients.person_search.scan_timeout_sec,
-      clients.person_search.mission_timeout_sec, "Person", preferred, clients,
+      clients.person_search.mission_timeout_sec, 0U, "Person", preferred, clients,
       [client = clients.remote](const auto &board, const auto &action) {
         return client->find_person_by_attribute(board, action);
       });
@@ -332,7 +503,8 @@ SkillResultData find_object_with_route(const Blackboard::SharedPtr &blackboard,
       clients.object_search.observation_timeout_sec,
       clients.object_search.navigation_timeout_sec,
       clients.object_search.scan_timeout_sec,
-      clients.object_search.mission_timeout_sec, "Object", preferred, clients,
+      clients.object_search.mission_timeout_sec,
+      clients.object_search.max_not_found_retries, "Object", preferred, clients,
       [client = clients.remote](const auto &board, const auto &action) {
         return client->find_object(board, action);
       });
@@ -434,6 +606,28 @@ yasmin::StateMachine::SharedPtr make_skill_state_machine(const std::string &acti
         },
         require_any_field(
             {"target_object", "object_name", "target_category", "category"}));
+  }
+  if (action_type == FIND_PERSON) {
+    return std::make_shared<SimpleSkillSM>(
+        "FIND_PERSON_SKILL_SM",
+        [clients](const auto &bb, const auto &action) {
+          // Section: Name searches own navigation and the interactive identity policy.
+          const auto preferred =
+              action.parameters.value("preferred_location", std::string{});
+          return search_with_waypoint_route(
+              bb, action, clients.person_search.global_waypoints,
+              clients.person_search.scan_headings_deg,
+              clients.person_search.observation_timeout_sec,
+              clients.person_search.navigation_timeout_sec,
+              clients.person_search.scan_timeout_sec,
+              clients.person_search.mission_timeout_sec,
+              clients.person_search.max_not_found_retries, "Person", preferred,
+              clients,
+              [client = clients.remote](const auto &board, const auto &local_action) {
+                return client->find_person(board, local_action);
+              });
+        },
+        validate_find_person_query());
   }
   if (action_type == FIND_PERSON_BY_ATTRIBUTE) {
     return std::make_shared<SimpleSkillSM>(

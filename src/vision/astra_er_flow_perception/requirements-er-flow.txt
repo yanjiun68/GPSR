@@ -1,0 +1,10 @@
+# Install PyTorch separately so it matches your CUDA version.
+# Section: Match the Transformers version recorded by the local checkpoint.
+transformers==5.5.3
+accelerate
+# Section: Provide CUDA NF4 Linear4bit layers for quantized inference.
+bitsandbytes==0.50.2
+huggingface_hub
+# Section: Transformers 5.5.3 requires the modern Image.Resampling API.
+pillow>=10.0
+numpy

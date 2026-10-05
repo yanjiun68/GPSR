@@ -16,11 +16,11 @@ Default configuration:
 
 | Setting | Value |
 | --- | --- |
-| faster-whisper model | `small.en` |
-| device / compute type | `cuda` / `float16` |
+| OpenAI Whisper model | `turbo` (shared with one-shot STT) |
+| device / precision | `cuda` / `fp16` |
 | VAD decision frame | 100 ms |
 | partial update | 900 ms |
 | rolling partial context | 5 s |
 | final boundary | 600 ms silence |
 
-The implementation uses `webrtcvad` for speech boundaries and splits each 100 ms policy frame into WebRTC-compatible 10 ms checks. A CUDA-capable faster-whisper installation is required when this opt-in listener is enabled because its requested compute type is `float16`.
+The implementation uses `webrtcvad` for speech boundaries and splits each 100 ms policy frame into WebRTC-compatible 10 ms checks. Each policy frame uses a voiced-subframe ratio and two consecutive qualifying frames before activation, avoiding starts from an isolated 10 ms noise spike. It shares the process's single OpenAI Whisper cache with one-shot STT.

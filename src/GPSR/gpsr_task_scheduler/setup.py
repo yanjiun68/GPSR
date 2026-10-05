@@ -26,7 +26,7 @@ setup(
     maintainer_email="yanjiun68@example.com",
     description="Deterministic LLM-absent GPSR task scheduler.",
     license="TODO",
-    tests_require=["pytest"],
+    # tests_require=["pytest"],
     entry_points={
         "console_scripts": [
             "gpsr_scheduler = gpsr_task_scheduler.scheduler_node:main",

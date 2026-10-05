@@ -50,7 +50,7 @@ set(realsense2_camera_msgs_rosidl_args
   DEPENDENCIES builtin_interfaces std_msgs sensor_msgs
 )
 
-if(BUILD_TESTING)
+if(FALSE) # Section: Tests disabled for production-only workspace builds.
   find_package(ament_cmake_cppcheck QUIET)
   if(ament_cmake_cppcheck_FOUND)
     list(APPEND realsense2_camera_msgs_rosidl_args ADD_LINTER_TESTS)

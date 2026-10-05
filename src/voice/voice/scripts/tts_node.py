@@ -4,6 +4,8 @@
 import fcntl
 import os
 import subprocess
+import tempfile
+import wave
 from pathlib import Path
 from typing import TextIO
 
@@ -12,9 +14,15 @@ from diagnostic_msgs.msg import DiagnosticStatus
 from diagnostic_updater import DiagnosticStatusWrapper, Updater
 from rclpy.action import ActionServer, CancelResponse, GoalResponse
 from rclpy.node import Node
+from std_msgs.msg import String
 from voice_interfaces.action import SpeakText
 from voice_interfaces.srv import SayText
-from ament_index_python.packages import get_package_share_directory
+try:
+    # Section: Cache Piper's CPU voice through the supported piper-tts Python API.
+    from piper import PiperVoice
+except ImportError:
+    # Section: Preserve predictable ROS failures if the optional runtime package is absent.
+    PiperVoice = None
 
 
 # Section: Every TTS implementation cooperates on this one host-local playback lock.
@@ -70,20 +78,16 @@ class TTSNode(Node):
         # Parameters (configurable by launch)
         self.declare_parameter("service_name", "/voice/tts/say")
         self.declare_parameter("action_name", "/voice/tts/say_action")
-        self.declare_parameter("piper_bin", "piper")
-        default_model_path = (
-            get_package_share_directory("voice")
-            + "/models/en_US-lessac-medium.onnx"
-        )
+        default_model_path = "~/piper_models/en_US-lessac-high.onnx"
         self.declare_parameter("piper_model_path", default_model_path)
 
         self.service_name = self.get_parameter("service_name").get_parameter_value().string_value
         self.action_name = self.get_parameter("action_name").get_parameter_value().string_value
-        self.piper_bin = self.get_parameter("piper_bin").get_parameter_value().string_value
         self.model_path = (
-            self.get_parameter("piper_model_path").get_parameter_value().string_value
-            or default_model_path
+            os.path.expanduser(self.get_parameter("piper_model_path").get_parameter_value().string_value or default_model_path)
         )
+        self._piper_voice = None
+        self._piper_model_path = None
 
         # Section: Refuse a duplicate provider before registering duplicate ROS service/action endpoints.
         self._audio_playback_lock, owner_pid = acquire_audio_playback_lock()
@@ -107,6 +111,8 @@ class TTSNode(Node):
             goal_callback=self._accept_say_goal,
             cancel_callback=self._accept_say_cancel,
         )
+        # Section: Tell STT when playback ends so it can enforce its echo guard.
+        self._finished_pub = self.create_publisher(String, "/voice/tts/finished", 10)
 
         # Section: Publish diagnostics and expose this service-only node in topic graphs.
         self._diagnostics = Updater(self)
@@ -181,48 +187,35 @@ class TTSNode(Node):
             self.get_logger().warning("[voice_tts] piper_model_path is empty, skipping TTS.")
             return False, "piper_model_path is empty"
 
-        # Section: Build a streaming Piper-to-ALSA command pipeline.
-        cmd = [
-            self.piper_bin,
-            "--model",
-            self.model_path,
-            "--output_file",
-            "-",  # stdout WAV
-        ]
-
         try:
             # Section: Publish the active state before starting the blocking playback pipeline.
             self._speaking = True
             self._last_result = "Speaking"
             self._diagnostics.force_update()
             self.get_logger().info(f"[voice_tts] Speaking: \"{text}\"")
-            p1 = subprocess.Popen(
-                cmd,
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-            )
-            assert p1.stdin is not None
-            assert p1.stdout is not None
-            assert p1.stderr is not None
-            p1.stdin.write((text + "\n").encode("utf-8"))
-            p1.stdin.close()
-
-            subprocess.run(["aplay", "-q"], stdin=p1.stdout, check=False)
-            stderr = p1.stderr.read()
-            p1.wait(timeout=30)
-
-            if p1.returncode not in (0, None):
-                msg = f"Piper returned {p1.returncode}: {stderr.decode('utf-8', 'ignore')[:200]}"
-                self._speaking = False
-                self._failure_count += 1
-                self._last_result = msg
-                self.get_logger().warn(f"[voice_tts] {msg}")
-                self._diagnostics.force_update()
-                return False, msg
+            # Section: Avoid a silent medium-voice fallback when the required high model is absent.
+            if PiperVoice is None:
+                raise RuntimeError("piper-tts is missing; run: python3 -m pip install -U piper-tts")
+            if not os.path.isfile(self.model_path):
+                raise RuntimeError("Piper model missing: " + self.model_path + "; run: python3 -m piper.download_voices --data-dir ~/piper_models en_US-lessac-high")
+            if self._piper_voice is None or self._piper_model_path != self.model_path:
+                self._piper_voice = PiperVoice.load(self.model_path)
+                self._piper_model_path = self.model_path
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temporary:
+                wav_path = temporary.name
+            try:
+                with wave.open(wav_path, "wb") as wav_file:
+                    self._piper_voice.synthesize_wav(text, wav_file)
+                playback = subprocess.run(["aplay", "-q", wav_path], capture_output=True, text=True, timeout=60)
+                if playback.returncode != 0:
+                    raise RuntimeError(f"aplay failed: {playback.stderr[:200]}")
+            finally:
+                if os.path.exists(wav_path):
+                    os.unlink(wav_path)
 
             self._speaking = False
             self._last_result = "Speech completed"
+            self._finished_pub.publish(String(data="completed"))
             self._diagnostics.force_update()
             return True, "spoken"
         except FileNotFoundError as e:

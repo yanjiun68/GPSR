@@ -16,6 +16,14 @@ def generate_launch_description() -> LaunchDescription:
     start_stt = LaunchConfiguration("start_stt")
     start_tts = LaunchConfiguration("start_tts")
     enable_vad_utterance = LaunchConfiguration("enable_vad_utterance")
+    whisper_model = LaunchConfiguration("whisper_model")
+    whisper_language = LaunchConfiguration("whisper_language")
+    whisper_device = LaunchConfiguration("whisper_device")
+    piper_model_path = LaunchConfiguration("piper_model_path")
+    post_tts_guard_ms = LaunchConfiguration("post_tts_guard_ms")
+    vad_start_ratio = LaunchConfiguration("vad_start_ratio")
+    vad_continue_ratio = LaunchConfiguration("vad_continue_ratio")
+    vad_start_consecutive_frames = LaunchConfiguration("vad_start_consecutive_frames")
     vad_partial_update_ms = LaunchConfiguration("vad_partial_update_ms")
     vad_rolling_context_sec = LaunchConfiguration("vad_rolling_context_sec")
     vad_end_silence_ms = LaunchConfiguration("vad_end_silence_ms")
@@ -34,6 +42,13 @@ def generate_launch_description() -> LaunchDescription:
                     enable_vad_utterance,
                     value_type=bool,
                 ),
+                "whisper_model": whisper_model,
+                "whisper_language": whisper_language,
+                "whisper_device": whisper_device,
+                "post_tts_guard_ms": ParameterValue(post_tts_guard_ms, value_type=int),
+                "vad_start_ratio": ParameterValue(vad_start_ratio, value_type=float),
+                "vad_continue_ratio": ParameterValue(vad_continue_ratio, value_type=float),
+                "vad_start_consecutive_frames": ParameterValue(vad_start_consecutive_frames, value_type=int),
                 "vad_partial_update_ms": ParameterValue(
                     vad_partial_update_ms,
                     value_type=int,
@@ -57,6 +72,7 @@ def generate_launch_description() -> LaunchDescription:
         name="voice_tts",
         output="screen",
         condition=IfCondition(start_tts),
+        parameters=[{"piper_model_path": piper_model_path}],
     )
 
     # Section: Return launch controls before the processes that consume them.
@@ -67,6 +83,14 @@ def generate_launch_description() -> LaunchDescription:
                 default_value="true",
                 description="Start the voice STT node.",
             ),
+            DeclareLaunchArgument("whisper_model", default_value="turbo", description="OpenAI Whisper model name."),
+            DeclareLaunchArgument("whisper_language", default_value="en", description="Whisper language hint."),
+            DeclareLaunchArgument("whisper_device", default_value="cuda", description="Whisper device: cuda, cpu, or auto."),
+            DeclareLaunchArgument("piper_model_path", default_value="~/piper_models/en_US-lessac-high.onnx", description="Piper high-quality voice model path."),
+            DeclareLaunchArgument("post_tts_guard_ms", default_value="400", description="STT echo-suppression time after TTS playback."),
+            DeclareLaunchArgument("vad_start_ratio", default_value="0.60", description="Minimum voiced 10 ms ratio to begin VAD."),
+            DeclareLaunchArgument("vad_continue_ratio", default_value="0.30", description="Minimum voiced 10 ms ratio to continue VAD."),
+            DeclareLaunchArgument("vad_start_consecutive_frames", default_value="2", description="Consecutive VAD blocks required to start an utterance."),
             DeclareLaunchArgument(
                 "start_tts",
                 default_value="true",

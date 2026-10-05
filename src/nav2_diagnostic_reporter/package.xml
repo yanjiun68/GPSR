@@ -1,0 +1,27 @@
+<?xml version="1.0"?>
+<!-- Section: Standalone Nav2 diagnostic proxy package metadata. -->
+<package format="3">
+  <name>nav2_diagnostic_reporter</name>
+  <version>0.1.0</version>
+  <description>Diagnoses Nav2 navigation failures and proxies NavigateToPose goals.</description>
+  <maintainer email="yanjiun68@example.com">yanjiun68</maintainer>
+  <license>Apache-2.0</license>
+  <!-- Section: Python package build tooling. -->
+  <buildtool_depend>ament_python</buildtool_depend>
+  <!-- Section: ROS interfaces used by the reporter. -->
+  <exec_depend>action_msgs</exec_depend>
+  <exec_depend>diagnostic_msgs</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>nav2_msgs</exec_depend>
+  <exec_depend>nav_msgs</exec_depend>
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+  <exec_depend>tf2_geometry_msgs</exec_depend>
+  <exec_depend>tf2_ros</exec_depend>
+  <exec_depend>voice</exec_depend>
+  <exec_depend>voice_interfaces</exec_depend>
+  <exec_depend>my_robot_nav</exec_depend>
+  <!-- Section: Test runtime dependency. -->
+  <test_depend>pytest</test_depend>
+  <export><build_type>ament_python</build_type></export>
+</package>

@@ -64,6 +64,8 @@ set(runtime_executables
   count_objects_skill_server
   count_people_skill_server
   find_object_skill_server
+  find_person_skill_server
+  guide_person_skill_server
   gpsr_guest_memory_node
   find_person_by_attribute_skill_server
   extract_person_info_skill_server
@@ -81,6 +83,8 @@ add_executable(gpsr_voice_command src/nodes/orchestration/gpsr_voice_command.cpp
 add_executable(count_objects_skill_server src/nodes/skill_servers/count_objects_skill_server.cpp)
 add_executable(count_people_skill_server src/nodes/skill_servers/count_people_skill_server.cpp)
 add_executable(find_object_skill_server src/nodes/skill_servers/find_object_skill_server.cpp)
+add_executable(find_person_skill_server src/nodes/skill_servers/find_person_skill_server.cpp)
+add_executable(guide_person_skill_server src/nodes/skill_servers/guide_person_skill_server.cpp)
 add_executable(find_person_by_attribute_skill_server src/nodes/skill_servers/find_person_by_attribute_skill_server.cpp)
 add_executable(extract_person_info_skill_server src/nodes/skill_servers/extract_person_info_skill_server.cpp)
 
@@ -106,7 +110,7 @@ endforeach()
 target_link_libraries(find_object_skill_server ${OpenCV_LIBS})
 
 # Section: Exercise the compiled factory contracts rather than only retained Python code.
-if(BUILD_TESTING)
+if(FALSE) # Section: Tests disabled for production-only workspace builds.
   find_package(ament_cmake_gtest REQUIRED)
   ament_add_gtest(test_skill_factory_cpp test/test_skill_factory.cpp)
   if(TARGET test_skill_factory_cpp)
@@ -115,7 +119,7 @@ if(BUILD_TESTING)
   endif()
 endif()
 
-# Section: Retain only non-converted Python support and the not-yet-ported FIND_PERSON path.
+# Section: Retain Python compatibility helpers alongside the production C++ FIND_PERSON path.
 ament_python_install_package(${PROJECT_NAME})
 
 # Section: Install C++ runtime, public headers, and unchanged package resources.

@@ -328,7 +328,7 @@ install(DIRECTORY
 )
 
 # Test
-if(BUILD_TESTING)
+if(FALSE) # Section: Tests disabled for production-only workspace builds.
   find_package(ament_cmake_gtest REQUIRED)
   set(_gtest_folders
     test

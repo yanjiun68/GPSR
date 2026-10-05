@@ -9,17 +9,20 @@
 #include <chrono>
 #include <cmath>
 #include <condition_variable>
+#include <future>
 #include <limits>
 #include <map>
 #include <memory>
 #include <mutex>
 #include <nlohmann/json.hpp>
+#include <nav2_msgs/action/spin.hpp>
 #include <optional>
 #include <putrabot_interfaces/msg/object_detections.hpp>
 #include <rclcpp/executors/multi_threaded_executor.hpp>
 #include <rclcpp_action/rclcpp_action.hpp>
 #include <rclcpp_lifecycle/lifecycle_node.hpp>
 #include <robot_ai_interfaces/action/find_object.hpp>
+#include <robot_ai_interfaces/action/navigate_named_pose.hpp>
 #include <set>
 #include <std_msgs/msg/bool.hpp>
 #include <std_msgs/msg/string.hpp>
@@ -31,6 +34,8 @@ namespace robot_yasmin_tasks {
 
 using Action = robot_ai_interfaces::action::FindObject;
 using GoalHandle = rclcpp_action::ServerGoalHandle<Action>;
+using NavigateNamedPose = robot_ai_interfaces::action::NavigateNamedPose;
+using Spin = nav2_msgs::action::Spin;
 using Detection = putrabot_interfaces::msg::ObjectDetection;
 using DetectionArray = putrabot_interfaces::msg::ObjectDetections;
 using Json = nlohmann::json;
@@ -82,6 +87,8 @@ class FindObjectServer final : public rclcpp_lifecycle::LifecycleNode {
     declare_parameter<std::string>("detector_query_topic",
                                    "/perception/object_detector_query");
     declare_parameter<std::string>("search_config_file", "");
+    declare_parameter<bool>("enable_navigation", true);
+    declare_parameter<double>("camera_horizontal_fov_deg", 69.4);
     declare_parameter<std::string>("object_knowledge_file", "");
     declare_parameter<double>("default_timeout_sec", 300.0);
     rclcpp::QoS qos(1);
@@ -97,6 +104,7 @@ class FindObjectServer final : public rclcpp_lifecycle::LifecycleNode {
     default_timeout_sec_ =
         std::max(0.1, get_parameter("default_timeout_sec").as_double());
     if (!load_object_knowledge()) return CallbackReturn::FAILURE;
+    if (!load_search_policy()) return CallbackReturn::FAILURE;
     detection_subscription_ = create_subscription<DetectionArray>(
         get_parameter("detections_topic").as_string(), rclcpp::SensorDataQoS(),
         std::bind(&FindObjectServer::detections_callback, this, std::placeholders::_1));
@@ -109,6 +117,11 @@ class FindObjectServer final : public rclcpp_lifecycle::LifecycleNode {
     // waiting for fresh frames.
     detector_query_publisher_ = create_publisher<std_msgs::msg::String>(
         get_parameter("detector_query_topic").as_string(), 10);
+    // Section: Reuse the already-running named-waypoint and Nav2 spin servers.
+    named_navigation_client_ = rclcpp_action::create_client<NavigateNamedPose>(
+        this, get_parameter("named_navigation_action").as_string());
+    spin_client_ = rclcpp_action::create_client<Spin>(
+        this, get_parameter("spin_action").as_string());
     action_server_ = rclcpp_action::create_server<Action>(
         this, get_parameter("action_name").as_string(),
         std::bind(&FindObjectServer::admit, this, std::placeholders::_1,
@@ -149,6 +162,29 @@ class FindObjectServer final : public rclcpp_lifecycle::LifecycleNode {
   }
 
  private:
+  // Special class: Release the one-mission admission lock on every worker exit path.
+  class BusyResetGuard final {
+   public:
+    // Special function: Retain the server whose lock and status must be restored.
+    explicit BusyResetGuard(FindObjectServer *server) : server_(server) {}
+
+    // Special function: Clear the mission lock even during stack unwinding.
+    ~BusyResetGuard() noexcept {
+      // Section: A completed, canceled, or failed worker must never block later goals.
+      server_->busy_.store(false);
+      try {
+        // Section: Replace stale constructor-only IDLE status with the current availability.
+        server_->publish_status("IDLE", nullptr, 0.0, false, -1, "", "");
+      } catch (...) {
+        // Section: A status publication failure must not prevent lock cleanup.
+      }
+    }
+
+   private:
+    // Section: The owning lifecycle server remains alive while its worker thread runs.
+    FindObjectServer *server_;
+  };
+
   // Special function: Load canonical labels, aliases, categories, and wildcard targets.
   bool load_object_knowledge() {
     // Section: Resolve the installed knowledge file when launch does not override it.
@@ -206,6 +242,187 @@ class FindObjectServer final : public rclcpp_lifecycle::LifecycleNode {
       return false;
     }
     return !object_aliases_.empty();
+  }
+
+  // Special function: Load named viewpoints and relative scan headings from policy.
+  bool load_search_policy() {
+    // Section: Resolve the installed search policy when launch does not override it.
+    auto path = get_parameter("search_config_file").as_string();
+    if (path.empty()) {
+      path = ament_index_cpp::get_package_share_directory("robot_yasmin_tasks") +
+             "/config/find_object_search.yaml";
+    }
+    room_viewpoints_.clear();
+    global_viewpoints_.clear();
+    scan_angles_deg_.clear();
+    try {
+      const auto root = YAML::LoadFile(path);
+      const auto rooms = root["rooms"];
+      for (const auto &entry : rooms) {
+        std::vector<std::string> viewpoints;
+        for (const auto &viewpoint : entry.second["viewpoints"])
+          viewpoints.push_back(clean_symbol(viewpoint.as<std::string>()));
+        // Section: Preserve the policy's YAML order for GLOBAL physical search.
+        global_viewpoints_.insert(global_viewpoints_.end(), viewpoints.begin(),
+                                  viewpoints.end());
+        room_viewpoints_[clean_symbol(entry.first.as<std::string>())] = viewpoints;
+      }
+      const auto angles = root["scan"]["fast_angles_deg"];
+      for (const auto &angle : angles) scan_angles_deg_.push_back(angle.as<double>());
+      if (scan_angles_deg_.empty()) scan_angles_deg_.push_back(0.0);
+      navigation_server_timeout_sec_ = root["navigation"]["server_timeout_sec"]
+                                            ? root["navigation"]["server_timeout_sec"].as<double>() : 5.0;
+      navigation_result_timeout_sec_ = root["navigation"]["result_timeout_sec"]
+                                            ? root["navigation"]["result_timeout_sec"].as<double>() : 120.0;
+      scan_action_timeout_sec_ = root["scan"]["action_timeout_sec"]
+                                     ? root["scan"]["action_timeout_sec"].as<double>() : 20.0;
+      confirmation_timeout_sec_ = root["verification"]["confirmation_timeout_sec"]
+                                      ? root["verification"]["confirmation_timeout_sec"].as<double>() : 3.0;
+      local_scan_step_deg_ = root["scan"]["local_step_deg"]
+                                  ? root["scan"]["local_step_deg"].as<double>() : 15.0;
+      local_scan_max_yaw_deg_ = root["scan"]["local_max_yaw_deg"]
+                                     ? root["scan"]["local_max_yaw_deg"].as<double>() : 360.0;
+    } catch (const std::exception &error) {
+      RCLCPP_ERROR(get_logger(), "Unable to load FindObject search policy '%s': %s",
+                   path.c_str(), error.what());
+      return false;
+    }
+    return !room_viewpoints_.empty();
+  }
+
+  // Special function: Resolve strict or global object-search waypoints from policy.
+  std::vector<std::string> search_viewpoints(const Action::Goal &goal) const {
+    // Section: A strict location selects only that configured room's viewpoints.
+    if (goal.search_scope == "STRICT_LOCATION" ||
+        (goal.search_scope.empty() && !goal.location.empty())) {
+      const auto found = room_viewpoints_.find(clean_symbol(goal.location));
+      return found == room_viewpoints_.end() ? std::vector<std::string>{} : found->second;
+    }
+    // Section: Global search preserves the configured room order.
+    return global_viewpoints_;
+  }
+
+  // Special function: Execute one existing named-waypoint action with bounded waits.
+  bool navigate_to_viewpoint(const std::string &viewpoint) {
+    // Section: Fail clearly when the external navigation stack is unavailable.
+    if (!named_navigation_client_ || !named_navigation_client_->wait_for_action_server(
+                                        std::chrono::duration<double>(navigation_server_timeout_sec_)))
+      return false;
+    NavigateNamedPose::Goal navigation_goal;
+    navigation_goal.target_name = viewpoint;
+    auto goal_future = named_navigation_client_->async_send_goal(navigation_goal);
+    if (goal_future.wait_for(std::chrono::duration<double>(navigation_server_timeout_sec_)) != std::future_status::ready)
+      return false;
+    const auto handle = goal_future.get();
+    if (!handle) return false;
+    auto result_future = named_navigation_client_->async_get_result(handle);
+    if (result_future.wait_for(std::chrono::duration<double>(navigation_result_timeout_sec_)) != std::future_status::ready) {
+      named_navigation_client_->async_cancel_goal(handle);
+      return false;
+    }
+    const auto result = result_future.get();
+    return result.code == rclcpp_action::ResultCode::SUCCEEDED && result.result &&
+           result.result->success;
+  }
+
+  // Special function: Rotate the robot through one relative observation heading.
+  bool spin_by(const double yaw_radians) {
+    // Section: A zero heading is already covered by the arrival orientation.
+    if (std::abs(yaw_radians) < 1e-6) return true;
+    if (!spin_client_ || !spin_client_->wait_for_action_server(
+                           std::chrono::duration<double>(navigation_server_timeout_sec_)))
+      return false;
+    Spin::Goal spin_goal;
+    spin_goal.target_yaw = static_cast<float>(yaw_radians);
+    spin_goal.time_allowance = rclcpp::Duration::from_seconds(scan_action_timeout_sec_);
+    auto goal_future = spin_client_->async_send_goal(spin_goal);
+    if (goal_future.wait_for(std::chrono::duration<double>(navigation_server_timeout_sec_)) != std::future_status::ready)
+      return false;
+    const auto handle = goal_future.get();
+    if (!handle) return false;
+    auto result_future = spin_client_->async_get_result(handle);
+    return result_future.wait_for(std::chrono::duration<double>(scan_action_timeout_sec_ + 5.0)) == std::future_status::ready &&
+           result_future.get().code == rclcpp_action::ResultCode::SUCCEEDED;
+  }
+
+  // Special function: Generate bounded local-search headings for a full in-place sweep.
+  std::vector<double> local_scan_headings() const {
+    // Section: Clamp malformed policy values so one goal cannot request unbounded motion.
+    const auto step = std::clamp(local_scan_step_deg_, 5.0, 90.0);
+    const auto maximum = std::clamp(local_scan_max_yaw_deg_, step, 360.0);
+    std::vector<double> headings;
+    for (double heading = 0.0; heading < maximum; heading += step)
+      headings.push_back(heading);
+    return headings.empty() ? std::vector<double>{0.0} : headings;
+  }
+
+  // Special function: Convert a target's image displacement into a small base-facing yaw.
+  double target_facing_yaw(const Detection &detection) const {
+    // Section: REP-103 positive yaw turns left, whereas positive image-u lies right.
+    if (detection.image_width <= 0) return 0.0;
+    const auto normalized_offset = (2.0 * detection.center_u /
+                                    static_cast<double>(detection.image_width)) - 1.0;
+    const auto half_fov = std::clamp(get_parameter("camera_horizontal_fov_deg").as_double(),
+                                     1.0, 179.0) * M_PI / 360.0;
+    return -std::atan(normalized_offset * std::tan(half_fov));
+  }
+
+  // Special structure: Return target evidence and perception health from one stationary look.
+  struct Observation final {
+    std::optional<Detection> detection;
+    bool saw_frame{false};
+  };
+
+  // Special function: Confirm a target from fresh frames while stationary at one viewpoint.
+  Observation observe_target(const std::shared_ptr<GoalHandle> &goal_handle,
+                             const Action::Goal &goal,
+                             const std::set<std::string> &labels, const bool wildcard,
+                             const Json &query,
+                             const std::chrono::steady_clock::time_point deadline,
+                             const std::string &room,
+                             const std::string &viewpoint) {
+    // Section: Each scan heading starts with fresh detector frames and stable evidence.
+    Observation observation;
+    std::uint64_t cursor = sequence_;
+    unsigned hits = 0;
+    std::string last_candidate_key;
+    const auto started = std::chrono::steady_clock::now();
+    while (std::chrono::steady_clock::now() < deadline && active_.load() &&
+           !goal_handle->is_canceling()) {
+      std::vector<Detection> frame;
+      {
+        std::unique_lock<std::mutex> lock(mutex_);
+        condition_.wait_for(lock, std::chrono::milliseconds(100), [this, cursor]() {
+          return sequence_ > cursor || !active_.load();
+        });
+        if (sequence_ <= cursor) continue;
+        cursor = sequence_;
+        frame = detections_;
+      }
+      observation.saw_frame = true;
+      const auto candidate = select_frame_candidate(frame, labels, wildcard, query);
+      if (candidate) {
+        const auto key = candidate_key(*candidate);
+        hits = key == last_candidate_key ? hits + 1U : 1U;
+        last_candidate_key = key;
+        observation.detection = candidate;
+      } else {
+        hits = 0;
+        last_candidate_key.clear();
+      }
+      auto feedback = std::make_shared<Action::Feedback>();
+      feedback->phase = observation.detection ? "VERIFYING" : "SEARCHING";
+      feedback->current_room = room;
+      feedback->current_viewpoint = viewpoint;
+      feedback->candidate_confidence = observation.detection ? observation.detection->confidence : 0.0F;
+      feedback->elapsed_sec = static_cast<float>(std::chrono::duration<double>(
+          std::chrono::steady_clock::now() - started).count());
+      goal_handle->publish_feedback(feedback);
+      publish_status(feedback->phase, &goal, feedback->candidate_confidence, false, -1);
+      if (hits >= 3U) return observation;
+    }
+    observation.detection.reset();
+    return observation;
   }
 
   // Special function: Resolve object/category symbols into detector labels and wildcard
@@ -526,28 +743,90 @@ class FindObjectServer final : public rclcpp_lifecycle::LifecycleNode {
     std::lock_guard<std::mutex> lock(mutex_);
     detections_ = message->detections;
     ++sequence_;
+    ++detection_frame_count_;
+    last_detection_time_ = std::chrono::steady_clock::now();
     condition_.notify_all();
   }
 
   // Special function: Track the detector's transient-local live-inference readiness.
   void ready_callback(const std_msgs::msg::Bool::SharedPtr message) {
     detector_ready_.store(message->data);
+    // Section: Retain readiness delivery evidence separately from its latest value.
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      ++ready_message_count_;
+      last_ready_time_ = std::chrono::steady_clock::now();
+    }
     condition_.notify_all();
+  }
+
+  // Special function: Build actionable detector-wiring evidence for terminal reports.
+  Json perception_diagnostics(const std::uint64_t frames_at_goal_start,
+                              const bool observation_attempted) {
+    // Section: Snapshot callback-owned timestamps under the same lock used for frames.
+    std::optional<std::chrono::steady_clock::time_point> last_detection;
+    std::optional<std::chrono::steady_clock::time_point> last_ready;
+    std::uint64_t ready_messages = 0;
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      last_detection = last_detection_time_;
+      last_ready = last_ready_time_;
+      ready_messages = ready_message_count_;
+    }
+    const auto now = std::chrono::steady_clock::now();
+    const auto age_seconds = [&now](const auto &time) -> Json {
+      return time ? Json(std::chrono::duration<double>(now - *time).count()) : Json(nullptr);
+    };
+    // Section: Include endpoint counts to distinguish missing publishers from stale streams.
+    return Json{{"detector_ready", detector_ready_.load()},
+                {"ready_messages_received", ready_messages},
+                {"detection_frames_received", detection_frame_count_.load()},
+                {"detection_frames_during_goal",
+                 detection_frame_count_.load() - frames_at_goal_start},
+                {"last_ready_age_sec", age_seconds(last_ready)},
+                {"last_detection_age_sec", age_seconds(last_detection)},
+                {"observation_attempted", observation_attempted},
+                {"ready_topic", get_parameter("detector_ready_topic").as_string()},
+                {"detections_topic", get_parameter("detections_topic").as_string()},
+                {"ready_publishers", ready_subscription_ ? ready_subscription_->get_publisher_count() : 0U},
+                {"detection_publishers", detection_subscription_ ? detection_subscription_->get_publisher_count() : 0U}};
   }
 
   // Special function: Reject malformed, inactive, or concurrent object missions.
   rclcpp_action::GoalResponse admit(const rclcpp_action::GoalUUID &,
                                     const std::shared_ptr<const Action::Goal> goal) {
+    // Section: Resolve the implicit default scope before validating goal routing.
     const auto scope = goal->search_scope.empty()
                            ? (goal->location.empty() ? "GLOBAL" : "STRICT_LOCATION")
                            : goal->search_scope;
-    if ((!goal->object_name.empty() || !goal->category.empty()) &&
-        (scope == "GLOBAL" ||
-         (scope == "STRICT_LOCATION" && !goal->location.empty())) &&
-        active_.load() && !busy_.exchange(true)) {
-      return rclcpp_action::GoalResponse::ACCEPT_AND_EXECUTE;
+    // Section: Reject goals that cannot identify any target object or category.
+    if (goal->object_name.empty() && goal->category.empty()) {
+      RCLCPP_WARN(get_logger(), "Rejected FindObject goal: object_name and category are empty.");
+      publish_status("REJECTED", goal.get(), 0.0, true, -1, "", "EMPTY_TARGET");
+      return rclcpp_action::GoalResponse::REJECT;
     }
-    return rclcpp_action::GoalResponse::REJECT;
+    // Section: LOCAL searches rotate at the current pose; strict searches need a room.
+    if (scope != "LOCAL" && scope != "GLOBAL" &&
+        !(scope == "STRICT_LOCATION" && !goal->location.empty())) {
+      RCLCPP_WARN(get_logger(), "Rejected FindObject goal: invalid scope or missing location.");
+      publish_status("REJECTED", goal.get(), 0.0, true, -1, "", "INVALID_SCOPE");
+      return rclcpp_action::GoalResponse::REJECT;
+    }
+    // Section: Accept action work only while the lifecycle server is ACTIVE.
+    if (!active_.load()) {
+      RCLCPP_WARN(get_logger(), "Rejected FindObject goal: lifecycle server is inactive.");
+      publish_status("REJECTED", goal.get(), 0.0, true, -1, "", "INACTIVE");
+      return rclcpp_action::GoalResponse::REJECT;
+    }
+    // Section: Atomically acquire exclusive ownership for exactly one mission worker.
+    bool expected_busy = false;
+    if (!busy_.compare_exchange_strong(expected_busy, true)) {
+      RCLCPP_WARN(get_logger(), "Rejected FindObject goal: another mission is running.");
+      publish_status("REJECTED", goal.get(), 0.0, true, -1, "", "BUSY");
+      return rclcpp_action::GoalResponse::REJECT;
+    }
+    // Section: The accepted worker now owns the guard that will release this lock.
+    return rclcpp_action::GoalResponse::ACCEPT_AND_EXECUTE;
   }
 
   // Special function: Move the bounded perception mission off executor callback
@@ -559,104 +838,197 @@ class FindObjectServer final : public rclcpp_lifecycle::LifecycleNode {
   // Special function: Confirm the selected semantic target across a sliding frame
   // window.
   void execute(const std::shared_ptr<GoalHandle> goal_handle) {
+    // Section: Capture the immutable goal before entering the exception-safe worker body.
     const auto goal = goal_handle->get_goal();
-    bool wildcard = false;
-    const auto labels = target_labels(*goal, wildcard);
-    // Section: The action goal is the sole source of the active Qwen target/query for
-    // this mission.
-    const auto query = query_from_goal(*goal);
-    publish_detector_query(query);
-    const auto timeout =
-        goal->timeout_sec > 0.0F ? goal->timeout_sec : default_timeout_sec_;
-    const auto started = std::chrono::steady_clock::now();
-    const auto deadline = started + std::chrono::duration<double>(timeout);
-    publish_status("GOAL_ACCEPTED", goal.get(), 0.0, false, -1);
-    std::uint64_t cursor = 0;
-    unsigned hits = 0;
-    std::optional<Detection> best;
-    std::string last_candidate_key;
-    while (std::chrono::steady_clock::now() < deadline && active_.load() &&
-           !goal_handle->is_canceling()) {
-      std::vector<Detection> frame;
-      {
-        std::unique_lock<std::mutex> lock(mutex_);
-        condition_.wait_for(lock, std::chrono::milliseconds(100), [this, cursor]() {
-          return sequence_ > cursor || !active_.load();
-        });
-        if (sequence_ <= cursor) continue;
-        cursor = sequence_;
-        frame = detections_;
+    // Section: Ensure every normal or exceptional worker exit releases busy_.
+    const BusyResetGuard busy_reset(this);
+    try {
+      bool wildcard = false;
+      const auto labels = target_labels(*goal, wildcard);
+      // Section: The action goal is the sole source of the active Qwen target/query for
+      // this mission.
+      const auto query = query_from_goal(*goal);
+      publish_detector_query(query);
+      const auto timeout =
+          goal->timeout_sec > 0.0F ? goal->timeout_sec : default_timeout_sec_;
+      // Section: Measure fresh detector traffic only after this action goal begins.
+      const auto frames_at_goal_start = detection_frame_count_.load();
+      const auto started = std::chrono::steady_clock::now();
+      const auto deadline = started + std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+                                          std::chrono::duration<double>(timeout));
+      publish_status("GOAL_ACCEPTED", goal.get(), 0.0, false, -1);
+      std::optional<Detection> best;
+      bool saw_frame = false;
+      bool observation_attempted = false;
+      bool facing_succeeded = true;
+      unsigned navigation_failures = 0;
+      std::string found_viewpoint;
+      std::string found_room;
+      std::vector<std::string> viewpoints_searched;
+      const bool navigation_enabled = get_parameter("enable_navigation").as_bool();
+      const bool local_scan_only = goal->search_scope == "LOCAL";
+      // Section: LOCAL retains Nav2 Spin but deliberately skips named-waypoint travel.
+      const bool waypoint_navigation_enabled = navigation_enabled && !local_scan_only;
+      auto viewpoints = waypoint_navigation_enabled ? search_viewpoints(*goal)
+                                                    : std::vector<std::string>{"current_pose"};
+      if (waypoint_navigation_enabled && !goal->preferred_viewpoint.empty()) {
+        const auto preferred = clean_symbol(goal->preferred_viewpoint);
+        viewpoints.erase(std::remove(viewpoints.begin(), viewpoints.end(), preferred),
+                        viewpoints.end());
+        viewpoints.insert(viewpoints.begin(), preferred);
       }
-      // Section: The unified selector applies semantic labels, characteristics,
-      // relations, and extremes.
-      const auto frame_best = select_frame_candidate(frame, labels, wildcard, query);
-      if (frame_best) {
-        const auto frame_candidate_key = candidate_key(*frame_best);
-        hits = frame_candidate_key == last_candidate_key ? hits + 1U : 1U;
-        last_candidate_key = frame_candidate_key;
-        best = frame_best;
-      } else {
-        hits = 0;
-        last_candidate_key.clear();
+      for (const auto &viewpoint : viewpoints) {
+        if (std::chrono::steady_clock::now() >= deadline || !active_.load() ||
+            goal_handle->is_canceling()) break;
+        const auto room = waypoint_navigation_enabled ? clean_symbol(goal->location) : "";
+        if (waypoint_navigation_enabled) {
+          publish_status("NAVIGATING", goal.get(), 0.0, false, -1);
+          if (!navigate_to_viewpoint(viewpoint)) {
+            ++navigation_failures;
+            continue;
+          }
+          viewpoints_searched.push_back(viewpoint);
+        } else if (local_scan_only) {
+          // Section: Report the current-pose scan as a searched viewpoint.
+          viewpoints_searched.push_back(viewpoint);
+        }
+        double last_angle_deg = 0.0;
+        // Section: LOCAL performs a complete incremental sweep; other scopes retain
+        // the configured short waypoint scan.
+        const auto headings = local_scan_only ? local_scan_headings() : scan_angles_deg_;
+        for (const auto angle_deg : headings) {
+          if (std::chrono::steady_clock::now() >= deadline || !active_.load() ||
+              goal_handle->is_canceling()) break;
+          // Section: Nav2 Spin consumes a relative yaw, while policy headings are
+          // offsets from the waypoint arrival orientation.
+          if (navigation_enabled && !spin_by((angle_deg - last_angle_deg) * M_PI / 180.0)) {
+            ++navigation_failures;
+            break;
+          }
+          last_angle_deg = angle_deg;
+          observation_attempted = true;
+          const auto observation_deadline = navigation_enabled
+              ? std::min(deadline, std::chrono::steady_clock::now() +
+                    std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+                        std::chrono::duration<double>(confirmation_timeout_sec_)))
+              : deadline;
+          const auto observation = observe_target(goal_handle, *goal, labels, wildcard,
+                                                  query, observation_deadline, room,
+                                                  viewpoint);
+          saw_frame = saw_frame || observation.saw_frame;
+          if (observation.detection) {
+            best = observation.detection;
+            found_viewpoint = viewpoint;
+            found_room = room;
+            break;
+          }
+        }
+        if (best) break;
       }
-      const auto elapsed =
-          std::chrono::duration<double>(std::chrono::steady_clock::now() - started)
-              .count();
-      auto feedback = std::make_shared<Action::Feedback>();
-      feedback->phase = best ? "VERIFYING" : "SEARCHING";
-      feedback->current_room = goal->location;
-      feedback->candidate_confidence = best ? best->confidence : 0.0F;
-      feedback->elapsed_sec = static_cast<float>(elapsed);
-      goal_handle->publish_feedback(feedback);
-      publish_status(feedback->phase, goal.get(), feedback->candidate_confidence, false,
-                     -1);
-      if (hits >= 3U) break;
-    }
-    auto result = std::make_shared<Action::Result>();
-    if (goal_handle->is_canceling() || !active_.load()) {
+      // Section: After stable verification, center the target before returning success.
+      if (best && local_scan_only && navigation_enabled) {
+        const auto correction_yaw = target_facing_yaw(*best);
+        if (!spin_by(correction_yaw)) {
+          ++navigation_failures;
+          facing_succeeded = false;
+        }
+      }
+      auto result = std::make_shared<Action::Result>();
+      if (goal_handle->is_canceling() || !active_.load()) {
       result->result_code = Action::Result::CANCELED;
       result->message = "FindObject mission canceled.";
       publish_status("CANCELED", goal.get(), best ? best->confidence : 0.0, true,
                      result->result_code);
       goal_handle->canceled(result);
-    } else if (!detector_ready_.load() || cursor == 0U) {
-      result->result_code = Action::Result::PERCEPTION_FAILED;
-      result->message =
-          "Object perception did not provide ready, fresh detection frames.";
-      publish_status("PERCEPTION_FAILED", goal.get(), 0.0, true, result->result_code);
+      } else if (waypoint_navigation_enabled && !viewpoints.empty() && !observation_attempted) {
+      const auto diagnostics = perception_diagnostics(frames_at_goal_start, false);
+      result->result_code = Action::Result::NAVIGATION_FAILED;
+      result->navigation_failures = navigation_failures;
+      result->viewpoints_searched = viewpoints_searched;
+      result->message = "NAVIGATION_PREVENTED_OBSERVATION: no waypoint scan phase was reached.";
+      publish_status("NAVIGATION_FAILED", goal.get(), 0.0, true, result->result_code, "",
+                     "NAVIGATION_PREVENTED_OBSERVATION", diagnostics);
       goal_handle->abort(result);
-    } else if (!best || hits < 3U) {
+      } else if (!detector_ready_.load() || !saw_frame) {
+      const auto diagnostics = perception_diagnostics(frames_at_goal_start,
+                                                      observation_attempted);
+      result->result_code = Action::Result::PERCEPTION_FAILED;
+      // Section: Report the one failed contract rather than merging readiness and frames.
+      const std::string reason = !detector_ready_.load()
+          ? (diagnostics["ready_messages_received"].get<std::uint64_t>() == 0U
+                 ? "DETECTOR_NOT_READY_NO_READY_MESSAGE"
+                 : "DETECTOR_REPORTED_NOT_READY")
+          : "NO_FRESH_DETECTION_FRAMES";
+      result->message = reason + ": ready_topic=" +
+          diagnostics["ready_topic"].get<std::string>() + ", detections_topic=" +
+          diagnostics["detections_topic"].get<std::string>() + ", detection_frames_during_goal=" +
+          std::to_string(diagnostics["detection_frames_during_goal"].get<std::uint64_t>()) + ".";
+      result->navigation_failures = navigation_failures;
+      result->viewpoints_searched = viewpoints_searched;
+      publish_status("PERCEPTION_FAILED", goal.get(), 0.0, true, result->result_code,
+                     "", reason, diagnostics);
+      goal_handle->abort(result);
+      } else if (!best) {
       result->result_code = Action::Result::NOT_FOUND;
       result->message = "Target was not confirmed before the search deadline.";
+      result->navigation_failures = navigation_failures;
+      result->viewpoints_searched = viewpoints_searched;
       publish_status("NOT_FOUND", goal.get(), best ? best->confidence : 0.0, true,
                      result->result_code);
       goal_handle->succeed(result);
-    } else {
+      } else {
       result->found = true;
       result->approached = false;
-      result->result_code = goal->approach_target ? Action::Result::FOUND_UNREACHABLE
-                                                  : Action::Result::SUCCESS;
+      result->result_code = (goal->approach_target || !facing_succeeded)
+          ? Action::Result::FOUND_UNREACHABLE : Action::Result::SUCCESS;
       result->object_id = clean_symbol(best->name) + "_" +
                           std::to_string(static_cast<int>(best->center_u)) + "_" +
                           std::to_string(static_cast<int>(best->center_v));
-      result->found_room = goal->location;
+      result->found_room = found_room;
+      result->found_viewpoint = found_viewpoint;
+      result->viewpoints_searched = viewpoints_searched;
+      result->navigation_failures = navigation_failures;
       result->selection_json = selection_payload(*best, query).dump();
-      result->message = goal->approach_target
+      result->message = !facing_succeeded
+                            ? "Target verified, but the final target-facing spin failed."
+                            : goal->approach_target
                             ? "Target verified, but approach geometry is not available "
                               "from RGB detections alone."
-                            : "Target verified from the live object detector.";
-      publish_status(goal->approach_target ? "FOUND_UNREACHABLE" : "SUCCESS",
+                            : local_scan_only && navigation_enabled
+                                ? "Target verified and the robot is facing the target."
+                                : "Target verified from the live object detector.";
+      publish_status((goal->approach_target || !facing_succeeded) ? "FOUND_UNREACHABLE" : "SUCCESS",
                      goal.get(), best->confidence, true, result->result_code,
                      result->object_id);
       goal_handle->succeed(result);
+      }
+    } catch (const std::exception &error) {
+      // Section: Convert unexpected worker failures into a terminal action result.
+      RCLCPP_ERROR(get_logger(), "FindObject worker failed: %s", error.what());
+      auto result = std::make_shared<Action::Result>();
+      result->result_code = Action::Result::PERCEPTION_FAILED;
+      result->message = std::string("FindObject worker failed: ") + error.what();
+      publish_status("INTERNAL_ERROR", goal.get(), 0.0, true, result->result_code, "",
+                     error.what());
+      goal_handle->abort(result);
+    } catch (...) {
+      // Section: Preserve server availability for non-standard worker failures.
+      RCLCPP_ERROR(get_logger(), "FindObject worker failed with an unknown exception.");
+      auto result = std::make_shared<Action::Result>();
+      result->result_code = Action::Result::PERCEPTION_FAILED;
+      result->message = "FindObject worker failed with an unknown exception.";
+      publish_status("INTERNAL_ERROR", goal.get(), 0.0, true, result->result_code, "",
+                     "UNKNOWN_EXCEPTION");
+      goal_handle->abort(result);
     }
-    busy_.store(false);
   }
 
   // Special function: Publish the transient target-state JSON contract for observers.
   void publish_status(const std::string &phase, const Action::Goal *goal,
                       const double confidence, const bool terminal,
-                      const int result_code, const std::string &object_id = "") {
+                      const int result_code, const std::string &object_id = "",
+                      const std::string &reason = "",
+                      const Json &diagnostics = Json::object()) {
     Json payload{{"phase", phase},
                  {"target_name", goal ? clean_symbol(goal->object_name) : ""},
                  {"category", goal ? clean_symbol(goal->category) : ""},
@@ -670,7 +1042,10 @@ class FindObjectServer final : public rclcpp_lifecycle::LifecycleNode {
                  {"found_room", terminal && goal ? clean_symbol(goal->location) : ""},
                  {"found_viewpoint", ""},
                  {"result_code", result_code},
-                 {"terminal", terminal}};
+                 {"terminal", terminal},
+                 {"busy", busy_.load()},
+                 {"reason", reason},
+                 {"diagnostics", diagnostics}};
     std_msgs::msg::String message;
     message.data = payload.dump();
     status_publisher_->publish(message);
@@ -682,9 +1057,15 @@ class FindObjectServer final : public rclcpp_lifecycle::LifecycleNode {
     detection_subscription_.reset();
     ready_subscription_.reset();
     detector_query_publisher_.reset();
+    named_navigation_client_.reset();
+    spin_client_.reset();
     std::lock_guard<std::mutex> lock(mutex_);
     detections_.clear();
     sequence_ = 0;
+    detection_frame_count_.store(0);
+    ready_message_count_ = 0;
+    last_detection_time_.reset();
+    last_ready_time_.reset();
     detector_ready_.store(false);
     busy_.store(false);
   }
@@ -697,15 +1078,31 @@ class FindObjectServer final : public rclcpp_lifecycle::LifecycleNode {
   std::map<std::string, std::string> category_aliases_;
   std::map<std::string, std::set<std::string>> category_labels_;
   std::set<std::string> wildcards_;
+  // Section: Search policy state separates strict room lookup from global route order.
+  std::map<std::string, std::vector<std::string>> room_viewpoints_;
+  std::vector<std::string> global_viewpoints_;
+  std::vector<double> scan_angles_deg_;
   double default_timeout_sec_{300.0};
+  double navigation_server_timeout_sec_{5.0};
+  double navigation_result_timeout_sec_{120.0};
+  double scan_action_timeout_sec_{20.0};
+  double confirmation_timeout_sec_{3.0};
+  double local_scan_step_deg_{15.0};
+  double local_scan_max_yaw_deg_{360.0};
   std::mutex mutex_;
   std::condition_variable condition_;
   std::uint64_t sequence_{0};
+  std::atomic_uint64_t detection_frame_count_{0};
+  std::uint64_t ready_message_count_{0};
+  std::optional<std::chrono::steady_clock::time_point> last_detection_time_;
+  std::optional<std::chrono::steady_clock::time_point> last_ready_time_;
   std::vector<Detection> detections_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr status_publisher_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr detector_query_publisher_;
   rclcpp::Subscription<DetectionArray>::SharedPtr detection_subscription_;
   rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr ready_subscription_;
+  rclcpp_action::Client<NavigateNamedPose>::SharedPtr named_navigation_client_;
+  rclcpp_action::Client<Spin>::SharedPtr spin_client_;
   rclcpp_action::Server<Action>::SharedPtr action_server_;
 };
 

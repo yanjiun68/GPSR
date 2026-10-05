@@ -1,4 +1,0 @@
-# Deprecated compatibility shim.
-# Use mapped_follow.yaml for nav_follow_interface tuning.
-/**:
-  ros__parameters: {}

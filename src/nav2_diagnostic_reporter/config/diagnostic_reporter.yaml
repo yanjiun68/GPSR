@@ -1,0 +1,29 @@
+# Section: Defaults aligned with src/m-e/my_robot_nav/config/nav2_params.yaml.
+nav2_diagnostic_reporter:
+  ros__parameters:
+    # Section: Nav2 frames and non-recursive action proxy names.
+    global_frame: map
+    robot_base_frame: base_footprint
+    proxy_action_name: navigate_to_pose_diagnostic
+    nav_action_name: navigate_to_pose
+    planner_action_name: compute_path_to_pose
+    planner_id: GridBased
+
+    # Section: Global costmap source and blocked-cell policy.
+    global_costmap_topic: /global_costmap/costmap_raw
+    lethal_cost: 253
+    unknown_is_blocked: true
+
+    # Section: Bounded readiness and diagnostic preflight timeouts in seconds.
+    tf_timeout_sec: 1.0
+    costmap_timeout_sec: 2.0
+    planner_server_timeout_sec: 2.0
+    planning_timeout_sec: 5.0
+    nav_server_timeout_sec: 2.0
+
+    # Section: Set zero to let Nav2 own execution timing; otherwise this proxy cancels on expiry.
+    navigation_timeout_sec: 0.0
+    cancel_timeout_sec: 2.0
+
+    # Section: Prevent repetitive spoken/user-facing notices while retaining diagnostics.
+    user_message_cooldown_sec: 2.0

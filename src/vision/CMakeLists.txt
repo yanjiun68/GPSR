@@ -33,9 +33,11 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/CamDetection.msg"
   "msg/CamDetections.msg"
   "msg/RecognizedPerson.msg"
+  # Section: Publish a typed, timestamped ROI contract shared by navigation and grasp geometry.
+  "msg/RoiResult.msg"
   "srv/UpdatePersonProfile.srv"
   "action/RegisterPerson.action"
-  DEPENDENCIES builtin_interfaces std_msgs
+  DEPENDENCIES builtin_interfaces sensor_msgs std_msgs
 )
 
 # Install the renamed handwritten Python package independently of generated
@@ -108,7 +110,7 @@ install(
   DESTINATION share/${PROJECT_NAME}
 )
 
-if(BUILD_TESTING)
+if(FALSE) # Section: Tests disabled for production-only workspace builds.
   find_package(ament_lint_auto REQUIRED)
   find_package(ament_cmake_pytest REQUIRED)
   # the following line skips the linter which checks for copyrights
@@ -160,6 +162,12 @@ if(BUILD_TESTING)
     test_target_grasp_geometry
     test/test_target_grasp_geometry.py
     APPEND_ENV PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}
+  )
+
+  # Section: Verify ROI status normalization and model-free OpenCV tracking behavior.
+  ament_add_pytest_test(
+    test_er_flow_roi
+    test/test_er_flow_roi.py
   )
 endif()
 

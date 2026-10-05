@@ -2,10 +2,12 @@
 
 # Section: POSIX file locking prevents multiple STT processes from competing for one microphone.
 import fcntl
+import gc
 import os
 import subprocess
 import threading
 import time
+import wave
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -15,12 +17,20 @@ import numpy as np
 import rclpy
 from diagnostic_msgs.msg import DiagnosticStatus
 from diagnostic_updater import DiagnosticStatusWrapper, Updater
-from faster_whisper import WhisperModel
 from rclpy.action import ActionServer, CancelResponse, GoalResponse
 from rclpy.node import Node
 from std_msgs.msg import Float32, String
 from voice_interfaces.action import TranscribeSpeech
 from voice_interfaces.srv import TranscribeAudio
+
+try:
+    # Section: OpenAI Whisper owns the sole heavyweight STT model in this process.
+    import torch
+    import whisper
+except ImportError:
+    # Section: Keep ROS interfaces alive long enough to return an actionable dependency error.
+    torch = None
+    whisper = None
 
 try:
     # Section: Import WebRTC VAD only for the optional continuous utterance listener.
@@ -94,20 +104,26 @@ class STTNode(Node):
         self.declare_parameter("mic_device", "default")
         self.declare_parameter("record_sec", 4.0)
         self.declare_parameter("wav_path", "/tmp/voice_stt.wav")
-        self.declare_parameter("whisper_model", "base")
+        self.declare_parameter("whisper_model", "turbo")
         self.declare_parameter("whisper_language", "en")
+        self.declare_parameter("whisper_device", "cuda")
+        self.declare_parameter("whisper_no_speech_threshold", 0.60)
+        self.declare_parameter("whisper_logprob_threshold", -1.0)
+        self.declare_parameter("min_rms", 0.003)
+        self.declare_parameter("post_tts_guard_ms", 400)
+        self.declare_parameter("tts_finished_topic", "/voice/tts/finished")
         # Section: Keep continuous VAD transcription opt-in so existing launch behavior is unchanged.
         self.declare_parameter("enable_vad_utterance", False)
         self.declare_parameter("vad_partial_topic", "/voice/stt/partial_transcript")
         self.declare_parameter("vad_final_topic", "/voice/stt/utterance_transcript")
-        self.declare_parameter("vad_whisper_model", "small.en")
-        self.declare_parameter("vad_compute_type", "float16")
-        self.declare_parameter("vad_device", "cuda")
         self.declare_parameter("vad_frame_ms", 100)
         self.declare_parameter("vad_partial_update_ms", 900)
         self.declare_parameter("vad_rolling_context_sec", 5.0)
         self.declare_parameter("vad_end_silence_ms", 600)
         self.declare_parameter("vad_mode", 2)
+        self.declare_parameter("vad_start_ratio", 0.60)
+        self.declare_parameter("vad_continue_ratio", 0.30)
+        self.declare_parameter("vad_start_consecutive_frames", 2)
 
         self.start_topic = self.get_parameter("start_topic").get_parameter_value().string_value
         self.transcript_topic = (
@@ -127,17 +143,23 @@ class STTNode(Node):
         self.whisper_language = (
             self.get_parameter("whisper_language").get_parameter_value().string_value
         )
+        self.whisper_device = self.get_parameter("whisper_device").value.strip().lower()
+        self.no_speech_threshold = float(self.get_parameter("whisper_no_speech_threshold").value)
+        self.logprob_threshold = float(self.get_parameter("whisper_logprob_threshold").value)
+        self.min_rms = float(self.get_parameter("min_rms").value)
+        self.post_tts_guard_sec = max(0.0, float(self.get_parameter("post_tts_guard_ms").value) / 1000.0)
+        self._tts_guard_until = 0.0
         self.enable_vad_utterance = bool(self.get_parameter("enable_vad_utterance").value)
         self.vad_partial_topic = self.get_parameter("vad_partial_topic").value
         self.vad_final_topic = self.get_parameter("vad_final_topic").value
-        self.vad_whisper_model_name = self.get_parameter("vad_whisper_model").value
-        self.vad_compute_type = self.get_parameter("vad_compute_type").value
-        self.vad_device = self.get_parameter("vad_device").value
         self.vad_frame_ms = int(self.get_parameter("vad_frame_ms").value)
         self.vad_partial_update_ms = int(self.get_parameter("vad_partial_update_ms").value)
         self.vad_rolling_context_sec = float(self.get_parameter("vad_rolling_context_sec").value)
         self.vad_end_silence_ms = int(self.get_parameter("vad_end_silence_ms").value)
         self.vad_mode = int(self.get_parameter("vad_mode").value)
+        self.vad_start_ratio = float(self.get_parameter("vad_start_ratio").value)
+        self.vad_continue_ratio = float(self.get_parameter("vad_continue_ratio").value)
+        self.vad_start_consecutive_frames = max(1, int(self.get_parameter("vad_start_consecutive_frames").value))
 
         # Section: Refuse a duplicate STT server before registering duplicate topic, service, and action endpoints.
         self._microphone_capture_lock, owner_pid = acquire_microphone_capture_lock()
@@ -152,10 +174,8 @@ class STTNode(Node):
         # Section: Initialize model and VAD state only after this process owns microphone capture.
         self._whisper_model = None
         self._whisper_model_name = None
-        # Section: Use an isolated model cache because the VAD feature has its own GPU/precision settings.
-        self._vad_whisper_model = None
-        self._vad_whisper_model_name = None
-        self._vad_whisper_model_config = None
+        self._whisper_model_device = None
+        self._whisper_lock = threading.Lock()
         self._vad_stop_event = threading.Event()
         self._vad_thread = None
         self._vad_process = None
@@ -165,6 +185,8 @@ class STTNode(Node):
 
         # Comm
         self.create_subscription(Float32, self.start_topic, self._start_cb, 10)
+        # Section: Suppress microphone acceptance until room reverberation after TTS has decayed.
+        self.create_subscription(String, self.get_parameter("tts_finished_topic").value, self._tts_finished_cb, 10)
         self.pub_transcript = self.create_publisher(String, self.transcript_topic, 10)
         # Section: Keep VAD partial and final results separate from the legacy one-shot transcript topic.
         self.pub_vad_partial = self.create_publisher(String, self.vad_partial_topic, 10)
@@ -200,6 +222,10 @@ class STTNode(Node):
             f"action: {self.action_name}; transcript: {self.transcript_topic}; "
             f"VAD utterance listener: {'enabled' if self.enable_vad_utterance else 'disabled'}"
         )
+        self.get_logger().info(
+            f"[voice_stt] Whisper model: {self.whisper_model_name}; device: {self.whisper_device}; "
+            f"CUDA available: {bool(torch and torch.cuda.is_available())}"
+        )
 
     # --- callbacks ---
     def _start_cb(self, msg: Float32):
@@ -215,6 +241,11 @@ class STTNode(Node):
         )
         if not success:
             self.get_logger().warning(f"[voice_stt] Topic request failed: {message}")
+
+    def _tts_finished_cb(self, _msg: String) -> None:
+        """Special function: Arm the configured post-TTS reverberation guard."""
+        # Section: A monotonic deadline avoids interpreting the robot's own speech as a command.
+        self._tts_guard_until = time.monotonic() + self.post_tts_guard_sec
 
     def _handle_transcribe_service(
         self,
@@ -306,6 +337,10 @@ class STTNode(Node):
                 wav_path,
             )
 
+        # Section: Wait out speaker reverberation before accepting a new microphone request.
+        guard_remaining = self._tts_guard_until - time.monotonic()
+        if guard_remaining > 0:
+            time.sleep(guard_remaining)
         # Section: Publish recording state through diagnostics before blocking on ALSA.
         self._request_count += 1
         self._recording = True
@@ -323,14 +358,14 @@ class STTNode(Node):
             return False, "", self._last_result, wav_path
 
         # Section: Transcribe the recorded file and publish the compatibility transcript topic.
-        transcript = self._transcribe(recorded_wav, whisper_model, whisper_language)
+        transcript, rejection = self._transcribe(recorded_wav, whisper_model, whisper_language)
         self._recording = False
         if transcript:
             self._last_result = "Transcript published"
             message = "Transcription completed"
         else:
             self._failure_count += 1
-            self._last_result = "Transcription returned no text"
+            self._last_result = rejection or "Transcription returned no text"
             message = self._last_result
         self.pub_transcript.publish(String(data=transcript))
         self._diagnostics.force_update()
@@ -391,37 +426,75 @@ class STTNode(Node):
             self.get_logger().warn(f"[voice_stt] Recording failed: {e}")
             return None
 
-    # --- whisper ---
-    def _load_whisper(self, whisper_model: str):
-        """Load and cache the requested faster-whisper model lazily."""
-        # Section: Replace the cached model only when the requested model name changes.
-        if self._whisper_model is None or self._whisper_model_name != whisper_model:
-            self.get_logger().info(f"[voice_stt] Loading faster-whisper model: {whisper_model}")
-            self._whisper_model = WhisperModel(
-                whisper_model,
-                device="cpu",
-                compute_type="int8",
-            )
-            self._whisper_model_name = whisper_model
-        return self._whisper_model
+    # --- OpenAI Whisper ---
+    def _resolve_whisper_device(self) -> str:
+        """Special function: Validate the explicit CUDA, CPU, or automatic execution policy."""
+        # Section: Never silently put the requested CUDA turbo model on CPU.
+        if whisper is None or torch is None:
+            raise RuntimeError("OpenAI Whisper dependencies are missing; install openai-whisper and PyTorch.")
+        if self.whisper_device == "auto":
+            return "cuda" if torch.cuda.is_available() else "cpu"
+        if self.whisper_device not in ("cuda", "cpu"):
+            raise RuntimeError("whisper_device must be cuda, cpu, or auto.")
+        if self.whisper_device == "cuda" and not torch.cuda.is_available():
+            raise RuntimeError("CUDA was requested for Whisper but is unavailable.")
+        return self.whisper_device
 
-    def _transcribe(self, wav_path: str, whisper_model: str, whisper_language: str) -> str:
-        """Convert one recorded WAV file into normalized transcript text."""
-        # Section: Reject missing recordings before loading the inference model.
-        if not os.path.exists(wav_path):
-            return ""
+    def _load_whisper(self, whisper_model: str):
+        """Special function: Lazily retain exactly one OpenAI Whisper model instance."""
+        # Section: Serialize cache replacement so VAD and request actions cannot load duplicate models.
+        with self._whisper_lock:
+            device = self._resolve_whisper_device()
+            if (self._whisper_model is None or self._whisper_model_name != whisper_model
+                    or self._whisper_model_device != device):
+                self._whisper_model = None
+                gc.collect()
+                if torch is not None and torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                self.get_logger().info(f"[voice_stt] Loading OpenAI Whisper model: {whisper_model} ({device})")
+                self._whisper_model = whisper.load_model(whisper_model, device=device)
+                self._whisper_model_name = whisper_model
+                self._whisper_model_device = device
+            return self._whisper_model, device
+
+    def _validate_audio_energy(self, wav_path: str) -> str:
+        """Special function: Reject invalid or near-silent audio before expensive inference."""
+        # Section: Compute RMS from the required 16 kHz mono 16-bit recording format.
         try:
-            model = self._load_whisper(whisper_model)
-            segments, _ = model.transcribe(
-                wav_path,
-                language=whisper_language if whisper_language else None,
-                vad_filter=False,
-                beam_size=5,
-            )
-            return " ".join(segment.text.strip() for segment in segments).strip()
-        except Exception as e:
-            self.get_logger().warn(f"[voice_stt] Transcription failed: {e}")
-            return ""
+            with wave.open(wav_path, "rb") as recording:
+                if (recording.getnchannels(), recording.getsampwidth(), recording.getframerate()) != (1, 2, 16000):
+                    return "invalid_wav"
+                samples = np.frombuffer(recording.readframes(recording.getnframes()), dtype=np.int16).astype(np.float32) / 32768.0
+            return "low_energy" if not samples.size or float(np.sqrt(np.mean(samples * samples))) < self.min_rms else ""
+        except (OSError, wave.Error):
+            return "invalid_wav"
+
+    def _transcribe(self, wav_path: str, whisper_model: str, whisper_language: str) -> tuple[str, str]:
+        """Special function: Transcribe one WAV and reject no-speech or low-confidence output."""
+        # Section: Validate microphone output before Whisper can hallucinate from room noise.
+        reason = self._validate_audio_energy(wav_path)
+        if reason:
+            self.get_logger().info(f"[voice_stt] rejected utterance: reason={reason}")
+            return "", reason
+        try:
+            model, device = self._load_whisper(whisper_model)
+            result = model.transcribe(wav_path, language=whisper_language or None, task="transcribe", temperature=0.0,
+                                      condition_on_previous_text=False, fp16=device == "cuda")
+            segments = result.get("segments", [])
+            if not segments:
+                return "", "no_speech"
+            no_speech = sum(float(segment.get("no_speech_prob", 0.0)) for segment in segments) / len(segments)
+            logprob = sum(float(segment.get("avg_logprob", 0.0)) for segment in segments) / len(segments)
+            if no_speech >= self.no_speech_threshold:
+                self.get_logger().info(f"[voice_stt] rejected utterance: reason=no_speech no_speech_prob={no_speech:.2f}")
+                return "", "no_speech"
+            if logprob < self.logprob_threshold:
+                self.get_logger().info(f"[voice_stt] rejected utterance: reason=low_confidence avg_logprob={logprob:.2f}")
+                return "", "low_confidence"
+            return str(result.get("text", "")).strip(), ""
+        except Exception as error:
+            self.get_logger().error(f"[voice_stt] Transcription failed: {error}")
+            return "", "transcription_failed"
 
     # --- continuous VAD utterance transcription ---
     def _start_vad_utterance_listener(self) -> None:
@@ -465,6 +538,7 @@ class STTNode(Node):
             "silence_ms": 0,
             "last_partial_at": 0.0,
             "utterance_id": 0,
+            "start_votes": 0,
         }
         command = [
             self.arecord_bin,
@@ -512,15 +586,19 @@ class STTNode(Node):
         """Use one 100 ms VAD decision to update the active utterance state."""
         # Section: Split the 100 ms policy frame into ten WebRTC-compatible 10 ms subframes.
         subframe_bytes = 16000 * 10 // 1000 * 2
-        speech = any(
-            vad.is_speech(frame[offset:offset + subframe_bytes], 16000)
-            for offset in range(0, len(frame), subframe_bytes)
-        )
+        votes = [vad.is_speech(frame[offset:offset + subframe_bytes], 16000)
+                 for offset in range(0, len(frame), subframe_bytes)]
+        speech_ratio = sum(votes) / len(votes)
         now = time.monotonic()
 
         # Section: Retain a short leading margin to avoid cutting the first phoneme of a new utterance.
         if not self._vad_utterance_active:
-            if not speech:
+            if speech_ratio < self.vad_start_ratio:
+                state["pre_roll"].append(frame)
+                state["start_votes"] = 0
+                return
+            state["start_votes"] += 1
+            if state["start_votes"] < self.vad_start_consecutive_frames:
                 state["pre_roll"].append(frame)
                 return
             state["utterance_id"] += 1
@@ -532,6 +610,7 @@ class STTNode(Node):
             state["partial_window"].extend((*state["pre_roll"], frame))
             state["pre_roll"].clear()
             state["silence_ms"] = 0
+            state["start_votes"] = 0
             state["last_partial_at"] = now
             self.get_logger().info(
                 f"[voice_stt] VAD detected utterance {state['utterance_id']}."
@@ -541,6 +620,7 @@ class STTNode(Node):
         # Section: Accumulate every active frame so the final result contains the complete utterance.
         state["active_pcm"].extend(frame)
         state["partial_window"].append(frame)
+        speech = speech_ratio >= self.vad_continue_ratio
         state["silence_ms"] = 0 if speech else state["silence_ms"] + self.vad_frame_ms
 
         # Section: Transcribe only the rolling 5-second context at roughly 900 ms intervals for low-latency previews.
@@ -562,40 +642,19 @@ class STTNode(Node):
             state["silence_ms"] = 0
             self._vad_executor.submit(self._publish_vad_final, utterance_id, complete_pcm)
 
-    def _load_vad_whisper(self):
-        """Load the exact optional VAD listener model and floating-point compute configuration."""
-        # Section: Cache independently so normal base-model requests cannot replace small.en float16 inference.
-        config = (self.vad_whisper_model_name, self.vad_device, self.vad_compute_type)
-        if self._vad_whisper_model is None or self._vad_whisper_model_config != config:
-            self.get_logger().info(
-                "[voice_stt] Loading VAD faster-whisper model: "
-                f"{self.vad_whisper_model_name} ({self.vad_device}, {self.vad_compute_type})"
-            )
-            self._vad_whisper_model = WhisperModel(
-                self.vad_whisper_model_name,
-                device=self.vad_device,
-                compute_type=self.vad_compute_type,
-            )
-            self._vad_whisper_model_name = self.vad_whisper_model_name
-            self._vad_whisper_model_config = config
-        return self._vad_whisper_model
-
     def _transcribe_vad_pcm(self, pcm_data: bytes) -> str:
-        """Convert raw utterance PCM into text using the VAD listener's small.en float16 model."""
-        # Section: Convert exactly the 16-bit mono stream supplied by arecord into faster-whisper float audio.
+        """Special function: Transcribe VAD PCM through the shared OpenAI Whisper cache."""
+        # Section: Convert exactly the 16-bit mono stream supplied by arecord into OpenAI Whisper audio.
         audio = np.frombuffer(pcm_data, dtype=np.int16).astype(np.float32) / 32768.0
         if not audio.size:
             return ""
         try:
-            model = self._load_vad_whisper()
-            segments, _ = model.transcribe(
-                audio,
-                language="en",
-                vad_filter=False,
-                beam_size=5,
-                condition_on_previous_text=False,
-            )
-            return " ".join(segment.text.strip() for segment in segments).strip()
+            if float(np.sqrt(np.mean(audio * audio))) < self.min_rms:
+                return ""
+            model, device = self._load_whisper(self.whisper_model_name)
+            result = model.transcribe(audio, language=self.whisper_language or None, task="transcribe", temperature=0.0,
+                                      condition_on_previous_text=False, fp16=device == "cuda")
+            return str(result.get("text", "")).strip()
         except Exception as e:
             self.get_logger().error(f"[voice_stt] VAD transcription failed: {e}")
             return ""

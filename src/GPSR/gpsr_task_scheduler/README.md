@@ -133,6 +133,17 @@ window lasts `12.0` seconds by default. A timeout leaves the robot stationary an
 timer re-arms the same listener; it does not recreate `/gpsr/command` subscriptions or submit a
 navigation goal. Configure the window with `command_input_timeout_sec:=12.0`.
 
+Section: Fuzzy object-name clarification.
+
+Object targets are first matched against the authoritative RoboCup object aliases and
+categories. If no exact match exists, the scheduler may offer one high-confidence fuzzy
+suggestion, for example `I could not match "aplle" to a configured object. Did you mean
+"apple"? Reply "yes" to confirm, or provide another object.` The command remains blocked
+until the operator confirms the suggestion or supplies another configured object. Weak or
+ambiguous matches receive the ordinary `Which object or person do you mean?` clarification;
+the planner never silently autocorrects an object name. The structured clarification payload
+contains `suggestion.input`, `suggestion.suggested_target`, and `suggestion.score` for UI clients.
+
 Section: Per-command return policy.
 
 The default scheduler freezes the newest valid `map`-frame `/amcl_pose` when a command is
@@ -145,6 +156,12 @@ frozen command-start pose and then reports `I could not find the <target>.` thro
 normal `SAY` skill. This report is automatic even when the original instruction did not
 explicitly request speech. If return navigation fails, speech remains pending until guarded
 return recovery succeeds.
+
+`FIND_OBJECT` owns one deterministic semantic retry in the compound search policy. With
+`max_not_found_retries: 1`, a complete route is searched once more only when the first
+complete route returns `NOT_FOUND`; the mission keeps one shared timeout deadline. A final
+miss in a compound acquisition or delivery command is reported after the scheduler confirms
+return to the frozen command-start pose.
 
 ```text
 WAITING_FOR_COMMAND

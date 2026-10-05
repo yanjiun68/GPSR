@@ -18,8 +18,8 @@ string mic_device
 # Precaution: final summary delivery fails if this path is empty or invalid.
 string piper_model_path
 
-# STT section: faster-whisper model name used during interview mode.
-# Precaution: larger models improve recognition but increase CPU latency.
+# STT section: OpenAI Whisper model name passed to the shared voice_stt action.
+# Precaution: the default turbo model requires CUDA for real-time operation.
 string whisper_model
 
 # STT section: language hint used during interview mode.

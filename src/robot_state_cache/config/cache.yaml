@@ -1,0 +1,24 @@
+# Section: Safe defaults for one independently deployable String state cache.
+robot_state_cache:
+  ros__parameters:
+    # Section: Input and held output remain distinct to prevent publication feedback loops.
+    input_topic: /robot_state_cache/input
+    held_topic: /robot_state_cache/held
+    status_topic: /robot_state_cache/status
+
+    # Section: Storage is allocated to this final capacity during node construction.
+    cache_capacity: 10
+
+    # Section: Producer updates are asynchronous; this rate controls only held output and status.
+    publish_rate_hz: 20.0
+
+    # Section: Equality at stale enters STALE and equality at expiration enters EXPIRED.
+    stale_timeout_sec: 0.5
+    expire_timeout_sec: 2.0
+
+    # Section: Safe output policy permits aging diagnostics but blocks expired targets by default.
+    publish_stale_data: true
+    publish_expired_data: false
+
+    # Section: Empty String observations demonstrate the extensible validation rejection path.
+    reject_empty_input: true

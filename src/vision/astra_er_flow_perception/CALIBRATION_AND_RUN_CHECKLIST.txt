@@ -1,0 +1,16 @@
+ASTRA + ER-FLOW CHECKLIST
+=========================
+
+[ ] 1. Astra color stream: 640x480 @ 30 FPS
+[ ] 2. Astra depth stream: 640x480 @ 30 FPS
+[ ] 3. /camera/depth/camera_info exists
+[ ] 4. /camera/color/camera_info exists
+[ ] 5. Actual DEPTH -> COLOR extrinsics entered in astra_registration.yaml
+[ ] 6. UnifoLM-ER-Flow downloaded to ~/models/UnifoLM-ER-Flow
+[ ] 7. Transformers can import Qwen3VLForConditionalGeneration
+[ ] 8. ROS package built successfully
+[ ] 9. /camera/aligned_color_to_depth/image_raw looks correctly registered
+[ ] 10. Publish a target to /astra_ai/command
+[ ] 11. Check /astra_ai/status for model/inference errors
+[ ] 12. Check /astra_ai/result for ROI + depth + tracking
+[ ] 13. View /astra_ai/tracking_image

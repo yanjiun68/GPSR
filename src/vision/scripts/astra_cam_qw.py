@@ -8,6 +8,7 @@ import copy
 import json
 import math
 import threading
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -22,6 +23,7 @@ from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import Image as RosImage
 from std_msgs.msg import String
+from vision.msg import RoiResult as RoiResultMessage
 
 # Section: Keep model imports optional so validation helpers remain testable without the Qwen environment.
 QWEN_IMPORT_ERROR: Exception | None = None
@@ -60,6 +62,79 @@ class LatestFrame:
     # Section: Qwen consumes RGB pixels while the header stamp correlates the resulting ROI with depth data.
     rgb_image: np.ndarray
     header: Any
+    # Section: A local sequence prevents repeating tracker work on the same camera observation.
+    sequence: int
+
+
+class OpenCvTemplateTracker:
+    """Special function: Track a validated ER-Flow box using only standard OpenCV operations."""
+
+    def __init__(self, search_margin: float = 0.50, minimum_score: float = 0.20) -> None:
+        """Special function: Configure bounded local template matching without another learned model."""
+        # Section: Search remains local so similar objects elsewhere do not silently replace the target.
+        self.search_margin = max(0.10, float(search_margin))
+        self.minimum_score = min(1.0, max(0.0, float(minimum_score)))
+        self._template: np.ndarray | None = None
+        self._bbox: tuple[int, int, int, int] | None = None
+
+    def reset(self) -> None:
+        """Special function: Remove stale visual evidence after a command or tracking failure."""
+        # Section: Both template and geometry must be cleared atomically by the caller's state lock.
+        self._template = None
+        self._bbox = None
+
+    def initialize(self, rgb_image: np.ndarray, bbox: tuple[int, int, int, int]) -> None:
+        """Special function: Seed tracking from one strictly validated model-generated pixel ROI."""
+        # Section: Clamp the model box before slicing to prevent empty or wrapped NumPy regions.
+        height, width = rgb_image.shape[:2]
+        left = max(0, min(width - 1, int(bbox[0])))
+        top = max(0, min(height - 1, int(bbox[1])))
+        right = max(left + 1, min(width, int(bbox[2])))
+        bottom = max(top + 1, min(height, int(bbox[3])))
+        gray = cv2.cvtColor(np.asarray(rgb_image), cv2.COLOR_RGB2GRAY)
+        template = gray[top:bottom, left:right].copy()
+        if template.size < 16:
+            raise ValueError("Tracked ROI is too small to initialize an OpenCV template.")
+        self._template = template
+        self._bbox = (left, top, right, bottom)
+
+    def update(self, rgb_image: np.ndarray) -> tuple[tuple[int, int, int, int], float] | None:
+        """Special function: Find the previous target locally and return its updated box and score."""
+        # Section: An absent acquisition is an ordinary waiting state, not a tracker exception.
+        if self._template is None or self._bbox is None:
+            return None
+        gray = cv2.cvtColor(np.asarray(rgb_image), cv2.COLOR_RGB2GRAY)
+        image_height, image_width = gray.shape[:2]
+        left, top, right, bottom = self._bbox
+        box_width = right - left
+        box_height = bottom - top
+        margin_x = max(4, int(round(box_width * self.search_margin)))
+        margin_y = max(4, int(round(box_height * self.search_margin)))
+        search_left = max(0, left - margin_x)
+        search_top = max(0, top - margin_y)
+        search_right = min(image_width, right + margin_x)
+        search_bottom = min(image_height, bottom + margin_y)
+        search = gray[search_top:search_bottom, search_left:search_right]
+        if search.shape[0] < box_height or search.shape[1] < box_width:
+            self.reset()
+            return None
+        # Section: SQDIFF_NORMED is stable for low-texture templates; one minus its minimum is confidence-like.
+        scores = cv2.matchTemplate(search, self._template, cv2.TM_SQDIFF_NORMED)
+        minimum_value, _maximum_value, minimum_location, _maximum_location = cv2.minMaxLoc(scores)
+        score = max(0.0, min(1.0, 1.0 - float(minimum_value)))
+        if not math.isfinite(score) or score < self.minimum_score:
+            self.reset()
+            return None
+        updated_left = search_left + int(minimum_location[0])
+        updated_top = search_top + int(minimum_location[1])
+        updated_bbox = (
+            updated_left,
+            updated_top,
+            min(image_width, updated_left + box_width),
+            min(image_height, updated_top + box_height),
+        )
+        self._bbox = updated_bbox
+        return updated_bbox, score
 
 
 def normalize_target_text(value: Any) -> str:
@@ -144,8 +219,10 @@ def normalize_qwen_roi(
     """Special function: Validate Qwen grounding JSON and emit a resolver-ready ROI result."""
     # Section: Restrict model status to an explicit public vocabulary rather than guessing missing results.
     status = str(payload.get("status", "")).strip().casefold()
-    if status not in {"found", "not_found", "uncertain"}:
-        raise ValueError("Qwen ROI status must be found, not_found, or uncertain.")
+    # Section: Accept the prompt's compatibility alias but expose only the four public ROI statuses.
+    status = "ok" if status == "found" else status
+    if status not in {"ok", "not_found", "ambiguous", "uncertain"}:
+        raise ValueError("Qwen ROI status must be ok, not_found, ambiguous, or uncertain.")
     # Section: Program-owned request identity prevents the model from retargeting a caller's object.
     result: dict[str, Any] = {
         "status": status,
@@ -156,7 +233,7 @@ def normalize_qwen_roi(
         "bbox_pixels": None,
         "confidence": None,
     }
-    if status != "found":
+    if status != "ok":
         return result
     # Section: A found target requires four finite, ordered coordinates in a declared coordinate system.
     bbox_value = payload.get("bbox_2d", payload.get("bbox"))
@@ -208,12 +285,18 @@ class AstraCamQwenNode(Node):
         self.declare_parameter("camera_topic", "/camera/image_raw")
         self.declare_parameter("query_topic", "/astra_cam_qw/query")
         self.declare_parameter("result_topic", "/astra_cam_qw/result")
+        self.declare_parameter("typed_result_topic", "/vision/roi/result")
         self.declare_parameter("annotated_image_topic", "/astra_cam_qw/annotated_image")
-        # Section: Model controls use the local Qwen3-VL-compatible UnifoLM-ER-1 checkpoint.
-        self.declare_parameter("model_path", "/home/yanjiun68/ai/models/UnifoLM-ER-1")
+        # Section: Model controls use the installed Qwen3-VL-compatible UnifoLM ER-Flow checkpoint.
+        self.declare_parameter("model_path", "/home/yanjiun68/ai/models/UnifoLM-ER-Flow")
         self.declare_parameter("image_size", 448)
         self.declare_parameter("max_new_tokens", 192)
         self.declare_parameter("minimum_confidence", 0.35)
+        # Section: Heavy semantic inference is capped at 1 Hz while standard OpenCV tracking publishes at 20 Hz.
+        self.declare_parameter("inference_rate_hz", 1.0)
+        self.declare_parameter("tracking_rate_hz", 20.0)
+        self.declare_parameter("tracker_search_margin", 0.50)
+        self.declare_parameter("tracker_minimum_score", 0.20)
         # Section: Optional visual debugging remains off by default for headless robot deployments.
         self.declare_parameter("publish_annotated_image", True)
         self.declare_parameter("show_gui", False)
@@ -223,8 +306,19 @@ class AstraCamQwenNode(Node):
         self.bridge = CvBridge()
         self._frame_lock = threading.Lock()
         self._latest_frame: LatestFrame | None = None
+        self._frame_sequence = 0
         self._inference_lock = threading.Lock()
         self._inference_running = False
+        self._last_inference_started = -math.inf
+        self._state_lock = threading.RLock()
+        self._active_request: TargetRequest | None = None
+        self._command_revision = 0
+        self._tracker_revision = 0
+        self._last_tracked_sequence = -1
+        self._tracker = OpenCvTemplateTracker(
+            search_margin=float(self.get_parameter("tracker_search_margin").value),
+            minimum_score=float(self.get_parameter("tracker_minimum_score").value),
+        )
 
         # Section: Load model resources once at startup, following the 4-bit Qwen setup used by test_camera.py.
         self.processor, self.model, self.torch = self._load_qwen_model()
@@ -249,11 +343,19 @@ class AstraCamQwenNode(Node):
             str(self.get_parameter("result_topic").value),
             10,
         )
+        self._typed_result_publisher = self.create_publisher(
+            RoiResultMessage,
+            str(self.get_parameter("typed_result_topic").value),
+            10,
+        )
         self._annotated_image_publisher = self.create_publisher(
             RosImage,
             str(self.get_parameter("annotated_image_topic").value),
             10,
         )
+        tracking_rate_hz = max(0.1, float(self.get_parameter("tracking_rate_hz").value))
+        # Section: The timer drops stale frames rather than creating a callback backlog.
+        self._tracking_timer = self.create_timer(1.0 / tracking_rate_hz, self._tracking_tick)
         self.get_logger().info(
             "Astra Qwen ROI node ready: camera=%s query=%s result=%s"
             % (
@@ -264,14 +366,14 @@ class AstraCamQwenNode(Node):
         )
 
     def _load_qwen_model(self) -> tuple[Any, Any, Any]:
-        """Special function: Load quantized UnifoLM-ER-1 using the reference strategy."""
+        """Special function: Load quantized UnifoLM ER-Flow using the reference strategy."""
         # Section: Raise a clear startup error when ROS used Python without the configured Qwen dependencies.
         if QWEN_IMPORT_ERROR is not None:
             raise RuntimeError(
                 "Qwen dependencies are unavailable; set VISION_PYTHON to the qwen3v1 virtual-environment Python."
             ) from QWEN_IMPORT_ERROR
         model_path = str(self.get_parameter("model_path").value)
-        self.get_logger().info("Loading UnifoLM-ER-1 processor for Astra ROI grounding...")
+        self.get_logger().info("Loading UnifoLM-ER-Flow processor for ROI grounding...")
         processor = AutoProcessor.from_pretrained(
             model_path,
             local_files_only=True,
@@ -283,7 +385,7 @@ class AstraCamQwenNode(Node):
             bnb_4bit_compute_dtype=torch.float16,
             bnb_4bit_use_double_quant=True,
         )
-        self.get_logger().info("Loading UnifoLM-ER-1 in NF4 for Astra ROI grounding...")
+        self.get_logger().info("Loading UnifoLM-ER-Flow in NF4 for ROI grounding...")
         model = Qwen3VLForConditionalGeneration.from_pretrained(
             model_path,
             quantization_config=quantization,
@@ -293,7 +395,7 @@ class AstraCamQwenNode(Node):
         )
         # Section: Disable training behavior because this node performs inference only.
         model.eval()
-        self.get_logger().info("UnifoLM-ER-1 loaded in NF4 for Astra ROI grounding.")
+        self.get_logger().info("UnifoLM-ER-Flow loaded in NF4 for ROI grounding.")
         return processor, model, torch
 
     def _image_callback(self, message: RosImage) -> None:
@@ -302,44 +404,134 @@ class AstraCamQwenNode(Node):
             # Section: RGB conversion creates the exact channel order expected by PIL and the Qwen processor.
             rgb_image = self.bridge.imgmsg_to_cv2(message, desired_encoding="rgb8")
             # Section: Copy pixels and header because ROS may recycle the incoming message after this callback returns.
-            latest_frame = LatestFrame(np.asarray(rgb_image).copy(), copy.deepcopy(message.header))
             with self._frame_lock:
+                self._frame_sequence += 1
+                latest_frame = LatestFrame(
+                    np.asarray(rgb_image).copy(),
+                    copy.deepcopy(message.header),
+                    self._frame_sequence,
+                )
                 self._latest_frame = latest_frame
         except Exception as exc:
             # Section: Preserve the previous valid frame after one malformed image conversion failure.
             self.get_logger().error(f"Astra RGB conversion failed: {exc}")
 
     def _query_callback(self, message: String) -> None:
-        """Special function: Validate one target query and dispatch non-blocking Qwen ROI inference on the latest frame."""
+        """Special function: Replace the active target and let the rate-limited timer schedule inference."""
         try:
             # Section: Input accepts only one target description, never arbitrary model instruction text.
             request = parse_target_request(message.data)
         except (TypeError, ValueError, json.JSONDecodeError) as exc:
-            self._publish_result({"status": "invalid_query", "error": str(exc)})
+            self._publish_result(
+                {"status": "uncertain", "processing_status": "invalid_query", "error": str(exc)}
+            )
             self.get_logger().warn(f"Rejected Astra Qwen query: {exc}")
             return
+        # Section: A revision switch invalidates any late model result from the previous command.
+        with self._state_lock:
+            self._command_revision += 1
+            self._active_request = request
+            self._tracker_revision = 0
+            self._last_tracked_sequence = -1
+            self._tracker.reset()
+            revision = self._command_revision
+        with self._frame_lock:
+            latest_frame = self._latest_frame
+        if latest_frame is None:
+            self._publish_result(
+                {
+                    "status": "uncertain",
+                    "processing_status": "no_frame",
+                    "target_id": request.target_id,
+                    "command_revision": revision,
+                    "error": "No RGB frame received yet.",
+                }
+            )
+
+    def _tracking_tick(self) -> None:
+        """Special function: Schedule at most 1 Hz inference and publish fresh OpenCV tracking at 20 Hz."""
+        # Section: Snapshot only the newest camera frame; no timer invocation queues historical images.
+        with self._frame_lock:
+            latest_frame = self._latest_frame
+        with self._state_lock:
+            request = self._active_request
+            revision = self._command_revision
+        if latest_frame is None or request is None:
+            return
+        self._schedule_inference_if_due(latest_frame, request, revision)
+        # Section: Update at most once per source frame even when the timer is faster than the camera.
+        with self._state_lock:
+            if self._tracker_revision != revision or self._last_tracked_sequence == latest_frame.sequence:
+                return
+            tracked = self._tracker.update(latest_frame.rgb_image)
+            self._last_tracked_sequence = latest_frame.sequence
+        if tracked is None:
+            self._publish_result(
+                {
+                    "status": "uncertain",
+                    "processing_status": "tracking_lost",
+                    "target_id": request.target_id,
+                    "command_revision": revision,
+                    "image_width": int(latest_frame.rgb_image.shape[1]),
+                    "image_height": int(latest_frame.rgb_image.shape[0]),
+                },
+                header=latest_frame.header,
+                tracking_valid=False,
+            )
+            return
+        bbox, tracker_score = tracked
+        result = {
+            "status": "ok",
+            "processing_status": "tracking_ok",
+            "target_id": request.target_id,
+            "command_revision": revision,
+            "bbox_pixels": list(bbox),
+            "bbox_2d": list(bbox),
+            "coordinate_width": int(latest_frame.rgb_image.shape[1]),
+            "coordinate_height": int(latest_frame.rgb_image.shape[0]),
+            "confidence": float(tracker_score),
+            "image_width": int(latest_frame.rgb_image.shape[1]),
+            "image_height": int(latest_frame.rgb_image.shape[0]),
+        }
+        self._publish_result(result, header=latest_frame.header, tracking_valid=True)
+        self._publish_annotation(latest_frame, result)
+
+    def _schedule_inference_if_due(
+        self,
+        latest_frame: LatestFrame,
+        request: TargetRequest,
+        revision: int,
+    ) -> None:
+        """Special function: Start one GPU request only when the global 1 Hz interval has elapsed."""
+        # Section: The lock prevents overlapping generation and enforces the rate across command changes.
+        now = time.monotonic()
+        inference_rate_hz = max(0.01, float(self.get_parameter("inference_rate_hz").value))
         with self._inference_lock:
-            if self._inference_running:
-                self._publish_result(
-                    {"status": "busy", "target_id": request.target_id, "error": "Qwen inference is already running."}
-                )
+            if self._inference_running or now - self._last_inference_started < 1.0 / inference_rate_hz:
                 return
-            with self._frame_lock:
-                latest_frame = self._latest_frame
-            if latest_frame is None:
-                self._publish_result(
-                    {"status": "no_frame", "target_id": request.target_id, "error": "No Astra RGB frame received yet."}
-                )
-                return
-            # Section: Reserve the single model before starting the worker so two topic callbacks cannot overlap GPU work.
             self._inference_running = True
+            self._last_inference_started = now
         try:
-            # Section: The worker owns an immutable copy of the latest snapshot and never blocks the ROS executor.
-            threading.Thread(target=self._run_inference, args=(latest_frame, request), daemon=True).start()
+            # Section: The worker receives immutable request/frame/revision snapshots and cannot block tracking callbacks.
+            threading.Thread(
+                target=self._run_inference,
+                args=(latest_frame, request, revision),
+                daemon=True,
+            ).start()
         except Exception as exc:
             with self._inference_lock:
                 self._inference_running = False
-            self._publish_result({"status": "model_error", "target_id": request.target_id, "error": str(exc)})
+            self._publish_result(
+                {
+                    "status": "uncertain",
+                    "processing_status": "model_error",
+                    "target_id": request.target_id,
+                    "command_revision": revision,
+                    "error": str(exc),
+                },
+                header=latest_frame.header,
+                model_generated=True,
+            )
 
     @staticmethod
     def _build_roi_prompt(request: TargetRequest) -> str:
@@ -351,14 +543,14 @@ class AstraCamQwenNode(Node):
             f"Find the visible target object described by this data: {target_json}.\n"
             "Return exactly one JSON object and no Markdown or prose.\n"
             "Use this schema exactly:\n"
-            '{"status":"found|not_found|uncertain","bbox_2d":[x_min,y_min,x_max,y_max],'
+            '{"status":"ok|not_found|ambiguous|uncertain","bbox_2d":[x_min,y_min,x_max,y_max],'
             '"coordinate_width":1000,"coordinate_height":1000,"confidence":0.0}\n'
-            "When status is found, bbox_2d must be four ordered integer image coordinates in 0..1000.\n"
-            "When status is not_found or uncertain, set bbox_2d to null and confidence to 0.0.\n"
+            "When status is ok, bbox_2d must be four ordered integer image coordinates in 0..1000.\n"
+            "When status is not_found, ambiguous, or uncertain, set bbox_2d to null and confidence to 0.0.\n"
             "Do not estimate distance, map position, robot motion, or objects not visible in this image."
         )
 
-    def _run_inference(self, latest_frame: LatestFrame, request: TargetRequest) -> None:
+    def _run_inference(self, latest_frame: LatestFrame, request: TargetRequest, revision: int) -> None:
         """Special function: Ground one requested object ROI with Qwen and publish a stamped Astra-compatible result."""
         try:
             # Section: Convert the copied RGB ndarray to the in-memory PIL image expected by Qwen3-VL.
@@ -416,12 +608,43 @@ class AstraCamQwenNode(Node):
             result["camera_topic"] = str(self.get_parameter("camera_topic").value)
             result["image_width"] = int(latest_frame.rgb_image.shape[1])
             result["image_height"] = int(latest_frame.rgb_image.shape[0])
-            self._publish_result(result)
+            result["processing_status"] = "model_ok" if result["status"] == "ok" else "model_complete"
+            result["command_revision"] = revision
+            # Section: A completed worker must not replace state selected by a newer command.
+            with self._state_lock:
+                if revision != self._command_revision or request != self._active_request:
+                    return
+                if result["status"] == "ok":
+                    bbox = tuple(int(value) for value in result["bbox_pixels"])
+                    self._tracker.initialize(latest_frame.rgb_image, bbox)
+                    self._tracker_revision = revision
+                    self._last_tracked_sequence = latest_frame.sequence
+                else:
+                    self._tracker.reset()
+                    self._tracker_revision = 0
+            self._publish_result(
+                result,
+                header=latest_frame.header,
+                model_generated=True,
+                tracking_valid=result["status"] == "ok",
+            )
             self._publish_annotation(latest_frame, result)
         except Exception as exc:
             # Section: Report parse and model failures as structured topic output rather than silently dropping the query.
             self.get_logger().error(f"Astra Qwen ROI inference failed: {exc}")
-            self._publish_result({"status": "model_error", "target_id": request.target_id, "error": str(exc)})
+            self._publish_result(
+                {
+                    "status": "uncertain",
+                    "processing_status": "model_error",
+                    "target_id": request.target_id,
+                    "command_revision": revision,
+                    "image_width": int(latest_frame.rgb_image.shape[1]),
+                    "image_height": int(latest_frame.rgb_image.shape[0]),
+                    "error": str(exc),
+                },
+                header=latest_frame.header,
+                model_generated=True,
+            )
         finally:
             # Section: Always release the single-inference reservation regardless of model or output failure.
             with self._inference_lock:
@@ -434,7 +657,7 @@ class AstraCamQwenNode(Node):
             return
         annotated = latest_frame.rgb_image.copy()
         bbox_pixels = result.get("bbox_pixels")
-        if result.get("status") == "found" and isinstance(bbox_pixels, list) and len(bbox_pixels) == 4:
+        if result.get("status") == "ok" and isinstance(bbox_pixels, list) and len(bbox_pixels) == 4:
             # Section: Draw the accepted pixel ROI and its confidence without altering the source camera frame.
             left, top, right, bottom = [int(value) for value in bbox_pixels]
             cv2.rectangle(annotated, (left, top), (right - 1, bottom - 1), (0, 255, 0), 2)
@@ -453,12 +676,60 @@ class AstraCamQwenNode(Node):
             except cv2.error as exc:
                 self.get_logger().error(f"Astra Qwen ROI GUI failed: {exc}")
 
-    def _publish_result(self, result: dict[str, Any]) -> None:
-        """Special function: Publish one compact, machine-readable Qwen ROI result envelope."""
-        # Section: Compact JSON makes CLI inspection and future resolver bridge consumption deterministic.
+    def _publish_result(
+        self,
+        result: dict[str, Any],
+        *,
+        header: Any | None = None,
+        model_generated: bool = False,
+        tracking_valid: bool = False,
+    ) -> None:
+        """Special function: Publish matching typed and compatibility JSON ROI result envelopes."""
+        # Section: Operational errors never escape through the semantic status field.
+        payload = dict(result)
+        status = str(payload.get("status", "uncertain")).strip().casefold()
+        if status not in {"ok", "not_found", "ambiguous", "uncertain"}:
+            payload.setdefault("processing_status", status or "invalid_status")
+            status = "uncertain"
+        payload["status"] = status
+        payload.setdefault("processing_status", "unspecified")
+        payload.setdefault("command_revision", self._command_revision)
+        # Section: Compact JSON preserves the existing CLI/debug transport during typed-message migration.
         message = String()
-        message.data = json.dumps(result, ensure_ascii=False, separators=(",", ":"))
+        message.data = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
         self._result_publisher.publish(message)
+        # Section: The typed contract carries a valid status on every output, including failures without a box.
+        typed = RoiResultMessage()
+        if header is not None:
+            typed.header = copy.deepcopy(header)
+        typed.command_revision = int(payload.get("command_revision", 0))
+        typed.target_id = str(payload.get("target_id", ""))
+        typed.status = status
+        typed.processing_status = str(payload.get("processing_status", "unspecified"))
+        typed.confidence = float(payload.get("confidence") or 0.0)
+        typed.image_width = max(0, int(payload.get("image_width") or 0))
+        typed.image_height = max(0, int(payload.get("image_height") or 0))
+        typed.model_generated = bool(model_generated)
+        typed.tracking_valid = bool(tracking_valid and status == "ok")
+        bbox_pixels = payload.get("bbox_pixels")
+        if status == "ok" and isinstance(bbox_pixels, list) and len(bbox_pixels) == 4:
+            left, top, right, bottom = [int(value) for value in bbox_pixels]
+            typed.roi.x_offset = max(0, left)
+            typed.roi.y_offset = max(0, top)
+            typed.roi.width = max(0, right - left)
+            typed.roi.height = max(0, bottom - top)
+            typed.roi.do_rectify = False
+        self._typed_result_publisher.publish(typed)
+
+    def destroy_node(self) -> bool:
+        """Special function: Close the optional OpenCV GUI before releasing ROS resources."""
+        # Section: HighGUI cleanup is conditional because headless deployments never create the window.
+        if bool(self.get_parameter("show_gui").value):
+            try:
+                cv2.destroyWindow(str(self.get_parameter("gui_window_name").value))
+            except cv2.error:
+                pass
+        return super().destroy_node()
 
 
 def main(args: list[str] | None = None) -> None:

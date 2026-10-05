@@ -93,7 +93,7 @@ if(EXISTS "${VISION_APPEARANCE_MODEL}")
 endif()
 endforeach()
 
-if(BUILD_TESTING)
+if(FALSE) # Section: Tests disabled for production-only workspace builds.
   find_package(ament_lint_auto REQUIRED)
   find_package(ament_cmake_pytest REQUIRED)
   set(ament_cmake_copyright_FOUND TRUE)

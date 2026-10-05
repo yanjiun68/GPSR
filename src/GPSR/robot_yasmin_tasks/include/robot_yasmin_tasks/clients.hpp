@@ -4,6 +4,7 @@
 #include "robot_yasmin_tasks/runtime.hpp"
 
 // Section: ROS interface types used by deterministic client adapters.
+#include <chrono>
 #include <condition_variable>
 #include <mutex>
 
@@ -17,6 +18,7 @@
 #include <robot_ai_interfaces/action/count_people.hpp>
 #include <robot_ai_interfaces/action/extract_guest_info.hpp>
 #include <robot_ai_interfaces/action/find_object.hpp>
+#include <robot_ai_interfaces/action/find_person.hpp>
 #include <robot_ai_interfaces/action/find_person_by_attribute.hpp>
 #include <robot_ai_interfaces/action/guide_person.hpp>
 #include <robot_ai_interfaces/action/handover.hpp>
@@ -57,7 +59,9 @@ class DialogueClient {
   // Special function: Create persistent TTS and STT topic interfaces.
   DialogueClient(const rclcpp::Node::SharedPtr &node,
                  const std::shared_ptr<SpeechClient> &speech,
-                 bool simulate = false);
+                 bool simulate = false,
+                 std::chrono::milliseconds post_tts_guard =
+                     std::chrono::milliseconds{400});
 
   // Special function: Ask one question and wait for the next transcript.
   SkillResultData ask_and_listen(const Blackboard::SharedPtr &blackboard,
@@ -70,6 +74,8 @@ class DialogueClient {
   rclcpp::Node::SharedPtr node_;
   std::shared_ptr<SpeechClient> speech_;
   bool simulate_;
+  // Section: Keep microphone capture closed after completed robot speech.
+  std::chrono::milliseconds post_tts_guard_;
   std::mutex mutex_;
   std::condition_variable condition_;
   std::string latest_;
@@ -201,6 +207,10 @@ class RemoteSkillClient {
   SkillResultData find_person_by_attribute(
       const Blackboard::SharedPtr &blackboard, const ActionStepData &action);
 
+  // Special function: Execute the interactive name-person mission.
+  SkillResultData find_person(const Blackboard::SharedPtr &blackboard,
+                              const ActionStepData &action);
+
   // Special function: Execute lifecycle-owned guest-information extraction.
   SkillResultData extract_guest_info(const Blackboard::SharedPtr &blackboard,
                                      const ActionStepData &action);
@@ -209,6 +219,8 @@ class RemoteSkillClient {
   rclcpp::Node::SharedPtr node_;
   rclcpp_action::Client<robot_ai_interfaces::action::FindObject>::SharedPtr
       find_object_client_;
+  rclcpp_action::Client<robot_ai_interfaces::action::FindPerson>::SharedPtr
+      find_person_client_;
   rclcpp_action::Client<
       robot_ai_interfaces::action::FindPersonByAttribute>::SharedPtr
       find_attribute_client_;

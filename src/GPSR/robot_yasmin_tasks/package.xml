@@ -17,6 +17,8 @@
   <exec_depend>fixed_information_dialogue</exec_depend>
   <depend>lifecycle_msgs</depend>
   <depend>nav2_msgs</depend>
+  <!-- Section: Standalone FIND_OBJECT launch activates its two lifecycle nodes. -->
+  <exec_depend>nav2_lifecycle_manager</exec_depend>
   <depend>nav_msgs</depend>
   <depend>putrabot_interfaces</depend>
   <depend>rclcpp</depend>

@@ -8,14 +8,12 @@ SCRIPT_DIRECTORY="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIRECTORY}/../.." && pwd)"
 source /opt/ros/humble/setup.bash
 source "${PROJECT_ROOT}/install/setup.bash"
+# Section: Import the reviewed lifecycle inventory and COUNT_OBJECTS dependency order.
+source "${SCRIPT_DIRECTORY}/lifecycle_nodes.sh"
 set -u
 
-# Section: Keep node order aligned with the COUNT_OBJECTS lifecycle registry.
-LIFECYCLE_NODES=(
-    "/gpsr_object_detection_node"
-    "/count_objects_perception_server"
-    "/count_objects_skill_server"
-)
+# Section: Keep node order aligned with the reviewed COUNT_OBJECTS lifecycle registry.
+LIFECYCLE_NODES=("${COUNT_OBJECTS_LIFECYCLE_NODES[@]}")
 
 # Special function: Read one lifecycle node state and preserve ROS error output.
 get_lifecycle_state() {

@@ -32,6 +32,7 @@ from sensor_msgs_py import point_cloud2
 from std_msgs.msg import String
 from tf2_ros import Buffer, TransformException, TransformListener
 from visualization_msgs.msg import MarkerArray
+from vision.msg import RoiResult
 
 # Section: Importing tf2_geometry_msgs registers PoseStamped transformations with tf2_ros.
 import tf2_geometry_msgs  # noqa: F401
@@ -399,6 +400,9 @@ class TargetGraspGeometryNode(Node):
 
         # Section: Reuse the managed RealSense aligned RGB-D pipeline and calibrated optical frame.
         self.declare_parameter("target_topic", "/vision/target_object")
+        # Section: A shared ER-Flow node supplies the semantic ROI without a second Qwen allocation.
+        self.declare_parameter("roi_topic", "/vision/roi/result")
+        self.declare_parameter("external_roi_timeout_sec", 1.5)
         self.declare_parameter("rgb_topic", "/camera/camera/color/image_raw")
         self.declare_parameter("depth_topic", "/camera/camera/aligned_depth_to_color/image_raw")
         self.declare_parameter("camera_info_topic", "/camera/camera/color/camera_info")
@@ -479,6 +483,7 @@ class TargetGraspGeometryNode(Node):
         self._latest_rgb: ReceivedMessage | None = None
         self._latest_depth: ReceivedMessage | None = None
         self._latest_camera_info: ReceivedMessage | None = None
+        self._latest_roi: ReceivedMessage | None = None
 
         # Section: Target generations cancel obsolete worker sessions without unbounded queues.
         self._target_lock = threading.Lock()
@@ -518,6 +523,12 @@ class TargetGraspGeometryNode(Node):
             str(self.get_parameter("camera_info_topic").value),
             self._camera_info_callback,
             qos_profile_sensor_data,
+        )
+        self._roi_sub = self.create_subscription(
+            RoiResult,
+            str(self.get_parameter("roi_topic").value),
+            self._roi_callback,
+            10,
         )
 
         # Section: Required outputs always exist; optional debug publishers remain inexpensive when unused.
@@ -573,6 +584,56 @@ class TargetGraspGeometryNode(Node):
         # Section: CameraInfo is small and normally constant for the complete sensor runtime.
         with self._sensor_lock:
             self._latest_camera_info = ReceivedMessage(message, time.monotonic())
+
+    def _roi_callback(self, message: RoiResult) -> None:
+        """Special function: Retain only the newest typed ROI from the shared ER-Flow tracker."""
+        # Section: The worker validates status, identity, dimensions, and freshness before using the box.
+        with self._sensor_lock:
+            self._latest_roi = ReceivedMessage(message, time.monotonic())
+
+    def _external_grounding(
+        self,
+        target: str,
+        image_width: int,
+        image_height: int,
+    ) -> GroundedTarget | None:
+        """Special function: Convert one fresh valid shared ROI into the grasp pipeline's grounding type."""
+        # Section: Copy the small message reference under the same bounded sensor-state lock.
+        with self._sensor_lock:
+            received = self._latest_roi
+        if received is None:
+            return None
+        timeout_sec = max(0.05, float(self.get_parameter("external_roi_timeout_sec").value))
+        if time.monotonic() - received.received_monotonic > timeout_sec:
+            return None
+        roi_message = received.message
+        normalized_target = " ".join(str(target).casefold().split())
+        normalized_result_target = " ".join(str(roi_message.target_id).casefold().split())
+        if normalized_result_target != normalized_target:
+            return None
+        if str(roi_message.status).casefold() != "ok" or not bool(roi_message.tracking_valid):
+            return None
+        source_width = int(roi_message.image_width)
+        source_height = int(roi_message.image_height)
+        if min(source_width, source_height, image_width, image_height) <= 0:
+            return None
+        left = int(math.floor(float(roi_message.roi.x_offset) * image_width / source_width))
+        top = int(math.floor(float(roi_message.roi.y_offset) * image_height / source_height))
+        right = int(math.ceil(float(roi_message.roi.x_offset + roi_message.roi.width) * image_width / source_width))
+        bottom = int(math.ceil(float(roi_message.roi.y_offset + roi_message.roi.height) * image_height / source_height))
+        left = max(0, min(image_width - 1, left))
+        top = max(0, min(image_height - 1, top))
+        right = max(left + 1, min(image_width, right))
+        bottom = max(top + 1, min(image_height, bottom))
+        confidence = float(roi_message.confidence)
+        if not math.isfinite(confidence) or not 0.0 <= confidence <= 1.0:
+            return None
+        return GroundedTarget(
+            label=str(target),
+            confidence=confidence,
+            bbox_xyxy=(left, top, right, bottom),
+            point_uv=(0.5 * float(left + right), 0.5 * float(top + bottom)),
+        )
 
     def _target_callback(self, message: String) -> None:
         """Replace the active target and invalidate all stale visualization."""
@@ -674,6 +735,20 @@ class TargetGraspGeometryNode(Node):
                 if grounding is None and bool(self.get_parameter("qwen_enabled").value):
                     self._publish_status(TargetState.GROUNDING, "running on-demand semantic grounding", target=target)
                     grounding = self._grounder.ground(rgb, target)
+                if not bool(self.get_parameter("qwen_enabled").value):
+                    # Section: Refresh the 5 Hz geometry input from the newest 20 Hz shared tracker result.
+                    grounding = self._external_grounding(target, int(rgb.shape[1]), int(rgb.shape[0]))
+                    if grounding is None:
+                        self._publish_status(
+                            TargetState.GROUNDING,
+                            "waiting for a fresh valid shared ER-Flow ROI",
+                            target=target,
+                        )
+                        remaining = max(0.0, period - (time.monotonic() - cycle_started))
+                        if self._target_event.wait(timeout=remaining):
+                            self._target_event.clear()
+                            return
+                        continue
                 grounding = self._process_bundle(target, bundle, rgb, grounding)
                 consecutive_failures = 0
             except GroundingError as exc:

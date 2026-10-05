@@ -2,7 +2,7 @@
 float32 record_sec
 # Request section: ALSA capture device; an empty value uses the node default.
 string mic_device
-# Request section: faster-whisper model name; an empty value uses the node default.
+# Request section: OpenAI Whisper model name; an empty value uses the node default.
 string whisper_model
 # Request section: language hint; an empty value enables automatic language detection.
 string whisper_language

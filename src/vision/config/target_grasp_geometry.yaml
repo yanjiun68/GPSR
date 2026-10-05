@@ -3,6 +3,9 @@ target_grasp_geometry:
   ros__parameters:
     # Section: Existing RealSense aligned RGB-D interfaces.
     target_topic: /vision/target_object
+    # Section: Consume the one shared ER-Flow grounder instead of loading a second Qwen model.
+    roi_topic: /vision/roi/result
+    external_roi_timeout_sec: 1.5
     rgb_topic: /camera/camera/color/image_raw
     depth_topic: /camera/camera/aligned_depth_to_color/image_raw
     camera_info_topic: /camera/camera/color/camera_info
@@ -16,8 +19,8 @@ target_grasp_geometry:
     debug_cloud_topic: /vision/debug_target_cloud
 
     # Section: On-demand Qwen semantic grounding configuration.
-    qwen_enabled: true
-    qwen_model_path: /home/yanjiun68/ai/models/UnifoLM-ER-1
+    qwen_enabled: false
+    qwen_model_path: /home/yanjiun68/ai/models/UnifoLM-ER-Flow
     qwen_max_new_tokens: 192
     qwen_image_size: 448
     qwen_minimum_confidence: 0.35

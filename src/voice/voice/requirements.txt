@@ -1,0 +1,6 @@
+# Section: Python runtime dependencies installed outside rosdep-managed ROS dependencies.
+openai-whisper
+piper-tts
+webrtcvad
+numpy
+torch

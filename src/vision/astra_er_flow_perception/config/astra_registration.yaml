@@ -1,0 +1,25 @@
+astra_registration_node:
+  ros__parameters:
+    depth_topic: /camera/depth/image_raw
+    # Section: Consume the normalized RGB topic published by robocup_astra_camera_node.
+    color_topic: /camera/image_raw
+    depth_info_topic: /camera/depth/camera_info
+    # Section: Consume the matching normalized RGB calibration topic.
+    color_info_topic: /camera/camera_info
+
+    aligned_color_topic: /camera/aligned_color_to_depth/image_raw
+    valid_mask_topic: /camera/aligned_color_to_depth/valid_mask
+
+    depth_scale: 0.001
+    sync_queue_size: 10
+    sync_slop: 0.05
+
+    # REPLACE with your actual Astra DEPTH -> COLOR transform.
+    # P_color = R * P_depth + t
+    rotation:
+      [1.0, 0.0, 0.0,
+       0.0, 1.0, 0.0,
+       0.0, 0.0, 1.0]
+
+    # metres
+    translation: [0.0, 0.0, 0.0]

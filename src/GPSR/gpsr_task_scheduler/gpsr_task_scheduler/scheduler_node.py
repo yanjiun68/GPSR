@@ -443,6 +443,8 @@ class GpsrTaskSchedulerNode(Node):
             "status": str(validation["status"]),
             "missing_fields": list(validation.get("missing_fields", [])),
             "prompt": str(validation["clarification_prompt"]),
+            # Section: Expose the candidate beside the spoken prompt for UI and logs.
+            "suggestion": validation.get("suggestion"),
         }
         self.get_logger().info(
             f"GPSR clarification {session.attempt}/{maximum}: "
@@ -474,7 +476,12 @@ class GpsrTaskSchedulerNode(Node):
                 return
             transcript = str(payload.get("transcript") or "").strip()
             self.get_logger().info(f"GPSR clarification reply received: attempt {session.attempt}.")
-            merged = merge_clarification(session.instruction, transcript, self.config)
+            merged = merge_clarification(
+                session.instruction,
+                transcript,
+                self.config,
+                session.validation.get("suggestion"),
+            )
             if transcript and merged != session.instruction:
                 result = self.process_one_command(
                     session.command_id, merged, session.dry_run, session.timeout_sec,
@@ -508,6 +515,8 @@ class GpsrTaskSchedulerNode(Node):
                     "status": str(validation.get("status", "MULTIPLE_MISSING")),
                     "missing_fields": list(validation.get("missing_fields", [])),
                     "prompt": str(validation.get("clarification_prompt", "")),
+                    # Section: Keep a refreshed suggestion available for the next reply.
+                    "suggestion": validation.get("suggestion"),
                 },
             }
             self.publish_command_result(result)
@@ -998,7 +1007,9 @@ class GpsrTaskSchedulerNode(Node):
         config = getattr(self, "config", None)
         say_timeout = float(config.timeout_for("SAY")) if config is not None else 30.0
         say_retries = int(config.retries_for("SAY")) if config is not None else 0
-        confirmation_timeout = float(config.timeout_for("ASK_AND_LISTEN")) if config is not None else 30.0
+        # Section: Keep the synthetic execution-consent window short without changing
+        # ordinary ASK_AND_LISTEN task timeouts requested by a GPSR command.
+        confirmation_timeout = 3.0
         # Section: Put deterministic speech and confirmation steps first so no external language model can alter executable intent.
         executable["steps"] = [{
             "step_id": summary_step_id,
@@ -1012,7 +1023,12 @@ class GpsrTaskSchedulerNode(Node):
             "step_id": confirmation_step_id,
             "skill_name": "ASK_AND_LISTEN",
             "arguments": {
-                "question": "Do you confirm that I should proceed? Please say yes or no.",
+                # Section: Use distinct multi-syllable replies so speech recognition can
+                # separate explicit consent from short ambient utterances or TTS fragments.
+                "question": (
+                    "Please confirm execution. Say confirm to start the command, "
+                    "or say reject to cancel the command."
+                ),
                 "require_affirmative_confirmation": True,
             },
             "dependencies": [summary_step_id],
@@ -1187,17 +1203,82 @@ class GpsrTaskSchedulerNode(Node):
         return {"steps": steps}
 
     @staticmethod
+    def find_failed_object_search(
+        planned: dict[str, Any],
+        task_result: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        """Special function: Locate a final FIND_OBJECT miss in any planned command."""
+        # Section: Match the terminal executor result rather than trusting the top-level task type.
+        object_results = [
+            item for item in task_result.get("results", [])
+            if isinstance(item, dict)
+            and str(item.get("action_type", "")) == "FIND_OBJECT"
+            and str(item.get("outcome", "")).strip().lower() == "not_found"
+        ]
+        if not object_results:
+            return None
+        request = dict(planned.get("task_request") or {})
+        find_steps = [
+            step for step in planned.get("steps", [])
+            if str(step.get("skill_name", "")).strip().upper() == "FIND_OBJECT"
+        ]
+        failed_result = object_results[-1]
+        result_ordinal = sum(
+            1
+            for item in task_result.get("results", [])
+            if isinstance(item, dict)
+            and str(item.get("action_type", "")) == "FIND_OBJECT"
+        ) - 1
+        step = find_steps[min(max(result_ordinal, 0), len(find_steps) - 1)] if find_steps else {}
+        arguments = dict(step.get("arguments") or {})
+        target = dict(request.get("target") or {})
+        payload = failed_result.get("result")
+        if not isinstance(payload, dict):
+            payload = {}
+        # Section: A pass with navigation or scan failures is infrastructure failure,
+        # not proof that the requested object was absent.
+        if payload.get("navigation_failures") or payload.get("scan_failures"):
+            return None
+        if any(
+            isinstance(pass_data, dict) and not bool(pass_data.get("complete_search", True))
+            for pass_data in payload.get("search_passes", [])
+        ):
+            return None
+        object_name = str(
+            arguments.get("object_name")
+            or arguments.get("target_object")
+            or target.get("object_name")
+            or ""
+        ).strip()
+        category = str(
+            arguments.get("category")
+            or arguments.get("target_category")
+            or target.get("category")
+            or ""
+        ).strip()
+        location = str(
+            arguments.get("target_location")
+            or arguments.get("location")
+            or request.get("task_location")
+            or ""
+        ).strip()
+        scope = str(arguments.get("search_scope") or ("STRICT_LOCATION" if location else "GLOBAL")).upper()
+        return {
+            "result": failed_result,
+            "payload": payload,
+            "object_name": object_name,
+            "category": category,
+            "location": location if scope == "STRICT_LOCATION" else "",
+            "search_scope": scope,
+        }
+
+    @staticmethod
     def requires_not_found_report(
         planned: dict[str, Any],
         task_result: dict[str, Any],
     ) -> bool:
-        """Special function: Require speech for an exhaustive FIND_OBJECT miss."""
-        request = dict(planned.get("task_request") or {})
-        outcomes = {
-            str(item.get("outcome", "")).strip().lower()
-            for item in task_result.get("results", [])
-        }
-        return request.get("task_type") == "find_object" and "not_found" in outcomes
+        """Special function: Require speech for a compound or direct object-search miss."""
+        return GpsrTaskSchedulerNode.find_failed_object_search(planned, task_result) is not None
 
     @staticmethod
     def extract_result_variables(
@@ -1230,14 +1311,20 @@ class GpsrTaskSchedulerNode(Node):
         task_result: dict[str, Any],
     ) -> str:
         """Special function: Produce deterministic post-return failure speech."""
-        request = dict(planned.get("task_request") or {})
-        target = dict(request.get("target") or {})
-        outcomes = {str(item.get("outcome", "")) for item in task_result.get("results", [])}
-        if request.get("task_type") == "find_object" and "not_found" in outcomes:
-            object_name = str(
-                target.get("object_name") or target.get("category") or "object"
-            ).strip() or "object"
-            return f"I could not find the {object_name}."
+        # Section: Keep report wording tied to the failed FIND_OBJECT step in compound plans.
+        failed_search = GpsrTaskSchedulerNode.find_failed_object_search(planned, task_result)
+        if failed_search is not None:
+            payload = failed_search["payload"]
+            label = failed_search["object_name"] or failed_search["category"] or "object"
+            if failed_search["object_name"]:
+                label = label[:1].upper() + label[1:]
+            article = "a" if failed_search["category"] and not failed_search["object_name"] else "the"
+            location = failed_search["location"]
+            location_phrase = f" in the {location}" if location else ""
+            completed_passes = int(payload.get("search_passes_completed", 0) or 0)
+            retries_used = int(payload.get("not_found_retries_used", 0) or 0)
+            retry_phrase = " after searching twice" if completed_passes >= 2 and retries_used >= 1 else ""
+            return f"I could not find {article} {label}{location_phrase}{retry_phrase}."
         return "I could not complete the requested task."
 
     @staticmethod

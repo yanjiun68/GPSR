@@ -1,0 +1,16 @@
+LLM chaining architecture : 
+1. instruction classifier 
+2. action generator 
+
+stage 1 : 
+a. fixed category list , 
+b. explicit disambiguation rules for the boundaries ( hard practise )
+c. output restriction 
+
+stage 2 : 
+a. task specific action schema for classified category ; generation of executable robot function that calls one step at a time 
+[ observe -> generate -> execute -> feedback ]
+b. 
+
+search up : 
+https://arxiv.org/html/2609.29043v1

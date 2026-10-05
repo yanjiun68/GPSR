@@ -15,6 +15,17 @@ person_search:
   # Section: One hard deadline bounds the complete multi-waypoint mission when the action omits one.
   mission_timeout_sec: 300.0
 
+  # Section: A clean no-person result permits exactly one complete physical rescan.
+  retry:
+    max_not_found_retries: 1
+
+  # Section: Interactive identity verification thresholds are shared policy values.
+  verification:
+    gesture_timeout_sec: 20.0
+    gesture_min_stable_frames: 3
+    gesture_confidence_threshold: 0.55
+    attribute_match_confidence: 0.55
+
   # Section: Desired headings are absolute offsets from the arrival orientation.
   scan:
     fast_angles_deg: [0.0, 60.0, -60.0]
@@ -25,3 +36,12 @@ person_search:
 # Section: Nav2 remains the sole owner of movement between person-search viewpoints.
 navigation:
   waypoint_timeout_sec: 60.0
+
+# Section: Audited person-perception capability registry.
+perception:
+  # Section: The deployed human detector is YOLO11n plus tracked appearance/pose;
+  # yoloe-26s-seg.pt is the object detector and is not silently reused for people.
+  primary_backend: yolo11n_tracked_appearance
+  deterministic_attributes: [pose, gesture, shirt_color, glasses]
+  vlm_fallback_enabled: true
+  vlm_minimum_confidence: 0.55

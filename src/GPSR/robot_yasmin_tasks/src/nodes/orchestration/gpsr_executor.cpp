@@ -3,6 +3,8 @@
 #include <yaml-cpp/yaml.h>
 
 #include <atomic>
+#include <algorithm>
+#include <cstdint>
 #include <memory>
 #include <mutex>
 #include <rclcpp/executors/multi_threaded_executor.hpp>
@@ -48,6 +50,9 @@ class GpsrExecutor final : public rclcpp::Node {
         declare_parameter<double>("lifecycle_transition_timeout_sec", 60.0);
     const auto lifecycle_margin =
         declare_parameter<double>("lifecycle_operation_timeout_margin_sec", 10.0);
+    // Section: Keep STT inactive after TTS so final robot audio cannot become a reply.
+    const auto post_tts_guard_ms =
+        std::max<std::int64_t>(0, declare_parameter<std::int64_t>("post_tts_guard_ms", 400));
     declare_parameter<double>("startup_dependency_poll_sec", 5.0);
     const auto status_topic = declare_parameter<std::string>(
         "queue_status_topic", "/gpsr/action_queue_status_json");
@@ -58,7 +63,10 @@ class GpsrExecutor final : public rclcpp::Node {
     // Section: Client lifetimes match the persistent Python executor node.
     auto self = std::shared_ptr<rclcpp::Node>(this, [](rclcpp::Node *) {});
     clients_.speech = std::make_shared<SpeechClient>(self, false);
-    clients_.dialogue = std::make_shared<DialogueClient>(self, clients_.speech, false);
+    // Section: TTS completion and its echo guard finish before a dialogue can trigger STT.
+    clients_.dialogue = std::make_shared<DialogueClient>(
+        self, clients_.speech, false,
+        std::chrono::milliseconds{post_tts_guard_ms});
     // Section: Fixed-information questions use their own correlated provider state.
     clients_.fixed_information =
         std::make_shared<FixedInformationClient>(self, clients_.speech, false);
@@ -106,6 +114,22 @@ class GpsrExecutor final : public rclcpp::Node {
       if (search["mission_timeout_sec"]) {
         clients_.person_search.mission_timeout_sec =
             search["mission_timeout_sec"].as<double>();
+      }
+      // Section: Keep person rescans bounded and separate from queue-level retries.
+      const auto retry = search["retry"];
+      if (retry && retry["max_not_found_retries"]) {
+        const auto configured_retries = retry["max_not_found_retries"].as<long long>();
+        constexpr std::uint32_t kMaximumPersonRescans = 1U;
+        if (configured_retries < 0) {
+          RCLCPP_WARN(get_logger(),
+                      "Ignoring negative FIND_PERSON max_not_found_retries=%lld.",
+                      configured_retries);
+        } else {
+          clients_.person_search.max_not_found_retries = static_cast<std::uint32_t>(
+              std::min<unsigned long long>(
+                  static_cast<unsigned long long>(configured_retries),
+                  kMaximumPersonRescans));
+        }
       }
       if (search["scan_timeout_sec"]) {
         clients_.person_search.scan_timeout_sec =
@@ -155,6 +179,44 @@ class GpsrExecutor final : public rclcpp::Node {
         }
       }
       if (!waypoints.empty()) clients_.object_search.global_waypoints = waypoints;
+
+      // Section: The semantic retry is deliberately separate from ActionStep max_retries.
+      const auto retry = root["retry"];
+      if (retry && !retry.IsMap()) {
+        RCLCPP_WARN(get_logger(),
+                    "Ignoring malformed FIND_OBJECT retry policy; expected a map.");
+      }
+      const auto configured_retries = retry && retry.IsMap()
+                                          ? retry["max_not_found_retries"]
+                                          : YAML::Node{};
+      if (configured_retries) {
+        constexpr std::uint32_t kMaximumConfiguredNotFoundRetries = 10U;
+        try {
+          const auto parsed_retries = configured_retries.as<long long>();
+          if (parsed_retries < 0) {
+            RCLCPP_WARN(get_logger(),
+                        "Ignoring negative FIND_OBJECT max_not_found_retries=%lld; "
+                        "keeping %u.",
+                        parsed_retries,
+                        clients_.object_search.max_not_found_retries);
+          } else if (static_cast<unsigned long long>(parsed_retries) >
+                     kMaximumConfiguredNotFoundRetries) {
+            clients_.object_search.max_not_found_retries =
+                kMaximumConfiguredNotFoundRetries;
+            RCLCPP_WARN(
+                get_logger(),
+                "Clamping FIND_OBJECT max_not_found_retries=%lld to %u.",
+                parsed_retries, kMaximumConfiguredNotFoundRetries);
+          } else {
+            clients_.object_search.max_not_found_retries =
+                static_cast<std::uint32_t>(parsed_retries);
+          }
+        } catch (const YAML::Exception &error) {
+          RCLCPP_WARN(get_logger(),
+                      "Ignoring invalid FIND_OBJECT max_not_found_retries: %s",
+                      error.what());
+        }
+      }
 
       // Section: The installed object policy provides tiered scan headings and one
       // bounded rotation budget.
@@ -316,7 +378,13 @@ class GpsrExecutor final : public rclcpp::Node {
           result = make_skill_result(action.action_type, FATAL_FAILURE, cleaned.second,
                                      result.payload, false, true);
         }
-        if (!is_recoverable(result.outcome) || attempt >= action.max_retries) break;
+        // Section: FIND_OBJECT owns its NOT_FOUND retry inside the compound search
+        // mission; never restart the full lifecycle-backed skill here.
+        const bool object_miss_owned_by_search_policy =
+            action.action_type == FIND_OBJECT && result.outcome == NOT_FOUND;
+        if (object_miss_owned_by_search_policy || !is_recoverable(result.outcome) ||
+            attempt >= action.max_retries)
+          break;
         ++attempt;
         const auto recovered = lifecycle_->recover(action.action_type);
         if (!recovered.first) {
@@ -350,7 +418,10 @@ class GpsrExecutor final : public rclcpp::Node {
                    terminal);
     if (terminal == SUCCESS)
       goal_handle->succeed(action_result);
-    else if (terminal == CANCELED)
+    // Section: A declined spoken confirmation is a business-level CANCELED result,
+    // not a ROS action cancellation. rclcpp permits canceled() only after the client
+    // has requested cancellation and the goal is therefore in CANCELING state.
+    else if (terminal == CANCELED && goal_handle->is_canceling())
       goal_handle->canceled(action_result);
     else
       goal_handle->abort(action_result);

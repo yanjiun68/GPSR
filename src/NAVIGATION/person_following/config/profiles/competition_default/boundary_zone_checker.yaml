@@ -1,6 +1,0 @@
-# boundary_zone_checker.py
-/**:
-  ros__parameters:
-    # NORMAL TUNING
-    boundary_enable_rviz_override: false
-    boundary_rviz_target_zone: ''

@@ -24,10 +24,10 @@ flowchart TD
 | put down, place, put | `FIND_OBJECT` → `PICK_OBJECT` → `PLACE_OBJECT` | Object and destination passed to placement; no separate navigation step is currently inserted. **Blocked: manipulation implementations missing.** |
 | bring, deliver, carry to, give to, hand over | `DELIVER_OBJECT` intent expands into acquisition and delivery primitives | Object, recipient and optional locations. **Blocked: manipulation implementations missing.** `DELIVER_OBJECT` itself never enters ActionQueue. |
 | follow | `FOLLOW_PERSON` | Person reference; real adapter, but requires `start_follow_person_pipeline:=true` and independently available external drivers. |
-| guide, lead | `GUIDE_PERSON` | Person and destination. **Blocked: guide implementation missing.** |
+| guide, lead | `GUIDE_PERSON` | Person and destination. Uses accepted Nav2 goal, follow prompt, bounded navigation retry, then arrival announcement. |
 | say, speak, report, tell, greet | `SAY` | Text or a report template and previously produced data. |
 | ask, talk to | `ASK_AND_LISTEN` | Question/prompt and any expected answer constraints; uses persistent speech interfaces. |
-| take | Context-dependent acquisition, delivery, or guiding intent | “Take the Coke” means acquire; “take the Coke to John” means deliver; “take John to the kitchen” means guide. Corresponding missing skills still block execution. |
+| take | Context-dependent acquisition, delivery, or guiding intent | “Take the Coke” means acquire; “take the Coke to John” means deliver; “take John to the kitchen” means guide. Acquisition/delivery remain blocked until manipulation skills are installed. |
 
 Aliases preserve typed meaning: `lounge` → `living_room`, `living room` → `living_room`, `dining room` → `dining_room`, `instruction point` → `instruction_point`; `me` and `instruction person` → person `operator`. Pronouns such as `it` and `him` require an appropriate earlier object/person reference. Unknown or ambiguous references are rejected instead of guessed.
 

@@ -1,21 +1,27 @@
 #!/usr/bin/env python3
 
 from difflib import get_close_matches
-import wave
+import os
 import subprocess
+import tempfile
+import threading
+import time
 from typing import Optional
 import re
-
-import numpy as np
-from scipy.signal import butter, lfilter
-import webrtcvad
+import wave
 
 import rclpy
 from rclpy.node import Node
-from rclpy.action import ActionServer
-from voice_interfaces.action import Receptionist
+from rclpy.action import ActionClient, ActionServer
+from rclpy.callback_groups import ReentrantCallbackGroup
+from rclpy.executors import MultiThreadedExecutor
+from voice_interfaces.action import Receptionist, TranscribeSpeech
 
-from faster_whisper import WhisperModel
+try:
+    # Section: Preserve Receptionist's per-goal voice-path field with cached piper-tts synthesis.
+    from piper import PiperVoice
+except ImportError:
+    PiperVoice = None
 
 
 def contains_any(text, phrases):
@@ -28,13 +34,19 @@ class ReceptionistActionServer(Node):
     def __init__(self):
         super().__init__("receptionist_action_server")
 
-        self._whisper_model = None
-        self._whisper_model_name = None
-
-        self.sample_rate = 16000
-        self.channels = 1
-        self.sample_width = 2
-        self.vad_mode = 2
+        # Section: Receptionist delegates all microphone and Whisper work to voice_stt.
+        self.declare_parameter("stt_action_name", "/voice/stt/transcribe_action")
+        self.declare_parameter("post_tts_guard_ms", 400)
+        self._stt_group = ReentrantCallbackGroup()
+        self._stt_client = ActionClient(
+            self,
+            TranscribeSpeech,
+            self.get_parameter("stt_action_name").value,
+            callback_group=self._stt_group,
+        )
+        self.post_tts_guard_sec = max(0.0, float(self.get_parameter("post_tts_guard_ms").value) / 1000.0)
+        self._piper_voice = None
+        self._piper_model_path = None
 
         # -------------------------------------------------------
         # Temporary guest memory
@@ -61,7 +73,7 @@ class ReceptionistActionServer(Node):
             execute_callback=self.execute_cb,
         )
 
-        self.get_logger().info("Receptionist Action Server Ready")
+        self.get_logger().info("[receptionist] Action server ready; STT is delegated to voice_stt.")
 
         # -------------------------------------------------------
         # Dataset choices
@@ -156,43 +168,23 @@ class ReceptionistActionServer(Node):
         self.get_logger().info(f"Robot says: {text}")
         self.get_logger().info(f"Piper model path: {model_path}")
 
-        output_wav = "/tmp/receptionist_tts.wav"
-
-        cmd = [
-            "piper",
-            "--model",
-            model_path,
-            "--output_file",
-            output_wav
-        ]
-
         try:
-            p1 = subprocess.run(
-                cmd,
-                input=(text + "\n").encode(),
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE
-            )
-
-            if p1.returncode != 0:
-                self.get_logger().error(
-                    f"Piper failed: {p1.stderr.decode(errors='ignore')}"
-                )
-                return False
-
-            self.get_logger().info(f"Piper generated {output_wav}")
-
-            p2 = subprocess.run(
-                ["aplay", "-q", output_wav],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE
-            )
-
-            if p2.returncode != 0:
-                self.get_logger().error(
-                    f"aplay failed: {p2.stderr.decode(errors='ignore')}"
-                )
-                return False
+            if PiperVoice is None:
+                raise RuntimeError("piper-tts is not installed")
+            if self._piper_voice is None or self._piper_model_path != model_path:
+                self._piper_voice = PiperVoice.load(model_path)
+                self._piper_model_path = model_path
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temporary:
+                output_wav = temporary.name
+            try:
+                with wave.open(output_wav, "wb") as wav_file:
+                    self._piper_voice.synthesize_wav(text, wav_file)
+                playback = subprocess.run(["aplay", "-q", output_wav], capture_output=True, text=True, timeout=60)
+                if playback.returncode != 0:
+                    raise RuntimeError(f"aplay failed: {playback.stderr[:200]}")
+            finally:
+                if os.path.exists(output_wav):
+                    os.unlink(output_wav)
 
             self.get_logger().info("Audio played successfully")
             return True
@@ -218,191 +210,36 @@ class ReceptionistActionServer(Node):
         )
 
     # -------------------------------------------------------
-    # Record
+    # Shared STT action
     # -------------------------------------------------------
-    def record(self, mic: str, sec: float, path: str) -> Optional[str]:
-        dur = max(1, int(sec))
-
-        self.get_logger().info(f"Recording for {dur} seconds...")
-        self.get_logger().info(f"Mic device: {mic}")
-
-        cmd = [
-            "arecord",
-            "-D", mic,
-            "-f", "S16_LE",
-            "-c", "1",
-            "-r", str(self.sample_rate),
-            "-d", str(dur),
-            path,
-        ]
-
-        r = subprocess.run(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE
+    def transcribe_via_voice_stt(self, mic: str, sec: float, model: str, lang: str) -> str:
+        """Special function: Reuse voice_stt so Receptionist never owns a Whisper model."""
+        # Section: Action callbacks run on a reentrant group while this receptionist workflow waits.
+        if not self._stt_client.wait_for_server(timeout_sec=5.0):
+            self.get_logger().error("[receptionist] Shared STT action is unavailable.")
+            return ""
+        goal = TranscribeSpeech.Goal()
+        goal.record_sec = float(sec)
+        goal.mic_device = mic
+        goal.whisper_model = model
+        goal.whisper_language = lang
+        goal.wav_path = ""
+        completed = threading.Event()
+        response = {}
+        self._stt_client.send_goal_async(goal).add_done_callback(
+            lambda future: (response.update(handle=future.result()), completed.set())
         )
-
-        if r.returncode != 0:
-            self.get_logger().error(
-                f"arecord failed: {r.stderr.decode(errors='ignore')}"
-            )
-            return None
-
-        self.get_logger().info(f"Saved recording: {path}")
-        return path
-
-    # -------------------------------------------------------
-    # Audio preprocessing
-    # -------------------------------------------------------
-    def highpass_filter(self, audio_np: np.ndarray, cutoff: float = 100.0) -> np.ndarray:
-        nyq = 0.5 * self.sample_rate
-        norm = cutoff / nyq
-        b, a = butter(4, norm, btype="high", analog=False)
-        return lfilter(b, a, audio_np)
-
-    def normalize_audio(self, audio_np: np.ndarray, target_peak: float = 0.85) -> np.ndarray:
-        peak = np.max(np.abs(audio_np))
-
-        if peak < 1e-6:
-            return audio_np
-
-        gain = target_peak / peak
-        return np.clip(audio_np * gain, -1.0, 1.0)
-
-    def load_wav_as_float(self, path: str) -> np.ndarray:
-        with wave.open(path, "rb") as wf:
-            n_channels = wf.getnchannels()
-            sampwidth = wf.getsampwidth()
-            framerate = wf.getframerate()
-            n_frames = wf.getnframes()
-            raw = wf.readframes(n_frames)
-
-        if n_channels != 1 or sampwidth != 2 or framerate != self.sample_rate:
-            raise ValueError(
-                f"Expected mono 16-bit {self.sample_rate} Hz WAV, got "
-                f"{n_channels} ch, {sampwidth * 8} bit, {framerate} Hz"
-            )
-
-        audio_int16 = np.frombuffer(raw, dtype=np.int16).astype(np.float32)
-        return audio_int16 / 32768.0
-
-    def save_float_as_wav(self, audio_np: np.ndarray, path: str):
-        audio_np = np.clip(audio_np, -1.0, 1.0)
-        audio_int16 = (audio_np * 32767.0).astype(np.int16)
-
-        with wave.open(path, "wb") as wf:
-            wf.setnchannels(1)
-            wf.setsampwidth(2)
-            wf.setframerate(self.sample_rate)
-            wf.writeframes(audio_int16.tobytes())
-
-    # -------------------------------------------------------
-    # VAD
-    # -------------------------------------------------------
-    def trim_with_vad(self, input_wav: str, output_wav: str) -> Optional[str]:
-        vad = webrtcvad.Vad(self.vad_mode)
-
-        with wave.open(input_wav, "rb") as wf:
-            n_channels = wf.getnchannels()
-            sampwidth = wf.getsampwidth()
-            framerate = wf.getframerate()
-
-            if n_channels != 1 or sampwidth != 2 or framerate != self.sample_rate:
-                self.get_logger().error(
-                    f"VAD expects mono 16-bit {self.sample_rate} Hz WAV"
-                )
-                return None
-
-            pcm_data = wf.readframes(wf.getnframes())
-
-        frame_ms = 30
-        frame_bytes = int(self.sample_rate * frame_ms / 1000) * 2
-        num_frames = len(pcm_data) // frame_bytes
-
-        frames = [
-            pcm_data[i * frame_bytes:(i + 1) * frame_bytes]
-            for i in range(num_frames)
-        ]
-
-        speech_flags = []
-
-        for fr in frames:
-            try:
-                speech_flags.append(vad.is_speech(fr, self.sample_rate))
-            except Exception:
-                speech_flags.append(False)
-
-        speech_indices = [
-            i for i, flag in enumerate(speech_flags)
-            if flag
-        ]
-
-        if not speech_indices:
-            self.get_logger().warn("VAD found no speech, using original audio")
-            return input_wav
-
-        pad_frames = 4
-        start_idx = max(0, speech_indices[0] - pad_frames)
-        end_idx = min(len(frames), speech_indices[-1] + pad_frames + 1)
-
-        trimmed_pcm = b"".join(frames[start_idx:end_idx])
-
-        with wave.open(output_wav, "wb") as wf:
-            wf.setnchannels(1)
-            wf.setsampwidth(2)
-            wf.setframerate(self.sample_rate)
-            wf.writeframes(trimmed_pcm)
-
-        self.get_logger().info(f"VAD trimmed audio: {output_wav}")
-        return output_wav
-
-    def preprocess_audio(self, input_wav: str, tag: str) -> str:
-        vad_wav = f"/tmp/{tag}_vad.wav"
-        filtered_wav = f"/tmp/{tag}_clean.wav"
-
-        trimmed_path = self.trim_with_vad(input_wav, vad_wav)
-
-        if trimmed_path is None:
-            raise RuntimeError("VAD trimming failed")
-
-        audio_np = self.load_wav_as_float(trimmed_path)
-        audio_np = self.highpass_filter(audio_np, cutoff=100.0)
-        audio_np = self.normalize_audio(audio_np, target_peak=0.85)
-
-        self.save_float_as_wav(audio_np, filtered_wav)
-
-        self.get_logger().info(f"Clean audio saved: {filtered_wav}")
-        return filtered_wav
-
-    # -------------------------------------------------------
-    # Faster Whisper
-    # -------------------------------------------------------
-    def load_faster_whisper(self, model_name: str):
-        if self._whisper_model is None or self._whisper_model_name != model_name:
-            self.get_logger().info(f"Loading faster-whisper model: {model_name}")
-
-            self._whisper_model = WhisperModel(
-                model_name,
-                device="cpu",
-                compute_type="int8",
-            )
-
-            self._whisper_model_name = model_name
-
-    def transcribe(self, path: str, model_name: str, lang: str) -> str:
-        self.load_faster_whisper(model_name)
-
-        segments, info = self._whisper_model.transcribe(
-            path,
-            language=lang if lang else None,
-            vad_filter=False,
-            beam_size=5,
+        if not completed.wait(timeout=10.0) or not response.get("handle") or not response["handle"].accepted:
+            return ""
+        completed.clear()
+        response["handle"].get_result_async().add_done_callback(
+            lambda future: (response.update(result=future.result()), completed.set())
         )
-
-        text = " ".join(seg.text.strip() for seg in segments).strip()
-        self.get_logger().info(f"Transcript: {text}")
-
-        return text
+        if not completed.wait(timeout=max(20.0, float(sec) + 30.0)):
+            response["handle"].cancel_goal_async()
+            return ""
+        wrapped = response.get("result")
+        return wrapped.result.transcript.strip() if wrapped and wrapped.result.success else ""
 
     # -------------------------------------------------------
     # Ask and transcribe
@@ -423,23 +260,11 @@ class ReceptionistActionServer(Node):
         No extra sleep delay.
         """
 
-        self.speak(question, piper_model)
-
-        raw_wav = f"/tmp/{tag}_raw.wav"
-
-        ok = self.record(mic, sec, raw_wav)
-
-        if not ok:
+        if not self.speak(question, piper_model):
             return ""
-
-        try:
-            clean_wav = self.preprocess_audio(raw_wav, tag)
-            transcript = self.transcribe(clean_wav, whisper_model, lang)
-            return transcript
-
-        except Exception as e:
-            self.get_logger().error(f"{tag} transcription failed: {e}")
-            return ""
+        # Section: Receptionist's direct Piper path has no shared completion topic, so guard locally.
+        time.sleep(self.post_tts_guard_sec)
+        return self.transcribe_via_voice_stt(mic, sec, whisper_model, lang)
 
     # -------------------------------------------------------
     # Ask with retry and skip
@@ -1394,7 +1219,11 @@ def main():
     node = ReceptionistActionServer()
 
     try:
-        rclpy.spin(node)
+        # Section: Allow shared-STT action client callbacks while Receptionist blocks in its action workflow.
+        executor = MultiThreadedExecutor(num_threads=3)
+        executor.add_node(node)
+        executor.spin()
+        executor.remove_node(node)
 
     except KeyboardInterrupt:
         pass
@@ -1414,8 +1243,8 @@ if __name__ == "__main__":
 #   replay_last_profile: false,
 #   record_sec: 4.0,
 #   mic_device: 'default',
-#   piper_model_path: '/home/yanjiun68/piper_models/en_US-lessac-medium.onnx',
-#   whisper_model: 'base',
+#   piper_model_path: '~/piper_models/en_US-lessac-high.onnx',
+#   whisper_model: 'turbo',
 #   whisper_language: 'en',
 #   guest_name: '',
 #   guest_age: 0,
