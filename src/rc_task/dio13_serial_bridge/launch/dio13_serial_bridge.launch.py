@@ -5,7 +5,7 @@ from launch_ros.actions import Node
 
 
 def generate_launch_description() -> LaunchDescription:
-    """Launch the DIO13 serial bridge with configurable serial settings."""
+    """Launch the Arduino Nano D2 serial bridge with configurable settings."""
     return LaunchDescription([
         DeclareLaunchArgument(
             'port',
@@ -20,12 +20,12 @@ def generate_launch_description() -> LaunchDescription:
         DeclareLaunchArgument(
             'publish_only_on_change',
             default_value='false',
-            description='Publish only when the DIO13 value changes.',
+            description='Publish only when the Nano D2 state changes.',
         ),
         Node(
             package='dio13_serial_bridge',
-            executable='dio13_serial_publisher',
-            name='dio13_serial_publisher',
+            executable='nano_d2_serial_publisher',
+            name='nano_d2_serial_publisher',
             output='screen',
             parameters=[{
                 'port': LaunchConfiguration('port'),

@@ -5,6 +5,7 @@
 #include <atomic>
 #include <algorithm>
 #include <cstdint>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <rclcpp/executors/multi_threaded_executor.hpp>
@@ -12,6 +13,7 @@
 #include <rclcpp_action/rclcpp_action.hpp>
 #include <robot_ai_interfaces/action/execute_action_queue.hpp>
 #include <set>
+#include <sstream>
 #include <std_msgs/msg/string.hpp>
 #include <string>
 #include <thread>
@@ -94,6 +96,16 @@ class GpsrExecutor final : public rclcpp::Node {
   }
 
  private:
+  // Section: Preflight metadata binds each required data key to its nearest prior
+  // producer while retaining an exact structural-validation failure location.
+  struct QueueValidation {
+    bool valid{true};
+    std::size_t error_index{0U};
+    std::string error_action_type;
+    std::string message;
+    std::vector<std::map<std::string, std::string>> data_producers;
+  };
+
   // Special function: Load the shared person-search route without changing safe
   // defaults.
   void load_person_search_policy(const std::string &config_file) {
@@ -278,19 +290,110 @@ class GpsrExecutor final : public rclcpp::Node {
     std::thread([this, goal_handle]() { execute(goal_handle); }).detach();
   }
 
-  // Special function: Publish one authoritative queue status snapshot.
+  // Special function: Reject malformed identities and prerequisite references before
+  // any lifecycle transition or robot skill execution can begin.
+  QueueValidation validate_queue(const std::vector<ActionStepData> &actions,
+                                 const Json &initial_variables) const {
+    QueueValidation validation;
+    validation.data_producers.resize(actions.size());
+    std::set<std::string> prior_step_ids;
+    std::map<std::string, std::string> latest_data_producer;
+    for (std::size_t index = 0; index < actions.size(); ++index) {
+      const auto &action = actions[index];
+      auto reject = [&](const std::string &message) {
+        validation.valid = false;
+        validation.error_index = index;
+        validation.error_action_type = action.action_type;
+        validation.message = message;
+      };
+      if (action.step_id.empty()) {
+        reject("ActionQueue contains an empty step_id at index " +
+               std::to_string(index) + ".");
+        return validation;
+      }
+      if (prior_step_ids.count(action.step_id) != 0U) {
+        reject("ActionQueue contains duplicate step_id '" + action.step_id + "'.");
+        return validation;
+      }
+      for (const auto &dependency : action.requires_success) {
+        if (dependency.empty() || prior_step_ids.count(dependency) == 0U) {
+          reject("Step '" + action.step_id +
+                 "' references unknown or future requires_success step '" +
+                 dependency + "'.");
+          return validation;
+        }
+      }
+      for (const auto &key : action.requires_data) {
+        if (key.empty()) {
+          reject("Step '" + action.step_id +
+                 "' contains an empty requires_data key.");
+          return validation;
+        }
+        if (initial_variables.contains(key)) {
+          validation.data_producers[index][key] = "";
+          continue;
+        }
+        const auto producer = latest_data_producer.find(key);
+        if (producer == latest_data_producer.end()) {
+          reject("Step '" + action.step_id + "' requires data key '" + key +
+                 "' with no prior producer or initial blackboard value.");
+          return validation;
+        }
+        validation.data_producers[index][key] = producer->second;
+      }
+      prior_step_ids.insert(action.step_id);
+      if (!action.result_variable.empty()) {
+        latest_data_producer[action.result_variable] = action.step_id;
+      }
+    }
+    return validation;
+  }
+
+  // Special function: Join dependency diagnostics without losing any failed producer.
+  static std::string join_diagnostics(const std::vector<std::string> &diagnostics) {
+    std::ostringstream stream;
+    for (std::size_t index = 0; index < diagnostics.size(); ++index) {
+      if (index != 0U) stream << "; ";
+      stream << diagnostics[index];
+    }
+    return stream.str();
+  }
+
+  // Special function: Publish one authoritative queue status snapshot with progress,
+  // correlated step identities, and aggregate result counts.
   void publish_status(const std::shared_ptr<GoalHandle> &goal_handle,
                       const std::string &phase, std::size_t index,
+                      std::size_t total_steps, const std::string &step_id,
                       const std::string &action_type,
                       const std::vector<SkillResultData> &results,
+                      const std::vector<std::string> &result_step_ids,
                       const std::string &outcome = "") {
     Json result_values = Json::array();
-    for (const auto &result : results) result_values.push_back(result_to_json(result));
+    std::size_t successful_steps = 0U;
+    std::size_t skipped_steps = 0U;
+    for (std::size_t result_index = 0; result_index < results.size(); ++result_index) {
+      auto value = result_to_json(results[result_index]);
+      if (result_index < result_step_ids.size()) {
+        value["step_id"] = result_step_ids[result_index];
+      }
+      result_values.push_back(value);
+      successful_steps += results[result_index].outcome == SUCCESS ? 1U : 0U;
+      skipped_steps +=
+          results[result_index].outcome == SKIPPED_DEPENDENCY_FAILED ? 1U : 0U;
+    }
     Json payload{{"phase", phase},
                  {"current_index", index},
+                 {"processed_count", results.size()},
+                 {"total_steps", total_steps},
+                 {"step_id", step_id},
                  {"current_action_type", action_type},
                  {"outcome", outcome},
-                 {"results", result_values}};
+                 {"results", result_values},
+                 {"summary",
+                  {{"successful_steps", successful_steps},
+                   {"failed_steps", results.size() - successful_steps - skipped_steps},
+                   {"skipped_steps", skipped_steps},
+                   {"total_steps", total_steps}}}};
     std_msgs::msg::String status;
     status.data = payload.dump();
     status_pub_->publish(status);
@@ -304,8 +407,8 @@ class GpsrExecutor final : public rclcpp::Node {
     }
   }
 
-  // Special function: Run prerequisite checks, lifecycle barriers, skill dispatch, and
-  // retries.
+  // Special function: Run validated dependency checks, lifecycle barriers, skill
+  // dispatch, retries, and best-effort sequential aggregation.
   void execute(const std::shared_ptr<GoalHandle> goal_handle) {
     auto finish_admission = [this]() {
       std::lock_guard<std::mutex> lock(admission_mutex_);
@@ -320,47 +423,126 @@ class GpsrExecutor final : public rclcpp::Node {
     blackboard->set<std::vector<std::string>>(bb::COMPLETED_STEP_IDS, {});
     blackboard->set<std::map<std::string, int>>(bb::RECOVERY_ATTEMPTS, {});
     std::vector<SkillResultData> results;
-    std::set<std::string> completed;
+    std::vector<std::string> result_step_ids;
+    std::vector<ActionStepData> actions;
+    actions.reserve(queue.steps.size());
+    for (const auto &step : queue.steps) actions.push_back(action_from_msg(step));
+    std::map<std::string, std::string> step_outcomes;
+    for (const auto &action : actions) {
+      step_outcomes[action.step_id] = "not_executed";
+    }
     std::string terminal = SUCCESS;
-    publish_status(goal_handle, "QUEUE_STARTED", 0, "", results);
-    for (std::size_t index = 0; index < queue.steps.size(); ++index) {
-      const auto action = action_from_msg(queue.steps[index]);
+    bool abnormal_termination = false;
+    const auto initial_variables =
+        bb_get<Json>(blackboard, bb::RESULT_VARIABLES, Json::object());
+    const auto validation = validate_queue(actions, initial_variables);
+    publish_status(goal_handle, "QUEUE_STARTED", 0, actions.size(), "", "", results,
+                   result_step_ids);
+
+    // Section: Structural queue errors terminate before the first lifecycle prepare.
+    if (!validation.valid) {
+      const auto action_type = validation.error_action_type.empty()
+                                   ? std::string{"ACTION_QUEUE"}
+                                   : validation.error_action_type;
+      results.push_back(make_skill_result(action_type, INVALID_INPUT,
+                                          validation.message, Json::object(), false,
+                                          true));
+      result_step_ids.push_back(
+          validation.error_index < actions.size()
+              ? actions[validation.error_index].step_id
+              : std::string{});
+      terminal = INVALID_INPUT;
+      abnormal_termination = true;
+      publish_status(goal_handle, "STEP_FAILED", validation.error_index,
+                     actions.size(), result_step_ids.back(), action_type, results,
+                     result_step_ids, terminal);
+    }
+
+    for (std::size_t index = 0; validation.valid && index < actions.size(); ++index) {
+      const auto &action = actions[index];
       if (goal_handle->is_canceling()) {
         terminal = CANCELED;
+        abnormal_termination = true;
         break;
       }
-      bool prerequisites = true;
+
+      // Section: A valid runtime dependency failure skips only its consumer; it does
+      // not prepare lifecycle resources or dispatch a skill goal.
+      std::vector<std::string> failed_dependencies;
       for (const auto &dependency : action.requires_success) {
-        if (completed.count(dependency) == 0U) prerequisites = false;
+        const auto dependency_outcome = step_outcomes.at(dependency);
+        if (dependency_outcome != SUCCESS) {
+          failed_dependencies.push_back("step " + dependency + " (" +
+                                        dependency_outcome + ")");
+        }
       }
       const auto variables =
           bb_get<Json>(blackboard, bb::RESULT_VARIABLES, Json::object());
       for (const auto &key : action.requires_data) {
-        if (!variables.contains(key)) prerequisites = false;
+        const auto &producer = validation.data_producers[index].at(key);
+        if (!producer.empty() && step_outcomes.at(producer) != SUCCESS) {
+          failed_dependencies.push_back("data " + key + " from step " + producer +
+                                        " (" + step_outcomes.at(producer) + ")");
+        } else if (!variables.contains(key)) {
+          // Section: A successful producer that omitted its declared result is a
+          // fatal execution contract violation, not an ordinary dependency skip.
+          const auto message = producer.empty()
+                                   ? "Required initial data key '" + key +
+                                         "' disappeared before step '" +
+                                         action.step_id + "'."
+                                   : "Required data key '" + key + "' is missing even "
+                                     "though producer step '" + producer +
+                                         "' reported success.";
+          auto result = make_skill_result(action.action_type, FATAL_FAILURE, message,
+                                          Json::object(), false, true);
+          results.push_back(result);
+          result_step_ids.push_back(action.step_id);
+          step_outcomes[action.step_id] = result.outcome;
+          terminal = FATAL_FAILURE;
+          abnormal_termination = true;
+          publish_status(goal_handle, "STEP_FAILED", index, actions.size(),
+                         action.step_id, action.action_type, results,
+                         result_step_ids, result.outcome);
+          break;
+        }
       }
-      if (!prerequisites) {
-        results.push_back(make_skill_result(action.action_type, INVALID_INPUT,
-                                            "Action prerequisites are not satisfied.",
-                                            Json::object(), false, true));
-        terminal = INVALID_INPUT;
-        break;
+      if (abnormal_termination) break;
+      if (!failed_dependencies.empty()) {
+        const auto message = "Skipped because required dependencies did not succeed: " +
+                             join_diagnostics(failed_dependencies) + ".";
+        auto result = make_skill_result(action.action_type,
+                                        SKIPPED_DEPENDENCY_FAILED, message,
+                                        Json::object(), false, false);
+        results.push_back(result);
+        result_step_ids.push_back(action.step_id);
+        step_outcomes[action.step_id] = result.outcome;
+        publish_status(goal_handle, "STEP_SKIPPED", index, actions.size(),
+                       action.step_id, action.action_type, results, result_step_ids,
+                       result.outcome);
+        continue;
       }
       blackboard->set<ActionStepData>(bb::CURRENT_ACTION, action);
-      publish_status(goal_handle, "PREPARING_SKILL", index, action.action_type,
-                     results);
+      publish_status(goal_handle, "PREPARING_SKILL", index, actions.size(),
+                     action.step_id, action.action_type, results, result_step_ids);
       auto prepared = lifecycle_->start(action.action_type);
       if (!prepared.first) {
-        results.push_back(make_skill_result(action.action_type, SKILL_UNAVAILABLE,
-                                            prepared.second, Json::object(), false,
-                                            true));
+        auto result = make_skill_result(action.action_type, SKILL_UNAVAILABLE,
+                                        prepared.second, Json::object(), false, true);
+        results.push_back(result);
+        result_step_ids.push_back(action.step_id);
+        step_outcomes[action.step_id] = result.outcome;
         terminal = SKILL_UNAVAILABLE;
+        abnormal_termination = true;
+        publish_status(goal_handle, "STEP_FAILED", index, actions.size(),
+                       action.step_id, action.action_type, results, result_step_ids,
+                       result.outcome);
         break;
       }
       SkillResultData result;
       unsigned attempt = 0;
       while (true) {
-        publish_status(goal_handle, "EXECUTING_SKILL", index, action.action_type,
-                       results);
+        publish_status(goal_handle, "EXECUTING_SKILL", index, actions.size(),
+                       action.step_id, action.action_type, results, result_step_ids);
         try {
           auto skill = make_skill_state_machine(action.action_type, clients_);
           const auto outcome = (*skill)(blackboard);
@@ -394,29 +576,51 @@ class GpsrExecutor final : public rclcpp::Node {
         }
       }
       results.push_back(result);
+      result_step_ids.push_back(action.step_id);
+      step_outcomes[action.step_id] = result.outcome;
+      if (result.fatal || is_fatal(result.outcome)) {
+        terminal = result.outcome;
+        abnormal_termination = true;
+        publish_status(goal_handle, "STEP_FAILED", index, actions.size(),
+                       action.step_id, action.action_type, results, result_step_ids,
+                       result.outcome);
+        break;
+      }
       if (result.outcome == SUCCESS) {
-        if (!action.step_id.empty()) completed.insert(action.step_id);
+        auto completed = bb_get<std::vector<std::string>>(
+            blackboard, bb::COMPLETED_STEP_IDS, {});
+        completed.push_back(action.step_id);
+        blackboard->set<std::vector<std::string>>(bb::COMPLETED_STEP_IDS, completed);
         if (!action.result_variable.empty()) {
           auto updated = bb_get<Json>(blackboard, bb::RESULT_VARIABLES, Json::object());
           updated[action.result_variable] = result.payload;
           blackboard->set<Json>(bb::RESULT_VARIABLES, updated);
         }
-        publish_status(goal_handle, "STEP_COMMITTED", index, action.action_type,
-                       results, result.outcome);
+        publish_status(goal_handle, "STEP_COMMITTED", index, actions.size(),
+                       action.step_id, action.action_type, results, result_step_ids,
+                       result.outcome);
         continue;
       }
-      terminal = result.outcome;
-      break;
+      publish_status(goal_handle, "STEP_FAILED", index, actions.size(), action.step_id,
+                     action.action_type, results, result_step_ids, result.outcome);
+      // Section: Cleanup has succeeded and retries are exhausted, so the ordinary
+      // task failure is committed before the next independent ordered step.
     }
+
+    // Section: Only a complete normal traversal receives the aggregate business
+    // outcome; fatal diagnostics retain their specific terminal outcome.
+    if (!abnormal_termination) terminal = aggregate_queue_outcome(results);
     auto action_result = std::make_shared<Action::Result>();
     action_result->success = terminal == SUCCESS;
     action_result->outcome = terminal;
     for (const auto &result : results) {
       action_result->results.push_back(result_to_msg(result));
     }
-    publish_status(goal_handle, "QUEUE_FINISHED", queue.steps.size(), "", results,
-                   terminal);
-    if (terminal == SUCCESS)
+    publish_status(goal_handle, "QUEUE_FINISHED", results.size(), actions.size(), "",
+                   "", results, result_step_ids, terminal);
+    // Section: SUCCESS, PARTIAL_SUCCESS, and FAILED are normal executor traversal
+    // completions even though only SUCCESS sets the business success flag.
+    if (!abnormal_termination)
       goal_handle->succeed(action_result);
     // Section: A declined spoken confirmation is a business-level CANCELED result,
     // not a ROS action cancellation. rclcpp permits canceled() only after the client

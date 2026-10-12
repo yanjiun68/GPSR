@@ -14,7 +14,7 @@ from launch.substitutions import LaunchConfiguration, PythonExpression
 def _resolve_serial_roles():
     default_base = "/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0"
     default_lift = "auto"
-    default_dio13 = "/dev/ttyUSB0"
+    default_nano_d2 = "/dev/ttyUSB0"
     resolver = os.path.join(
         get_package_prefix("putrabot_bringup"),
         "lib",
@@ -32,11 +32,11 @@ def _resolve_serial_roles():
         payload = json.loads(result.stdout)
         base_port = payload.get("base_port") or default_base
         lift_port = payload.get("lift_port") or default_lift
-        dio13_port = payload.get("dio13_port") or default_dio13
+        nano_d2_port = payload.get("nano_d2_port") or default_nano_d2
         return {
             "base_port": base_port,
             "lift_port": lift_port,
-            "dio13_port": dio13_port,
+            "nano_d2_port": nano_d2_port,
             "ports": payload.get("ports") or [],
             "debug": payload.get("debug") or [],
         }
@@ -44,7 +44,7 @@ def _resolve_serial_roles():
         return {
             "base_port": default_base,
             "lift_port": default_lift,
-            "dio13_port": default_dio13,
+            "nano_d2_port": default_nano_d2,
             "ports": [],
             "debug": ["resolver failed, using defaults"],
         }
@@ -54,7 +54,7 @@ def generate_launch_description():
     resolved_ports = _resolve_serial_roles()
     base_port = resolved_ports["base_port"]
     lift_port = resolved_ports["lift_port"]
-    dio13_port = resolved_ports["dio13_port"]
+    nano_d2_port = resolved_ports["nano_d2_port"]
     lidar_serial_port = LaunchConfiguration('serial_port')
     enable_arm_lift_drivers = LaunchConfiguration('enable_arm_lift_drivers')
     button_launch = IncludeLaunchDescription(
@@ -66,7 +66,7 @@ def generate_launch_description():
             )
         ),
         launch_arguments={
-            "port": dio13_port,
+            "port": nano_d2_port,
         }.items(),
         condition=UnlessCondition(LaunchConfiguration('enable_person_following'))
     )
@@ -215,7 +215,7 @@ def generate_launch_description():
         msg=(
             "[drivers_bringup] serial ports found="
             f"{resolved_ports['ports']} base_port={base_port} lift_port={lift_port} "
-            f"dio13_port={dio13_port} "
+            f"nano_d2_port={nano_d2_port} "
             f"debug={resolved_ports['debug']}"
         )
     )

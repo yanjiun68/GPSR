@@ -35,7 +35,7 @@ There is **no Energy page**. `/battery_state` may still be observed at low rate 
 - Automatic ROS-graph lookup of `Twist` vs `TwistStamped` before creating velocity subscriptions.
 - RX200 joint feedback from existing `sensor_msgs/JointState` topics.
 - GPSR/YASMIN and phase-supervisor optional JSON status hooks.
-- GPSR original/normalized commands and full structured action queue state.
+- GPSR original/normalized commands, pre-execution skill readiness, and full structured action queue state.
 - Independent Voice STT/TTS presence, diagnostic health/activity, and actual STT transcript.
 - CPU/RAM/load/disk/thermal telemetry directly from `/proc`, `/sys`, and `statvfs`.
 - NVIDIA GPU utilization/VRAM/temperature/power through structured `nvidia-smi` query output.
@@ -118,9 +118,9 @@ The terminal uses semantic colors:
 
 ```text
 cyan/blue   active tab and section headings
-green       OK / ACTIVE / RUNNING / DONE / LISTENING / SPEAKING
-amber       WARN / BLOCKED / STALE / RETRYING / SKIPPED / CANCELED
-red         ERROR / FAILED / MISSING / ABORTED
+green       OK / ACTIVE / READY / RUNNING / DONE / LISTENING / SPEAKING
+amber       WARN / PARTIAL / BLOCKED / UNKNOWN / STALE / RETRYING / SKIPPED / CANCELED
+red         ERROR / FAILED / UNAVAILABLE / MISSING / ABORTED
 white       primary values
 gray        labels, table headers, secondary information
 ```
@@ -173,30 +173,36 @@ The UI never parses natural-language commands or reconstructs queue state from l
 ```text
 /gpsr/task_plan                    std_msgs/msg/String JSON (scheduler owner)
 /gpsr/state                        std_msgs/msg/String JSON (scheduler owner)
+/gpsr/action_queue_validation_json std_msgs/msg/String JSON (preflight owner)
 /gpsr/action_queue_status_json     std_msgs/msg/String JSON (executor owner)
 /voice/stt/transcript              std_msgs/msg/String (voice STT owner)
 /diagnostics                       diagnostic_msgs/msg/DiagnosticArray
 /putrabot_bringup/managed_process_status_json
 ```
 
-The scheduler plan and executor status publishers are event-driven and transient-local. They publish without checking for UI subscribers and retain their latest snapshots, so the scheduler and executor run normally when `monitor_core` and the TUI are stopped. A monitor started after command acceptance receives the latest plan and queue status. The executor reports queue start, action selection, retry, action completion, and queue completion. The existing `ExecuteActionQueue` feedback fields receive the same cursor/action/status values.
+The task plan represents scheduler intent. Pre-execution validation represents runtime capability/readiness before physical execution. Queue status represents actual executor runtime state. These dimensions remain separate: for example, an action can be `UNAVAILABLE` during preflight while its executor state is still `PENDING`, or can be `READY` during preflight and later fail during execution.
 
-The Overview page shows the accepted ActionQueue as an ordered live task table, and the GPSR page shows the complete sequence with domain, action parameters, and retry details. Parameters are retained as structured monitor-state data and rendered as compact `key=value` text, including nested selectors and filters. Operator-facing task statuses are `IN QUEUE`, `RUNNING`, `RETRYING`, `COMPLETED`, `ABORTED`, and `SKIPPED`. When a queue aborts, the failed task and every unstarted remainder are marked `ABORTED` because none of them can continue.
+The scheduler plan, validation, and executor status publishers may be event-driven and transient-local. They publish without checking for UI subscribers and retain their latest snapshots, so robot execution runs normally when `monitor_core` and the TUI are stopped. The monitor uses reliable transient-local QoS for the optional validation source. If `/gpsr/action_queue_validation_json` does not exist, the monitor still starts and the GPSR page reports validation as not available without treating that absence as a robot failure.
+
+The Overview page shows a compact preflight result and readiness counts alongside the accepted ActionQueue. The GPSR page shows detailed preflight readiness, unavailable skills, dependency-blocked actions, and the complete runtime sequence with domain, action parameters, preflight state, execution status, and retry details. Parameters are retained as structured monitor-state data and rendered as compact `key=value` text, including nested selectors and filters. Operator-facing task statuses are `IN QUEUE`, `RUNNING`, `RETRYING`, `COMPLETED`, `ABORTED`, and `SKIPPED`. Preflight states are independently normalized to `READY`, `UNAVAILABLE`, `BLOCKED`, or `UNKNOWN`.
 
 ```text
-Scheduler plan/state ─┐
-                      ├─> monitor_core cache ─> state_json ─> nine-page TUI
-Executor queue status ┤
-Voice transcript/diag ┘
+Scheduler plan/state ────────────┐
+                                 │
+Pre-execution validation ────────┼─> monitor_core cache
+                                 │          ↓
+Executor queue status ───────────┤      state_json
+                                 │          ↓
+Voice transcript/diagnostics ────┘      nine-page TUI
 ```
 
-The arrows are one-way ROS topic subscriptions. Neither the scheduler nor the executor imports, launches, calls, or waits for `gpsr_sys_ui`.
+The arrows are one-way ROS topic subscriptions. `gpsr_sys_ui` is an observer only: it does not call services, transition lifecycle nodes, start skill servers, or alter scheduler/executor behavior. Neither the scheduler nor the executor imports, launches, calls, or waits for `gpsr_sys_ui`.
 
 STT and TTS are ordinary ROS nodes, not lifecycle nodes. Their verified graph names are `/voice_stt` and `/voice_tts`. Voice diagnostics distinguish `LISTENING`, `PROCESSING` (when an owner reports it), `SPEAKING`, and `IDLE`. Transcript age is display metadata only and never creates a stale-health failure.
 
 No structured voice interface currently exposes speech confidence or the last TTS utterance, so the UI deliberately does not invent those values. If GPSR or voice nodes start after the monitor, graph polling and transient-local queue status allow the pages to recover without restarting the UI.
 
-Queue display states are normalized centrally to `PENDING`, `RUNNING`, `DONE`, `SKIPPED`, `RETRYING`, `FAILED`, `CANCELED`, or `UNKNOWN`; every item also retains its producer-supplied raw state. The Events page emits command, queue, action, retry, failure, completion, and Voice presence transitions without changing scheduler/executor behavior.
+Queue display states are normalized centrally to `PENDING`, `RUNNING`, `DONE`, `SKIPPED`, `RETRYING`, `FAILED`, `CANCELED`, or `UNKNOWN`; every item also retains its producer-supplied raw state. Validation values are normalized separately from structured owner data and retain their raw state. The Events page emits command, preflight summary, unavailable/blocked skill, queue, action, retry, failure, completion, and Voice presence transitions without changing scheduler/executor behavior.
 
 ## Interface audit
 
@@ -221,11 +227,13 @@ Hardware-free tests cover:
 - Nav2 velocity topic type resolution, including ambiguous/unsupported cases.
 - Voice STT/TTS independent presence, diagnostics, activity, transcript, and late startup.
 - GPSR command provenance, queue mapping, domains, targets, retries, skipped/failed/canceled states.
+- GPSR preflight normalization, step-ID/index merging, stale-command protection, and event deduplication.
+- Independent preflight readiness and executor runtime status presentation.
 - Terminal wrapping, truncation, column fitting, page order, and current-row markers.
 - Executor queue-status snapshots and observer-failure isolation.
 
 Run:
 
 ```bash
-python3 -m pytest -q test
+python3 -m pytest -q src/GPSR/gpsr_sys_ui/test
 ```

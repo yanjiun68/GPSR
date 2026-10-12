@@ -81,7 +81,8 @@ def generate_launch_description() -> LaunchDescription:
         DeclareLaunchArgument("roi_topic", default_value="/vision/roi/result"),
         DeclareLaunchArgument("model_path", default_value="/home/yanjiun68/ai/models/UnifoLM-ER-Flow"),
         DeclareLaunchArgument("inference_rate_hz", default_value="1.0"),
-        DeclareLaunchArgument("tracking_rate_hz", default_value="20.0"),
+        # Section: Cap shared ROI tracker updates at the 15 Hz perception budget.
+        DeclareLaunchArgument("tracking_rate_hz", default_value="15.0"),
         DeclareLaunchArgument("show_gui", default_value="false"),
         DeclareLaunchArgument("config_file", default_value=default_config),
         DeclareLaunchArgument("start_rviz", default_value="false"),

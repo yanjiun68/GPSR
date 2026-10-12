@@ -253,7 +253,6 @@ def _build_action_step(
     action: dict[str, Any],
     action_index: int,
     task_id: str,
-    previous_step_id: str,
     default_timeout_sec: float,
     default_retries: int,
 ) -> ActionStep:
@@ -286,10 +285,9 @@ def _build_action_step(
     if timeout_sec <= 0.0:
         raise ValueError(f"Action {action_index} timeout_sec must be positive.")
 
-    # Section: Ordered Qwen actions depend on the successful completion of the prior action by default.
+    # Section: Array order controls sequential dispatch; only model-declared semantic
+    # prerequisites become requires_success edges.
     dependencies = _as_string_list(action.get("requires_success"), "requires_success")
-    if not dependencies and previous_step_id:
-        dependencies = [previous_step_id]
 
     # Section: Populate the flattened fields consumed by C++ executor clients.
     target_object = _first_string(params, "target_object", "object_name", "object")
@@ -341,7 +339,6 @@ def parse_qwen_action_queue(
     task_id = task_id or f"qwen_{uuid.uuid4().hex}"
     queue = ActionQueue()
     queue.task_id = task_id
-    previous_step_id = ""
     seen_step_ids: set[str] = set()
     for action_index, raw_action in enumerate(actions):
         if not isinstance(raw_action, dict):
@@ -350,7 +347,6 @@ def parse_qwen_action_queue(
             raw_action,
             action_index,
             task_id,
-            previous_step_id,
             default_timeout_sec,
             default_retries,
         )
@@ -369,7 +365,6 @@ def parse_qwen_action_queue(
             )
         seen_step_ids.add(step.step_id)
         queue.steps.append(step)
-        previous_step_id = step.step_id
     return queue
 
 

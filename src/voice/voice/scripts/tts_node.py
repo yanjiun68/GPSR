@@ -9,6 +9,8 @@ import wave
 from pathlib import Path
 from typing import TextIO
 
+from audio_turn import audio_turn  # Section: Serialize playback with all shared one-shot STT operations.
+
 import rclpy
 from diagnostic_msgs.msg import DiagnosticStatus
 from diagnostic_updater import DiagnosticStatusWrapper, Updater
@@ -78,7 +80,8 @@ class TTSNode(Node):
         # Parameters (configurable by launch)
         self.declare_parameter("service_name", "/voice/tts/say")
         self.declare_parameter("action_name", "/voice/tts/say_action")
-        default_model_path = "~/piper_models/en_US-lessac-high.onnx"
+        # Section: Use the installed Piper medium ONNX voice unless launch overrides it.
+        default_model_path = "~/piper_models/en_US-lessac-medium.onnx"
         self.declare_parameter("piper_model_path", default_model_path)
 
         self.service_name = self.get_parameter("service_name").get_parameter_value().string_value
@@ -169,6 +172,7 @@ class TTSNode(Node):
             goal_handle.abort()
         return result
 
+    @audio_turn("tts")  # Section: Service and action playback both wait for the preceding audio turn.
     def _speak_text(self, requested_text: str) -> tuple[bool, str]:
         """Synthesize and play text for both service and action callers."""
         # Section: Validate shared inputs and update health counters.
@@ -197,7 +201,7 @@ class TTSNode(Node):
             if PiperVoice is None:
                 raise RuntimeError("piper-tts is missing; run: python3 -m pip install -U piper-tts")
             if not os.path.isfile(self.model_path):
-                raise RuntimeError("Piper model missing: " + self.model_path + "; run: python3 -m piper.download_voices --data-dir ~/piper_models en_US-lessac-high")
+                raise RuntimeError("Piper model missing: " + self.model_path + "; run: python3 -m piper.download_voices --data-dir ~/piper_models en_US-lessac-medium")
             if self._piper_voice is None or self._piper_model_path != self.model_path:
                 self._piper_voice = PiperVoice.load(self.model_path)
                 self._piper_model_path = self.model_path

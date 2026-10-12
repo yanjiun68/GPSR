@@ -40,7 +40,7 @@ def generate_launch_description():
     start_lifecycle_node = LaunchConfiguration("start_lifecycle_node")
     use_camera_topic = LaunchConfiguration("use_camera_topic")
     guest_enter_topic = LaunchConfiguration("guest_enter_topic")
-    startup_dio13_topic = LaunchConfiguration("startup_dio13_topic")
+    startup_nano_d2_topic = LaunchConfiguration("startup_nano_d2_topic")
     piper_model_path = LaunchConfiguration("piper_model_path")
     waypoint_1 = LaunchConfiguration("waypoint_1")
     waypoint_2 = LaunchConfiguration("waypoint_2")
@@ -58,7 +58,7 @@ def generate_launch_description():
         DeclareLaunchArgument("start_lifecycle_node", default_value="false"),
         DeclareLaunchArgument("use_camera_topic", default_value="/camera/rx200_camera/color/image_raw"),
         DeclareLaunchArgument("guest_enter_topic", default_value="/person_selected"),
-        DeclareLaunchArgument("startup_dio13_topic", default_value="/dio13_state"),
+        DeclareLaunchArgument("startup_nano_d2_topic", default_value="/nano_d2_grounded"),
         DeclareLaunchArgument("piper_model_path", default_value=""),
         DeclareLaunchArgument("waypoint_1", default_value="ENTRANCE"),
         DeclareLaunchArgument("waypoint_2", default_value="FACE_HOST"),
@@ -208,7 +208,7 @@ def generate_launch_description():
             "dry_run": dry_run,
             "target_guest_count": target_guest_count,
             "guest_enter_topic": guest_enter_topic,
-            "startup_dio13_topic": startup_dio13_topic,
+            "startup_nano_d2_topic": startup_nano_d2_topic,
             "waypoint_1": waypoint_1,
             "waypoint_2": waypoint_2,
             "waypoint_3": waypoint_3,

@@ -94,7 +94,7 @@ struct SmReceptionist : smacc2::SmaccStateMachineBase<SmReceptionist, StStartupG
 
     node->declare_parameter<bool>("dry_run", true);
     node->declare_parameter<int>("target_guest_count", 2);
-    node->declare_parameter<std::string>("startup_dio13_topic", "/dio13_state");
+    node->declare_parameter<std::string>("startup_nano_d2_topic", "/nano_d2_grounded");
     node->declare_parameter<std::string>("guest_enter_topic", "/person_selected");
     node->declare_parameter<double>("wait_guest_timeout_sec", 10.0);
     node->declare_parameter<double>("startup_timeout_sec", 0.0);
@@ -347,7 +347,7 @@ private:
 
   bool startupGate()
   {
-    const auto topic = stringParam("startup_dio13_topic", "/dio13_state");
+    const auto topic = stringParam("startup_nano_d2_topic", "/nano_d2_grounded");
     const auto timeout = doubleParam("startup_timeout_sec", 0.0);
     return waitForBoolTopic(topic, timeout, false);
   }

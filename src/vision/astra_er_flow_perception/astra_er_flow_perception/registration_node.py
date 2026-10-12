@@ -1,4 +1,5 @@
 import threading
+import time
 import numpy as np
 
 import rclpy
@@ -28,6 +29,8 @@ class AstraRegistrationNode(Node):
         self.declare_parameter("depth_scale", 0.001)
         self.declare_parameter("sync_queue_size", 10)
         self.declare_parameter("sync_slop", 0.05)
+        # Section: Cap registered RGB-D output so downstream tracking processes no more than the configured rate.
+        self.declare_parameter("max_output_rate_hz", 15.0)
         self.declare_parameter(
             "rotation",
             [1.0, 0.0, 0.0,
@@ -41,6 +44,8 @@ class AstraRegistrationNode(Node):
         self.depth_info = None
         self.color_info = None
         self._lock = threading.Lock()
+        # Section: A monotonic deadline rate-limits complete synchronized pairs before costly OpenCV registration.
+        self._last_published_monotonic = float("-inf")
 
         self.create_subscription(
             CameraInfo,
@@ -127,11 +132,17 @@ class AstraRegistrationNode(Node):
         )
 
     def synced_cb(self, depth_msg, color_msg):
+        """Special function: Register one timestamp-compatible RGB-D pair at the configured maximum rate."""
+        # Section: Drop excess synchronized pairs before image conversion so the slowest valid stream sets the 3D rate.
         with self._lock:
             adapter = self.adapter
-
-        if adapter is None:
-            return
+            if adapter is None:
+                return
+            max_output_rate_hz = max(0.1, float(self.get_parameter("max_output_rate_hz").value))
+            now_monotonic = time.monotonic()
+            if now_monotonic - self._last_published_monotonic < 1.0 / max_output_rate_hz:
+                return
+            self._last_published_monotonic = now_monotonic
 
         try:
             depth = self.bridge.imgmsg_to_cv2(depth_msg, desired_encoding="passthrough")

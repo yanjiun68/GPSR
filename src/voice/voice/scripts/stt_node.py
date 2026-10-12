@@ -13,6 +13,8 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Optional, TextIO
 
+from audio_turn import audio_turn  # Section: Gate every one-shot STT API on actual playback completion.
+
 import numpy as np
 import rclpy
 from diagnostic_msgs.msg import DiagnosticStatus
@@ -319,6 +321,7 @@ class STTNode(Node):
             goal_handle.abort()
         return result
 
+    @audio_turn("stt")  # Section: Topic, service, and action requests share the same complete listening turn.
     def _run_transcription(
         self,
         record_sec: float,

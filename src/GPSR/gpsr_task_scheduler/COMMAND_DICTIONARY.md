@@ -37,11 +37,11 @@ The existing `gpsr_voice_command` node obtains spoken commands through the `voic
 
 **Queue ordering contract**
 
-1. Preserve sequential clause order. Match longer aliases first, so “pick up” is treated as one phrase.
+1. Preserve sequential clause order. ActionQueue array order is execution order. Match longer aliases first, so “pick up” is treated as one phrase.
 2. Expand compound tasks in physical dependency order. A grasp needs a found object; delivery needs successful acquisition before navigation/handover. Reuse explicit earlier object state where the compiler supports it.
-3. Give each primitive a unique `step_id`. Planner `dependencies` become ActionStep `requires_success`; `requires_data` names required blackboard/result values, and `result_variable` stores a successful result for later use.
+3. Give each primitive a unique `step_id`. Planner `dependencies` become ActionStep `requires_success` only for genuine semantic prerequisites; never add one merely to preserve array order. An omitted Qwen `requires_success` means `[]`. `requires_data` names required blackboard/result values, and `result_variable` stores a successful result for later use.
 4. Validate that dependencies appear earlier in the queue. The executor does not alphabetically sort or regroup by skill/resource type. Reordering to reduce camera startups could change the command's meaning.
-5. Before each dispatch, verify prerequisites; prepare lifecycle resources; execute the skill; receive its structured result; clean resources; then commit success and advance. Failure and retry do not count as completion.
+5. Before each dispatch, verify prerequisites; prepare lifecycle resources; execute the skill; receive its structured result; clean resources; then commit its final outcome and advance. Exhausted ordinary failures skip dependent steps but do not prevent later independent steps; lifecycle and structural failures still abort the queue.
 6. Unsupported temporal/concurrent forms, missing slots, and unavailable capabilities remain validation errors. There is no general parallel-task planner.
 
 Examples from the semantic compiler's tested vocabulary:

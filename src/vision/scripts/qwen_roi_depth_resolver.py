@@ -430,7 +430,8 @@ class QwenRoiDepthResolver(Node):
 
         # Section: Depth-cache policy accommodates bounded local Qwen inference latency.
         self.declare_parameter("depth_cache_frames", 120)
-        self.declare_parameter("depth_cache_sample_period_sec", 0.10)
+        # Section: Retain every registered observation at the 15 Hz launch-rate ceiling for accurate ROI timestamp matching.
+        self.declare_parameter("depth_cache_sample_period_sec", 1.0 / 15.0)
         self.declare_parameter("max_observation_age_sec", 20.0)
         self.declare_parameter("max_image_depth_skew_sec", 0.20)
         self.declare_parameter("max_latest_depth_age_sec", 0.75)

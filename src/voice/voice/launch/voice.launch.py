@@ -86,7 +86,8 @@ def generate_launch_description() -> LaunchDescription:
             DeclareLaunchArgument("whisper_model", default_value="turbo", description="OpenAI Whisper model name."),
             DeclareLaunchArgument("whisper_language", default_value="en", description="Whisper language hint."),
             DeclareLaunchArgument("whisper_device", default_value="cuda", description="Whisper device: cuda, cpu, or auto."),
-            DeclareLaunchArgument("piper_model_path", default_value="~/piper_models/en_US-lessac-high.onnx", description="Piper high-quality voice model path."),
+            # Section: Default the generic voice stack to the installed Piper medium ONNX voice.
+            DeclareLaunchArgument("piper_model_path", default_value="~/piper_models/en_US-lessac-medium.onnx", description="Piper medium-quality voice model path."),
             DeclareLaunchArgument("post_tts_guard_ms", default_value="400", description="STT echo-suppression time after TTS playback."),
             DeclareLaunchArgument("vad_start_ratio", default_value="0.60", description="Minimum voiced 10 ms ratio to begin VAD."),
             DeclareLaunchArgument("vad_continue_ratio", default_value="0.30", description="Minimum voiced 10 ms ratio to continue VAD."),

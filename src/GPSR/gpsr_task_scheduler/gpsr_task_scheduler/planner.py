@@ -77,7 +77,13 @@ def plan_task(request: TaskRequest, config: SchedulerConfig) -> SchedulerResult:
         task_result_step = _step(
             "extract_person_info",
             "EXTRACT_PERSON_INFO",
-            {"fields": list(request.requested_person_fields), "requires_data": ["person_ref", "gpsr_guest_memory_id"]},
+            {
+                "fields": list(request.requested_person_fields),
+                # Section: ActionStep exposes one declared result variable; the
+                # producer's task_result gates extraction while its skill preserves
+                # the detailed PersonRef and memory keys on the shared blackboard.
+                "requires_data": ["task_result"],
+            },
             [execute_step.step_id],
             config,
             "task_result",
@@ -102,8 +108,9 @@ def plan_task(request: TaskRequest, config: SchedulerConfig) -> SchedulerResult:
         else:
             steps.append(report_step)
     if request.return_after_completion and request.return_location:
-        dependency = steps[-1].step_id
-        steps.append(_step("return_to_instruction_point", "NAVIGATE", {"target_location": request.return_location}, [dependency], config))
+        # Section: Mission-final return is ordered last but remains independent of
+        # ordinary task success so best-effort execution always attempts it.
+        steps.append(_step("return_to_instruction_point", "NAVIGATE", {"target_location": request.return_location}, [], config))
     return _validated_capability_result(
         request,
         steps,

@@ -36,6 +36,8 @@ if(FALSE) # Section: Tests disabled for production-only workspace builds.
   set(ament_cmake_cpplint_FOUND TRUE)
   ament_lint_auto_find_test_dependencies()
 endif()
+# Section: Install the shared turn coordinator beside the standalone Python nodes.
+install(FILES scripts/audio_turn.py DESTINATION lib/${PROJECT_NAME}) # Make sibling imports work after installation.
 install(PROGRAMS
   scripts/receptionist_node.py
   scripts/tts_node.py

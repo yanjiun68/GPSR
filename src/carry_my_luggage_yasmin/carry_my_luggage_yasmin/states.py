@@ -236,7 +236,7 @@ class WaitForStartState(State):
         self.breadcrumb = make_trigger_state(
             node, "/breadcrumb_teach_repeat/start_teach", response_timeout=15.0
         )
-        self.button = make_bool_monitor(node, "/dio13_state")
+        self.button = make_bool_monitor(node, "/nano_d2_grounded")
         self.active: State | None = None
 
     def execute(self, blackboard: Blackboard) -> str:

@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-Beginner-friendly example consumer node for the Arduino DIO13 serial bridge.
+Beginner-friendly example consumer node for the Arduino Nano D2 serial bridge.
 
-This node subscribes to /dio13_state and does three useful things:
+This node subscribes to /nano_d2_grounded and does three useful things:
 1. Logs every state transition clearly.
 2. Republishes a human-readable event string.
-3. Triggers a simple software latch when DIO13 becomes HIGH.
+3. Triggers a simple software latch when D2 is pulled to ground.
 
 You can later replace the latch section with:
 - a service call
@@ -21,21 +21,21 @@ from rclpy.node import Node
 from std_msgs.msg import Bool, String
 
 
-class DIO13MonitorNode(Node):
-    """Monitor /dio13_state and generate easy-to-use software events."""
+class NanoD2MonitorNode(Node):
+    """Monitor whether Nano D2 is grounded and generate software events."""
 
     def __init__(self) -> None:
-        super().__init__('dio13_monitor_node')
+        super().__init__('nano_d2_monitor_node')
 
         # Parameters let you reuse the node without editing source code.
-        self.declare_parameter('input_topic', '/dio13_state')
-        self.declare_parameter('event_topic', '/dio13_event')
-        self.declare_parameter('latch_high_event', True)
+        self.declare_parameter('input_topic', '/nano_d2_grounded')
+        self.declare_parameter('event_topic', '/nano_d2_event')
+        self.declare_parameter('latch_grounded_event', True)
         self.declare_parameter('periodic_status_sec', 2.0)
 
         self.input_topic = self.get_parameter('input_topic').value
         self.event_topic = self.get_parameter('event_topic').value
-        self.latch_high_event = self.get_parameter('latch_high_event').value
+        self.latch_grounded_event = self.get_parameter('latch_grounded_event').value
         self.periodic_status_sec = float(self.get_parameter('periodic_status_sec').value)
 
         # Publisher for readable software events.
@@ -45,7 +45,7 @@ class DIO13MonitorNode(Node):
         self.subscription = self.create_subscription(
             Bool,
             self.input_topic,
-            self._dio13_callback,
+            self._nano_d2_callback,
             10,
         )
 
@@ -54,55 +54,55 @@ class DIO13MonitorNode(Node):
 
         # Internal state variables.
         self.last_state: bool | None = None
-        self.high_event_latched = False
+        self.grounded_event_latched = False
         self.message_count = 0
 
         self.get_logger().info(
-            f'DIO13 monitor started. Subscribing to {self.input_topic} and publishing events to {self.event_topic}.'
+            f'Nano D2 monitor started. Subscribing to {self.input_topic} and publishing events to {self.event_topic}.'
         )
 
-    def _dio13_callback(self, msg: Bool) -> None:
-        """Handle each incoming DIO13 state message."""
+    def _nano_d2_callback(self, msg: Bool) -> None:
+        """Handle each incoming report; True means the pin is grounded."""
         current_state = bool(msg.data)
         self.message_count += 1
 
         # First message case.
         if self.last_state is None:
             self.last_state = current_state
-            self._publish_event('INITIAL_HIGH' if current_state else 'INITIAL_LOW')
-            self.get_logger().info(f'Initial DIO13 state received: {current_state}')
+            self._publish_event('INITIAL_GROUNDED' if current_state else 'INITIAL_RELEASED')
+            self.get_logger().info(f'Initial Nano D2 grounded state received: {current_state}')
             if current_state:
-                self._handle_high_event()
+                self._handle_grounded_event()
             return
 
         # Transition detection.
         if current_state != self.last_state:
             if current_state:
-                self.get_logger().info('DIO13 transition detected: LOW -> HIGH')
-                self._publish_event('RISING_EDGE')
-                self._handle_high_event()
+                self.get_logger().info('Nano D2 transition detected: RELEASED -> GROUNDED')
+                self._publish_event('GROUNDED')
+                self._handle_grounded_event()
             else:
-                self.get_logger().info('DIO13 transition detected: HIGH -> LOW')
-                self._publish_event('FALLING_EDGE')
+                self.get_logger().info('Nano D2 transition detected: GROUNDED -> RELEASED')
+                self._publish_event('RELEASED')
 
-                # When signal goes low, clear the latch so the next HIGH can trigger again.
-                if self.latch_high_event and self.high_event_latched:
-                    self.high_event_latched = False
-                    self.get_logger().info('HIGH-event latch cleared because input returned LOW.')
+                # Clear the latch so the next grounding can trigger again.
+                if self.latch_grounded_event and self.grounded_event_latched:
+                    self.grounded_event_latched = False
+                    self.get_logger().info('Grounded-event latch cleared because input was released.')
 
         self.last_state = current_state
 
-    def _handle_high_event(self) -> None:
-        """Example place to trigger robot behavior when DIO13 becomes HIGH."""
-        if self.latch_high_event:
-            if self.high_event_latched:
-                self.get_logger().info('HIGH detected again, but event is latched so no repeat trigger is sent.')
+    def _handle_grounded_event(self) -> None:
+        """Example place to trigger robot behavior when D2 is connected to GND."""
+        if self.latch_grounded_event:
+            if self.grounded_event_latched:
+                self.get_logger().info('D2 is still grounded; event is latched so no repeat trigger is sent.')
                 return
-            self.high_event_latched = True
+            self.grounded_event_latched = True
 
         # Replace this section later with your actual robot action.
-        self.get_logger().warn('DIO13 HIGH event: this is where you can trigger homing, stop, or a state-machine event.')
-        self._publish_event('HIGH_TRIGGERED')
+        self.get_logger().warn('Nano D2 grounded event: this is where you can trigger homing, stop, or a state-machine event.')
+        self._publish_event('GROUNDED_TRIGGERED')
 
     def _publish_event(self, text: str) -> None:
         """Publish a readable software event string."""
@@ -115,13 +115,13 @@ class DIO13MonitorNode(Node):
         self.get_logger().info(
             f'Status: received_messages={self.message_count}, '
             f'last_state={self.last_state}, '
-            f'high_event_latched={self.high_event_latched}'
+            f'grounded_event_latched={self.grounded_event_latched}'
         )
 
 
 def main(args=None) -> None:
     rclpy.init(args=args)
-    node = DIO13MonitorNode()
+    node = NanoD2MonitorNode()
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:

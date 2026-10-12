@@ -32,7 +32,10 @@ from gpsr_task_scheduler.scheduler_viewer_sm import SchedulerViewerSM
 from robot_ai_interfaces.action import ExecuteActionQueue, ExecuteTaskPlan
 from robot_ai_interfaces.msg import ActionQueue, ActionStep
 from robot_ai_interfaces.srv import ScheduleCommand
-from robot_yasmin_tasks.gpsr.models import summarize_action_queue_failure
+from robot_yasmin_tasks.gpsr.models import (
+    action_queue_result_statistics,
+    summarize_action_queue_results,
+)
 
 
 def retained_plan_qos() -> QoSProfile:
@@ -1009,7 +1012,7 @@ class GpsrTaskSchedulerNode(Node):
         say_retries = int(config.retries_for("SAY")) if config is not None else 0
         # Section: Keep the synthetic execution-consent window short without changing
         # ordinary ASK_AND_LISTEN task timeouts requested by a GPSR command.
-        confirmation_timeout = 3.0
+        confirmation_timeout = 6.0  # Allow six seconds for the confirmation prompt's TTS response.
         # Section: Put deterministic speech and confirmation steps first so no external language model can alter executable intent.
         executable["steps"] = [{
             "step_id": summary_step_id,
@@ -1296,13 +1299,14 @@ class GpsrTaskSchedulerNode(Node):
             action_type = str(step.get("skill_name", ""))
             for index in range(cursor, len(available)):
                 candidate = dict(available[index])
-                if (
-                    str(candidate.get("action_type", "")) == action_type
-                    and str(candidate.get("outcome", "")) == "success"
-                ):
+                if str(candidate.get("action_type", "")) != action_type:
+                    continue
+                # Section: Consume the matching failed/skipped result as well as a
+                # success so a later same-type action cannot be misattributed.
+                cursor = index + 1
+                if str(candidate.get("outcome", "")) == "success":
                     variables[variable] = dict(candidate.get("result", {}))
-                    cursor = index + 1
-                    break
+                break
         return variables
 
     @staticmethod
@@ -1401,8 +1405,13 @@ class GpsrTaskSchedulerNode(Node):
     async def dispatch_queue(self, goal_handle: Any, command_id: str, planned: dict[str, Any]) -> ExecuteTaskPlan.Result:
         """Special function: Submit a planned queue to the existing YASMIN executor."""
         result = ExecuteTaskPlan.Result()
-        result.execution_log_json = json.dumps(planned, sort_keys=True)
         queue_result = self.submit_action_queue(command_id, planned, max(1.0, float(goal_handle.request.overall_timeout_sec or 300.0)))
+        # Section: Preserve both the accepted plan and per-outcome queue accounting in
+        # the existing structured execution log interface.
+        result.execution_log_json = json.dumps(
+            {"plan": planned, "execution": queue_result},
+            sort_keys=True,
+        )
         result.success = bool(queue_result["success"])
         result.completed_steps = int(queue_result["completed_steps"])
         result.failed_step = "" if result.success else "execute_action_queue"
@@ -1466,21 +1475,30 @@ class GpsrTaskSchedulerNode(Node):
         success = bool(queue_result.success)
         # Section: Preserve structured skill payloads for post-return result reporting.
         results = [self.skill_result_to_dict(item) for item in list(queue_result.results)]
-        message = (
-            "Execution succeeded."
-            if success
-            else summarize_action_queue_failure(outcome, results)
-        )
-        if not success:
+        message = summarize_action_queue_results(outcome, results)
+        statistics = action_queue_result_statistics(results)
+        # Section: Distinguish planned total work from the number processed before a
+        # fatal termination; normal best-effort traversal makes these counts equal.
+        statistics["processed_steps"] = len(results)
+        statistics["total_steps"] = len(planned.get("steps", []))
+        if outcome in {"partial_success", "failed"}:
+            self.get_logger().warning(
+                f"GPSR ActionQueue completed with {outcome}: "
+                f"command_id={command_id} {message}"
+            )
+        elif not success:
             self.get_logger().error(
                 f"GPSR ActionQueue failed: command_id={command_id} {message}"
             )
         return {
             "success": success,
-            "completed_steps": len(results),
+            # Section: completed_steps remains the external successful-operation count;
+            # failures and dependency skips stay visible in the detailed statistics.
+            "completed_steps": statistics["successful_steps"],
             "message": message,
             "outcome": outcome,
             "results": results,
+            **statistics,
         }
 
     @staticmethod

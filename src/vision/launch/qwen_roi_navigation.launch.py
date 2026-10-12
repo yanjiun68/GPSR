@@ -31,6 +31,8 @@ def generate_launch_description() -> LaunchDescription:
     model_path = LaunchConfiguration("model_path")
     inference_rate_hz = LaunchConfiguration("inference_rate_hz")
     tracking_rate_hz = LaunchConfiguration("tracking_rate_hz")
+    max_rgbd_rate_hz = LaunchConfiguration("max_rgbd_rate_hz")
+    rgbd_sync_slop_sec = LaunchConfiguration("rgbd_sync_slop_sec")
     # Section: Astra registration remaps colour into the depth optical geometry used by ROI sampling.
     astra_registration_node = Node(
         package="astra_er_flow_perception",
@@ -38,6 +40,12 @@ def generate_launch_description() -> LaunchDescription:
         name="astra_registration_node",
         output="screen",
         condition=IfCondition(start_astra_registration),
+        parameters=[{
+            # Section: Registration discards excess synchronized pairs before OpenCV alignment.
+            "max_output_rate_hz": ParameterValue(max_rgbd_rate_hz, value_type=float),
+            # Section: Registration only pairs RGB and depth observations close enough to represent one scene.
+            "sync_slop": ParameterValue(rgbd_sync_slop_sec, value_type=float),
+        }],
     )
     # Section: This is the sole model-owning node; the resolver remains GPU-free.
     er_flow_node = Node(
@@ -74,7 +82,12 @@ def generate_launch_description() -> LaunchDescription:
         DeclareLaunchArgument("debug_image_topic", default_value="/vision/roi/debug_image"),
         DeclareLaunchArgument("model_path", default_value="/home/yanjiun68/ai/models/UnifoLM-ER-Flow"),
         DeclareLaunchArgument("inference_rate_hz", default_value="1.0"),
-        DeclareLaunchArgument("tracking_rate_hz", default_value="20.0"),
+        # Section: Match tracker updates to the maximum registered RGB-D rate.
+        DeclareLaunchArgument("tracking_rate_hz", default_value="15.0"),
+        # Section: Bound synchronized Astra registration and aligned RGB output to 15 Hz by default.
+        DeclareLaunchArgument("max_rgbd_rate_hz", default_value="15.0"),
+        # Section: Reject raw RGB/depth pairs farther than 50 ms apart before ROI inference.
+        DeclareLaunchArgument("rgbd_sync_slop_sec", default_value="0.05"),
         # Section: The resolver needs registered depth in the same pixel coordinate system as Qwen RGB.
         DeclareLaunchArgument(
             "depth_topic",

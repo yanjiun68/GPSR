@@ -19,4 +19,36 @@ TEST(SkillFactoryContracts, TerminalOutcomeClassificationIsStable) {
   EXPECT_TRUE(is_recoverable(TIMEOUT));
 }
 
+// Special function: Verify dependency skips never enter recovery or fatal routing.
+TEST(SkillFactoryContracts, DependencySkipClassificationIsStable) {
+  EXPECT_FALSE(is_recoverable(SKIPPED_DEPENDENCY_FAILED));
+  EXPECT_FALSE(is_fatal(SKIPPED_DEPENDENCY_FAILED));
+}
+
+// Special function: Verify a completely successful normal traversal stays successful.
+TEST(SkillFactoryContracts, AggregateCompleteSuccess) {
+  const std::vector<SkillResultData> results{
+      make_skill_result("A", SUCCESS, "done"),
+      make_skill_result("B", SUCCESS, "done"),
+      make_skill_result("C", SUCCESS, "done")};
+  EXPECT_EQ(aggregate_queue_outcome(results), SUCCESS);
+}
+
+// Special function: Verify useful successes mixed with failure and skip aggregate partially.
+TEST(SkillFactoryContracts, AggregatePartialSuccess) {
+  const std::vector<SkillResultData> results{
+      make_skill_result("A", SUCCESS, "done"),
+      make_skill_result("B", NOT_FOUND, "missing"),
+      make_skill_result("C", SKIPPED_DEPENDENCY_FAILED, "dependency failed")};
+  EXPECT_EQ(aggregate_queue_outcome(results), PARTIAL_SUCCESS);
+}
+
+// Special function: Verify a normal traversal with no successful operation reports failure.
+TEST(SkillFactoryContracts, AggregateNoSuccessfulOperation) {
+  const std::vector<SkillResultData> results{
+      make_skill_result("A", TIMEOUT, "timed out"),
+      make_skill_result("B", SKIPPED_DEPENDENCY_FAILED, "dependency failed")};
+  EXPECT_EQ(aggregate_queue_outcome(results), FAILED);
+}
+
 }  // namespace robot_yasmin_tasks

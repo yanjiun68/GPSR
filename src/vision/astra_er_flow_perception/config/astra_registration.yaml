@@ -13,6 +13,8 @@ astra_registration_node:
     depth_scale: 0.001
     sync_queue_size: 10
     sync_slop: 0.05
+    # Section: Bound aligned RGB-D output and OpenCV registration cost to the perception update budget.
+    max_output_rate_hz: 15.0
 
     # REPLACE with your actual Astra DEPTH -> COLOR transform.
     # P_color = R * P_depth + t

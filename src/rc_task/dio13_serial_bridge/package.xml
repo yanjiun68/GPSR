@@ -2,7 +2,7 @@
 <package format="3">
   <name>dio13_serial_bridge</name>
   <version>0.0.1</version>
-  <description>ROS 2 Python serial bridge that reads Arduino DIO13 state text and publishes ROS topics.</description>
+  <description>ROS 2 Python serial bridge that reads an Arduino Nano D2 active-low input and publishes ROS topics.</description>
 
   <maintainer email="user@example.com">User</maintainer>
   <license>MIT</license>

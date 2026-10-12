@@ -2,7 +2,7 @@
 <package format="3">
   <name>dio13_monitor_example</name>
   <version>0.0.1</version>
-  <description>Example ROS 2 Python consumer node for /dio13_state.</description>
+  <description>Example ROS 2 Python consumer node for an Arduino Nano D2 active-low input.</description>
   <maintainer email="user@example.com">OpenAI</maintainer>
   <license>MIT</license>
 

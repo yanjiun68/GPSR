@@ -10,6 +10,8 @@ from typing import Optional
 import re
 import wave
 
+from audio_turn import audio_turn  # Section: Coordinate direct receptionist playback with shared STT.
+
 import rclpy
 from rclpy.node import Node
 from rclpy.action import ActionClient, ActionServer
@@ -155,6 +157,7 @@ class ReceptionistActionServer(Node):
     # -------------------------------------------------------
     # TTS
     # -------------------------------------------------------
+    @audio_turn("tts")  # Section: Keep direct Piper playback inside the same alternating audio contract.
     def speak(self, text: str, model_path: str) -> bool:
         """
         Generate speech using Piper and play it using aplay.
@@ -1243,7 +1246,7 @@ if __name__ == "__main__":
 #   replay_last_profile: false,
 #   record_sec: 4.0,
 #   mic_device: 'default',
-#   piper_model_path: '~/piper_models/en_US-lessac-high.onnx',
+#   piper_model_path: '~/piper_models/en_US-lessac-medium.onnx',
 #   whisper_model: 'turbo',
 #   whisper_language: 'en',
 #   guest_name: '',

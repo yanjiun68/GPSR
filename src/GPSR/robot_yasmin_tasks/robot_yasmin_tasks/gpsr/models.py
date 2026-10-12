@@ -64,25 +64,62 @@ def format_skill_failure(result: dict[str, Any]) -> str:
     return f"action={action_type} outcome={outcome} reason={reason}{details_text}"
 
 
+def action_queue_result_statistics(results: list[dict[str, Any]]) -> dict[str, int]:
+    """Special function: Count successful, failed, and dependency-skipped operations."""
+    # Section: Normalize outcome casing once so scheduler accounting cannot count a
+    # returned failure merely because the executor completed traversal normally.
+    outcomes = [str(result.get("outcome", "")).strip().lower() for result in results]
+    successful_steps = sum(outcome == "success" for outcome in outcomes)
+    skipped_steps = sum(outcome == "skipped_dependency_failed" for outcome in outcomes)
+    return {
+        "successful_steps": successful_steps,
+        "failed_steps": len(outcomes) - successful_steps - skipped_steps,
+        "skipped_steps": skipped_steps,
+        "total_steps": len(outcomes),
+    }
+
+
+def summarize_action_queue_results(
+    queue_outcome: str,
+    results: list[dict[str, Any]],
+) -> str:
+    """Special function: Describe every queue operation without assuming fail-fast execution."""
+    # Section: Lead with the aggregate traversal result, then preserve every individual
+    # success, failure, skip reason, and structured detail for reporting layers.
+    normalized_outcome = str(queue_outcome or "unknown_outcome").strip().lower()
+    heading = {
+        "success": "Queue completed successfully.",
+        "partial_success": "Queue partially completed.",
+        "failed": "Queue completed with no successful operations.",
+    }.get(normalized_outcome, f"Queue terminated with {normalized_outcome}.")
+    if not results:
+        return f"{heading} No SkillResult diagnostics were returned."
+
+    operation_summaries: list[str] = []
+    for result in results:
+        action_type = str(result.get("action_type", "") or "unknown_action")
+        outcome = str(result.get("outcome", "") or "unknown_outcome")
+        reason = str(result.get("message", "") or "no message provided")
+        details = result.get("result", {})
+        details_text = ""
+        if details not in ({}, None, ""):
+            try:
+                details_text = f" details={json.dumps(details, sort_keys=True)}"
+            except (TypeError, ValueError):
+                details_text = f" details={details!r}"
+        operation_summaries.append(
+            f"{action_type}: {outcome} - {reason}{details_text}"
+        )
+    return " ".join([heading, *operation_summaries])
+
+
 def summarize_action_queue_failure(
     queue_outcome: str,
     results: list[dict[str, Any]],
 ) -> str:
-    """Special function: Select and format the executor's terminal failed SkillResult."""
-    # Section: Prefer the last non-success result because it terminates queue execution.
-    failures = [
-        result
-        for result in results
-        if str(result.get("outcome", "")).strip().lower() != "success"
-    ]
-    if failures:
-        return format_skill_failure(failures[-1])
-
-    # Section: Retain the queue outcome when an abnormal executor returns no skill result.
-    return (
-        f"action=unknown_action outcome={str(queue_outcome or 'unknown_outcome')} "
-        "reason=executor returned no failed SkillResult"
-    )
+    """Special function: Preserve the legacy import while returning the full queue summary."""
+    # Section: Compatibility callers now receive multi-result best-effort diagnostics.
+    return summarize_action_queue_results(queue_outcome, results)
 
 
 def parse_parameters(raw: Any) -> dict[str, Any]:

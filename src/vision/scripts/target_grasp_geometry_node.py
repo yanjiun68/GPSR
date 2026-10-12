@@ -403,6 +403,8 @@ class TargetGraspGeometryNode(Node):
         # Section: A shared ER-Flow node supplies the semantic ROI without a second Qwen allocation.
         self.declare_parameter("roi_topic", "/vision/roi/result")
         self.declare_parameter("external_roi_timeout_sec", 1.5)
+        # Section: Require the shared ROI and current RGB frame to describe the same acquisition time.
+        self.declare_parameter("max_external_roi_rgb_time_difference", 0.05)
         self.declare_parameter("rgb_topic", "/camera/camera/color/image_raw")
         self.declare_parameter("depth_topic", "/camera/camera/aligned_depth_to_color/image_raw")
         self.declare_parameter("camera_info_topic", "/camera/camera/color/camera_info")
@@ -596,6 +598,7 @@ class TargetGraspGeometryNode(Node):
         target: str,
         image_width: int,
         image_height: int,
+        rgb_stamp: Any,
     ) -> GroundedTarget | None:
         """Special function: Convert one fresh valid shared ROI into the grasp pipeline's grounding type."""
         # Section: Copy the small message reference under the same bounded sensor-state lock.
@@ -612,6 +615,18 @@ class TargetGraspGeometryNode(Node):
         if normalized_result_target != normalized_target:
             return None
         if str(roi_message.status).casefold() != "ok" or not bool(roi_message.tracking_valid):
+            return None
+        # Section: Receipt freshness is insufficient; reject a valid but different-scene ROI before pixel scaling.
+        roi_stamp_sec = stamp_seconds(roi_message.header.stamp)
+        rgb_stamp_sec = stamp_seconds(rgb_stamp)
+        maximum_roi_rgb_skew = float(
+            self.get_parameter("max_external_roi_rgb_time_difference").value
+        )
+        if (
+            roi_stamp_sec <= 0.0
+            or rgb_stamp_sec <= 0.0
+            or abs(roi_stamp_sec - rgb_stamp_sec) > maximum_roi_rgb_skew
+        ):
             return None
         source_width = int(roi_message.image_width)
         source_height = int(roi_message.image_height)
@@ -736,8 +751,13 @@ class TargetGraspGeometryNode(Node):
                     self._publish_status(TargetState.GROUNDING, "running on-demand semantic grounding", target=target)
                     grounding = self._grounder.ground(rgb, target)
                 if not bool(self.get_parameter("qwen_enabled").value):
-                    # Section: Refresh the 5 Hz geometry input from the newest 20 Hz shared tracker result.
-                    grounding = self._external_grounding(target, int(rgb.shape[1]), int(rgb.shape[0]))
+                    # Section: Refresh the 5 Hz geometry input from a timestamp-matched shared 15 Hz tracker result.
+                    grounding = self._external_grounding(
+                        target,
+                        int(rgb.shape[1]),
+                        int(rgb.shape[0]),
+                        bundle.rgb_message.header.stamp,
+                    )
                     if grounding is None:
                         self._publish_status(
                             TargetState.GROUNDING,

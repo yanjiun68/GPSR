@@ -38,6 +38,8 @@ inline constexpr char RECOVERABLE_FAILURE[] = "recoverable_failure";
 inline constexpr char FATAL_FAILURE[] = "fatal_failure";
 inline constexpr char PERSON_LOST[] = "person_lost";
 inline constexpr char SKILL_UNAVAILABLE[] = "skill_unavailable";
+inline constexpr char SKIPPED_DEPENDENCY_FAILED[] = "skipped_dependency_failed";
+inline constexpr char PARTIAL_SUCCESS[] = "partial_success";
 
 // Section: Preserve canonical primitive identifiers and lifecycle endpoint names.
 inline constexpr char NAVIGATE[] = "NAVIGATE";
@@ -161,6 +163,10 @@ bool is_recoverable(const std::string &outcome);
 
 // Special function: Classify fatal queue outcomes exactly like the Python helper.
 bool is_fatal(const std::string &outcome);
+
+// Special function: Aggregate a normally traversed best-effort queue without hiding
+// individual step failures or skips.
+std::string aggregate_queue_outcome(const std::vector<SkillResultData> &results);
 
 // Special function: Read a typed blackboard value or return its Python-equivalent default.
 template <typename T>

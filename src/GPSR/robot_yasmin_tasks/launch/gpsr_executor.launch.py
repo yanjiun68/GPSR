@@ -16,6 +16,8 @@ def generate_launch_description() -> LaunchDescription:
     command_input_timeout_sec = LaunchConfiguration("command_input_timeout_sec")
     # Section: Match the scheduler launch's explicit TTS-to-STT echo handoff.
     post_tts_guard_ms = LaunchConfiguration("post_tts_guard_ms")
+    # Section: Choose the Piper ONNX voice used by standalone executor prompts.
+    piper_model_path = LaunchConfiguration("piper_model_path")
     start_lifecycle_manager = LaunchConfiguration("start_lifecycle_manager")
     # Section: Standalone execution uses the same installed waypoint policies as the scheduler.
     find_person_search_config_file = PathJoinSubstitution(
@@ -39,13 +41,27 @@ def generate_launch_description() -> LaunchDescription:
                 default_value="400",
                 description="Milliseconds to wait after TTS playback before GPSR starts STT.",
             ),
+            # Section: Default standalone executor prompts to the installed Piper medium voice.
+            DeclareLaunchArgument(
+                "piper_model_path",
+                default_value="~/piper_models/en_US-lessac-medium.onnx",
+                description="Path to the Piper ONNX model used by executor TTS.",
+            ),
             DeclareLaunchArgument("use_llm_parser", default_value="false", description="Use optional /llm parser service if available."),
             DeclareLaunchArgument(
                 "start_lifecycle_manager",
                 default_value="true",
                 description="Start the central manager required by every GPSR ActionStep.",
             ),
-            Node(package="voice", executable="tts_node.py", name="voice_tts", output="screen", condition=IfCondition(use_local_voice)),
+            # Section: Forward the selected Piper medium model to local standalone TTS.
+            Node(
+                package="voice",
+                executable="tts_node.py",
+                name="voice_tts",
+                output="screen",
+                condition=IfCondition(use_local_voice),
+                parameters=[{"piper_model_path": piper_model_path}],
+            ),
             # Section: Apply the shared echo guard even for direct local STT topic requests.
             Node(
                 package="voice",

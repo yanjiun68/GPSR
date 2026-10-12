@@ -1,9 +1,9 @@
-# dio13_monitor_example
+# dio13_monitor_example (Arduino Nano D2 input)
 
-Example ROS 2 Python package that subscribes to `/dio13_state` and generates:
+Example ROS 2 Python package that subscribes to `/nano_d2_grounded` and generates:
 - transition logs
-- `/dio13_event` software events
-- a simple HIGH-event latch
+- `/nano_d2_event` software events
+- a simple grounded-event latch
 
 ## Build
 
@@ -20,5 +20,5 @@ ros2 launch dio13_monitor_example dio13_monitor.launch.py
 
 ## Topics
 
-- Input: `/dio13_state` (`std_msgs/Bool`)
-- Output: `/dio13_event` (`std_msgs/String`)
+- Input: `/nano_d2_grounded` (`std_msgs/Bool`; `true` when D2 is grounded)
+- Output: `/nano_d2_event` (`std_msgs/String`)

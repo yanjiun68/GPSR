@@ -533,11 +533,11 @@ def _compile_semantic_steps(
     compiled: list[SkillStep] = []
     issues: list[ValidationIssue] = []
     first_request: TaskRequest | None = None
-    previous_final = ""
-    found_objects: set[str] = set()
-    picked_objects: set[str] = set()
-    # Section: Remember named people already located by an earlier clause in this command.
-    found_people: set[str] = set()
+    # Section: Producer maps preserve only genuine reusable state dependencies after
+    # duplicate macro steps are pruned; array order alone preserves clause sequencing.
+    found_object_producer: dict[str, str] = {}
+    picked_object_producer: dict[str, str] = {}
+    found_person_producer: dict[str, str] = {}
 
     for sequence, semantic in enumerate(semantic_steps, start=1):
         request = _request_from_semantic(command_id, semantic, config)
@@ -547,41 +547,75 @@ def _compile_semantic_steps(
         local_steps = list(planned.steps)
         object_name = str(semantic.arguments.get("object_name", ""))
         target_person = str(semantic.arguments.get("target_person", ""))
+        dependency_replacements: dict[str, str] = {}
+        clause_prerequisites: list[str] = []
 
         # Section: Deliver fixed information to the person already found without repeating perception.
-        if semantic.intent == "FIXED_INFORMATION" and target_person in found_people:
+        if semantic.intent == "FIXED_INFORMATION" and target_person in found_person_producer:
             local_steps = [step for step in local_steps if step.skill_name != "FIND_PERSON"]
+            dependency_replacements["find_recipient"] = found_person_producer[target_person]
 
         # Section: Reuse an explicitly produced object state instead of repeating macro work.
-        if semantic.intent == "PICK_OBJECT" and object_name in found_objects:
+        if semantic.intent == "PICK_OBJECT" and object_name in found_object_producer:
             local_steps = [step for step in local_steps if step.skill_name != "FIND_OBJECT"]
+            dependency_replacements["find_object"] = found_object_producer[object_name]
         if semantic.intent == "DELIVER_OBJECT":
-            if object_name in picked_objects:
+            if object_name in picked_object_producer:
                 local_steps = [
                     step for step in local_steps
                     if step.skill_name not in {"FIND_OBJECT", "PICK_OBJECT"}
                 ]
-            elif object_name in found_objects:
+                dependency_replacements["pick_object"] = picked_object_producer[object_name]
+            elif object_name in found_object_producer:
                 local_steps = [step for step in local_steps if step.skill_name != "FIND_OBJECT"]
+                dependency_replacements["find_object"] = found_object_producer[object_name]
 
-        renamed, previous_final = _chain_and_rename_steps(
+        # Section: Follow/guide actions that reuse an earlier named-person observation
+        # retain that semantic prerequisite without chaining unrelated clauses.
+        if (
+            semantic.intent in {"FOLLOW_PERSON", "GUIDE_PERSON"}
+            and target_person in found_person_producer
+        ):
+            clause_prerequisites.append(found_person_producer[target_person])
+
+        renamed = _chain_and_rename_steps(
             local_steps,
             sequence,
-            previous_final,
+            dependency_replacements,
+            clause_prerequisites,
         )
         compiled.extend(renamed)
+        find_object_step = next(
+            (step for step in renamed if step.skill_name == "FIND_OBJECT"),
+            None,
+        )
+        pick_object_step = next(
+            (step for step in renamed if step.skill_name == "PICK_OBJECT"),
+            None,
+        )
+        find_person_step = next(
+            (
+                step
+                for step in renamed
+                if step.skill_name in {"FIND_PERSON", "FIND_PERSON_BY_ATTRIBUTE"}
+            ),
+            None,
+        )
         if semantic.intent == "FIND_OBJECT" and object_name:
-            found_objects.add(object_name)
-            if renamed:
-                renamed[-1].result_variable = "found_object"
+            if find_object_step is not None:
+                find_object_step.result_variable = "found_object"
+                found_object_producer[object_name] = find_object_step.step_id
         if semantic.intent == "PICK_OBJECT" and object_name:
-            found_objects.add(object_name)
-            picked_objects.add(object_name)
+            if find_object_step is not None:
+                found_object_producer[object_name] = find_object_step.step_id
+            if pick_object_step is not None:
+                picked_object_producer[object_name] = pick_object_step.step_id
         if semantic.intent == "DELIVER_OBJECT" and object_name:
-            found_objects.add(object_name)
-            picked_objects.discard(object_name)
-        if semantic.intent == "FIND_PERSON" and target_person:
-            found_people.add(target_person)
+            if find_object_step is not None:
+                found_object_producer[object_name] = find_object_step.step_id
+            picked_object_producer.pop(object_name, None)
+        if semantic.intent == "FIND_PERSON" and target_person and find_person_step is not None:
+            found_person_producer[target_person] = find_person_step.step_id
 
     # Section: Preserve the existing one-return mission policy for a multi-step command.
     if config.return_after_completion and config.instruction_point and compiled:
@@ -589,7 +623,7 @@ def _compile_semantic_steps(
             "return_to_instruction_point",
             "NAVIGATE",
             {"target_location": config.instruction_point},
-            [compiled[-1].step_id],
+            [],
             config.timeout_for("NAVIGATE"),
             config.retries_for("NAVIGATE"),
         )
@@ -602,18 +636,38 @@ def _compile_semantic_steps(
 def _chain_and_rename_steps(
     steps: list[SkillStep],
     sequence: int,
-    previous_final: str,
-) -> tuple[list[SkillStep], str]:
-    """Special function: Make planner-local identifiers unique and preserve clause order."""
+    dependency_replacements: dict[str, str] | None = None,
+    clause_prerequisites: list[str] | None = None,
+) -> list[SkillStep]:
+    """Special function: Rename local IDs while preserving only semantic prerequisites."""
+    # Section: Removed macro producers resolve to explicit earlier producers rather
+    # than to the preceding clause's final step.
+    replacements = dict(dependency_replacements or {})
+    initial_dependencies = list(clause_prerequisites or [])
     id_map = {step.step_id: f"semantic_{sequence}_{step.step_id}" for step in steps}
     renamed: list[SkillStep] = []
     for index, step in enumerate(steps):
-        dependencies = [id_map[item] for item in step.dependencies if item in id_map]
-        if index == 0 and previous_final and previous_final not in dependencies:
-            dependencies.append(previous_final)
-        # Section: Dependencies removed by state-aware macro pruning fall back to prior order.
-        if not dependencies and previous_final:
-            dependencies = [previous_final]
+        unresolved_dependencies = [
+            item
+            for item in step.dependencies
+            if item not in id_map and item not in replacements
+        ]
+        if unresolved_dependencies:
+            raise ValueError(
+                f"No retained producer exists for dependencies {unresolved_dependencies!r} "
+                f"on semantic clause {sequence}."
+            )
+        dependencies = [
+            id_map[item] if item in id_map else replacements[item]
+            for item in step.dependencies
+            if item in id_map or item in replacements
+        ]
+        if index == 0:
+            dependencies.extend(
+                dependency
+                for dependency in initial_dependencies
+                if dependency not in dependencies
+            )
         renamed.append(SkillStep(
             step_id=id_map[step.step_id],
             skill_name=step.skill_name,
@@ -623,7 +677,7 @@ def _chain_and_rename_steps(
             retry_count=step.retry_count,
             result_variable=step.result_variable,
         ))
-    return renamed, renamed[-1].step_id if renamed else previous_final
+    return renamed
 
 
 def _request_from_semantic(

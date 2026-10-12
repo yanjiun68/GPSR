@@ -53,6 +53,8 @@ def generate_launch_description() -> LaunchDescription:
     command_input_timeout_sec = LaunchConfiguration("command_input_timeout_sec")
     # Section: Use one echo guard setting for the GPSR dialogue handoff and STT node.
     post_tts_guard_ms = LaunchConfiguration("post_tts_guard_ms")
+    # Section: Choose the Piper ONNX voice used for every GPSR prompt.
+    piper_model_path = LaunchConfiguration("piper_model_path")
     # Section: Keep a bounded voice reply window inside the scheduler dialogue deadline.
     max_clarification_attempts = LaunchConfiguration("max_clarification_attempts")
     clarification_timeout_sec = LaunchConfiguration("clarification_timeout_sec")
@@ -544,6 +546,8 @@ def generate_launch_description() -> LaunchDescription:
         name="voice_tts",
         output="screen",
         condition=IfCondition(start_voice_tts),
+        # Section: Forward the selected model instead of relying on a node-local default.
+        parameters=[{"piper_model_path": piper_model_path}],
     )
 
     # Section: Local STT supplies deterministic yes/no transcripts for verbal identity mode.
@@ -709,6 +713,8 @@ def generate_launch_description() -> LaunchDescription:
             DeclareLaunchArgument("start_voice_command", default_value="true", description="Start bounded spoken GPSR command reception at the current robot position."),
             DeclareLaunchArgument("command_input_timeout_sec", default_value="12.0", description="Seconds in each spoken GPSR command listening window before re-arming."),
             DeclareLaunchArgument("post_tts_guard_ms", default_value="400", description="Milliseconds to wait after TTS playback before GPSR starts STT."),
+            # Section: Default GPSR to the installed Piper medium ONNX model.
+            DeclareLaunchArgument("piper_model_path", default_value="~/piper_models/en_US-lessac-medium.onnx", description="Path to the Piper ONNX model used by GPSR TTS."),
             DeclareLaunchArgument("max_clarification_attempts", default_value="2", description="Maximum spoken clarification replies per incomplete GPSR command."),
             DeclareLaunchArgument("clarification_timeout_sec", default_value="40.0", description="Seconds allowed for each clarification TTS and STT exchange."),
             DeclareLaunchArgument("clarification_listen_timeout_sec", default_value="20.0", description="Seconds allowed for one request-scoped STT clarification result."),

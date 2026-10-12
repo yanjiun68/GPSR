@@ -11,7 +11,8 @@ yasmin::Outcomes skill_outcomes() {
   // Section: Keep ordering aligned with outcomes.py for viewer and test parity.
   return {SUCCESS,       FAILED,      CANCELED,           TIMEOUT,
           INVALID_INPUT, NOT_FOUND,   NEED_CLARIFICATION, RECOVERABLE_FAILURE,
-          FATAL_FAILURE, PERSON_LOST, SKILL_UNAVAILABLE};
+          FATAL_FAILURE, PERSON_LOST, SKILL_UNAVAILABLE,
+          SKIPPED_DEPENDENCY_FAILED};
 }
 
 Json parse_json(const std::string &text, const Json &fallback) {
@@ -93,6 +94,24 @@ bool is_fatal(const std::string &outcome) {
   static const std::set<std::string> values{CANCELED, INVALID_INPUT, FATAL_FAILURE,
                                             SKILL_UNAVAILABLE};
   return values.count(outcome) != 0U;
+}
+
+std::string aggregate_queue_outcome(
+    const std::vector<SkillResultData> &results) {
+  // Section: An empty queue, like a queue containing only successful operations,
+  // completed every executable request presented to it.
+  if (results.empty()) {
+    return SUCCESS;
+  }
+  const auto successful = std::count_if(
+      results.begin(), results.end(),
+      [](const SkillResultData &result) { return result.outcome == SUCCESS; });
+  if (successful == static_cast<std::ptrdiff_t>(results.size())) {
+    return SUCCESS;
+  }
+  // Section: Any useful success combined with a failed or skipped operation is a
+  // normal partial completion; no successes is a completed-but-failed traversal.
+  return successful > 0 ? PARTIAL_SUCCESS : FAILED;
 }
 
 bool cancel_requested(const Blackboard::SharedPtr &blackboard) {

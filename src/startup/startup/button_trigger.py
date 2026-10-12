@@ -5,7 +5,7 @@ from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from std_msgs.msg import Bool
 
-TOPIC_NAME = "/dio13_state"
+TOPIC_NAME = "/nano_d2_grounded"
 
 
 class ButtonTrigger(Node):

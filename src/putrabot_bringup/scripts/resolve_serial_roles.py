@@ -75,14 +75,14 @@ def probe_lift(port: str, baud: int, settle_s: float) -> bool:
     return False
 
 
-def probe_dio13(port: str, baud: int, settle_s: float) -> bool:
+def probe_nano_d2(port: str, baud: int, settle_s: float) -> bool:
     try:
         with serial.Serial(port, baud, timeout=0.2, write_timeout=0.2, exclusive=True) as ser:
             time.sleep(settle_s)
             deadline = time.monotonic() + 1.5
             while time.monotonic() < deadline:
                 line = ser.readline().decode("utf-8", errors="ignore").strip().upper()
-                if line in {"DIO13=HIGH", "DIO13=LOW"}:
+                if line in {"NANO_D2=GROUNDED", "NANO_D2=RELEASED"}:
                     return True
     except Exception:
         return False
@@ -108,7 +108,7 @@ def resolve_roles(
     debug: list[str] = []
     base_port: Optional[str] = None
     lift_port: Optional[str] = None
-    dio13_port: Optional[str] = None
+    nano_d2_port: Optional[str] = None
 
     for port in ports:
         is_base = probe_base(port, baud, settle_s=1.0)
@@ -129,25 +129,25 @@ def resolve_roles(
     for port in ports:
         if port in assigned:
             continue
-        is_dio13 = probe_dio13(port, baud, settle_s=1.0)
-        debug.append(f"dio13_probe {port} -> {is_dio13}")
-        if is_dio13 and dio13_port is None:
-            dio13_port = port
+        is_nano_d2 = probe_nano_d2(port, baud, settle_s=1.0)
+        debug.append(f"nano_d2_probe {port} -> {is_nano_d2}")
+        if is_nano_d2 and nano_d2_port is None:
+            nano_d2_port = port
 
-    assigned = {port for port in (base_port, lift_port, dio13_port) if port is not None}
+    assigned = {port for port in (base_port, lift_port, nano_d2_port) if port is not None}
 
     if lift_port is not None and base_port is None:
         base_port = _assign_single_remaining(ports, assigned, "base", debug)
-        assigned = {port for port in (base_port, lift_port, dio13_port) if port is not None}
+        assigned = {port for port in (base_port, lift_port, nano_d2_port) if port is not None}
 
     if base_port is not None and lift_port is None:
         lift_port = _assign_single_remaining(ports, assigned, "lift", debug)
-        assigned = {port for port in (base_port, lift_port, dio13_port) if port is not None}
+        assigned = {port for port in (base_port, lift_port, nano_d2_port) if port is not None}
 
-    if dio13_port is None:
-        dio13_port = _assign_single_remaining(ports, assigned, "dio13", debug)
+    if nano_d2_port is None:
+        nano_d2_port = _assign_single_remaining(ports, assigned, "nano_d2", debug)
 
-    return base_port, lift_port, dio13_port, debug
+    return base_port, lift_port, nano_d2_port, debug
 
 
 def main() -> int:
@@ -157,12 +157,12 @@ def main() -> int:
     args = parser.parse_args()
 
     ports = unique_existing_ports(BASE_PATTERNS)
-    base_port, lift_port, dio13_port, debug = resolve_roles(ports, args.baud)
+    base_port, lift_port, nano_d2_port, debug = resolve_roles(ports, args.baud)
     payload = {
         "ports": ports,
         "base_port": base_port,
         "lift_port": lift_port,
-        "dio13_port": dio13_port,
+        "nano_d2_port": nano_d2_port,
         "debug": debug,
     }
 
@@ -172,11 +172,11 @@ def main() -> int:
         print(f"ports={ports}")
         print(f"base_port={base_port}")
         print(f"lift_port={lift_port}")
-        print(f"dio13_port={dio13_port}")
+        print(f"nano_d2_port={nano_d2_port}")
         for line in debug:
             print(line)
 
-    if base_port is None or lift_port is None or dio13_port is None:
+    if base_port is None or lift_port is None or nano_d2_port is None:
         return 1
     return 0
 

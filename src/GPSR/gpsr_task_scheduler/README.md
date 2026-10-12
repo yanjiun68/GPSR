@@ -315,7 +315,7 @@ Section: Exhaustive and random scheduler-plan validation.
 
 The validator checks every phrase ordering of the supported task templates and then
 checks additional seeded random orderings. For each accepted command it verifies the
-task family, physical skill order, linear dependency chain, positive execution
+task family, physical skill order, semantic dependency edges, positive execution
 policy, and lossless conversion to an executor-compatible `ActionStep` dictionary.
 It does not command robot hardware.
 

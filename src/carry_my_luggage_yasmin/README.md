@@ -47,7 +47,7 @@ For live visualization, run `ros2 run yasmin_viewer yasmin_viewer_node` in anoth
 
 ## Required ROS contracts
 
-The full phase-one graph uses `/grasp/is_ready`, `/dio13_state`, breadcrumb teach/repeat services, `/bringup/bag_point_selection`, `/bag_ready_for_pickup`, grasp services, `/bringup/person_follow`, `/master_target`, `/receptionist`, and `/kill`.
+The full phase-one graph uses `/grasp/is_ready`, `/nano_d2_grounded`, breadcrumb teach/repeat services, `/bringup/bag_point_selection`, `/bag_ready_for_pickup`, grasp services, `/bringup/person_follow`, `/master_target`, `/receptionist`, and `/kill`.
 
 The follow demo uses `/grasp/is_ready`, grasp services, `/person_follow/mode`, `/person_follow/control`, `/return_home/start`, and the cleanup endpoints.
 

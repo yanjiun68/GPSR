@@ -131,6 +131,19 @@ def fit_columns(columns: Sequence[Column], available: int) -> List[Column]:
                         break
             if not changed:
                 break
+        # Section: Very narrow terminals may require going below preferred minima;
+        # retaining one character per column is safer than writing past the window.
+        while overflow > 0:
+            changed = False
+            for index in shrink_order:
+                if widths[index] > 1:
+                    widths[index] -= 1
+                    overflow -= 1
+                    changed = True
+                    if overflow <= 0:
+                        break
+            if not changed:
+                break
     elif total < usable:
         extra = usable - total
         growers = [index for index, column in enumerate(columns) if column.grow > 0] or [len(columns) - 1]
@@ -153,9 +166,18 @@ def queue_rows(queue: Any) -> List[Dict[str, Any]]:
     for position, raw in enumerate(source):
         if not isinstance(raw, Mapping):
             continue
-        index = int(raw.get("index", position) or 0)
-        attempt = int(raw.get("attempt", 0) or 0)
-        retry_limit = int(raw.get("max_retries", 0) or 0)
+        try:
+            index = int(raw.get("index", position) or 0)
+        except (TypeError, ValueError, OverflowError):
+            index = position
+        try:
+            attempt = int(raw.get("attempt", 0) or 0)
+        except (TypeError, ValueError, OverflowError):
+            attempt = 0
+        try:
+            retry_limit = int(raw.get("max_retries", 0) or 0)
+        except (TypeError, ValueError, OverflowError):
+            retry_limit = 0
         rows.append({
             "number": f"{'>' if raw.get('current') else ' '} {index + 1}",
             "domain": raw.get("domain", "OTHER"),
@@ -164,8 +186,35 @@ def queue_rows(queue: Any) -> List[Dict[str, Any]]:
             "params": format_parameters(
                 raw.get("parameters", raw.get("arguments", {}))
             ),
+            # Section: Readiness and runtime status are intentionally separate columns.
+            "preflight": raw.get("preflight_state", "UNKNOWN"),
             "state": raw.get("task_status", raw.get("state", "IN QUEUE")),
             "attempt": f"{attempt}/{retry_limit}",
             "current": bool(raw.get("current", False)),
+        })
+    return rows
+
+
+def validation_rows(queue: Any) -> List[Dict[str, Any]]:
+    """Special function: Produce diagnostic rows from normalized preflight fields."""
+    source = queue if isinstance(queue, list) else []
+    rows: List[Dict[str, Any]] = []
+    for position, raw in enumerate(source):
+        if not isinstance(raw, Mapping):
+            continue
+        try:
+            index = int(raw.get("index", position) or 0)
+        except (TypeError, ValueError, OverflowError):
+            index = position
+        blocked_by = raw.get("blocked_by", [])
+        dependencies = ", ".join(str(item) for item in blocked_by) if isinstance(blocked_by, list) else text_value(blocked_by, "")
+        resource = text_value(raw.get("preflight_resource"), "")
+        rows.append({
+            "number": str(index + 1),
+            "skill": raw.get("skill", raw.get("action_type", "-")),
+            "readiness": raw.get("preflight_state", "UNKNOWN"),
+            "reason": raw.get("preflight_reason", "-"),
+            "resource": resource or dependencies or "-",
+            "message": raw.get("preflight_message", "-"),
         })
     return rows

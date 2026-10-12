@@ -46,6 +46,7 @@ class MonitorCore(Node):
         self._declare('gpsr_plan_topic', '/gpsr/task_plan')
         self._declare('gpsr_scheduler_state_topic', '/gpsr/state')
         self._declare('gpsr_queue_status_topic', '/gpsr/action_queue_status_json')
+        self._declare('gpsr_validation_topic', '/gpsr/action_queue_validation_json')
         self._declare('voice_transcript_topic', '/voice/stt/transcript')
 
         # Component inventory.
@@ -119,6 +120,7 @@ class MonitorCore(Node):
             self.p('gpsr_plan_topic'),
             self.p('gpsr_scheduler_state_topic'),
             self.p('gpsr_queue_status_topic'),
+            self.p('gpsr_validation_topic'),
             float(self.p('graph_rate_hz')),
         )
         self.voice = VoiceSource(

@@ -163,7 +163,7 @@ supervisor_node:
     face_threshold: 0.45
     max_guests: 2
     use_voice_input: true
-    startup_dio13_topic: "/dio13_state"
+    startup_nano_d2_topic: "/nano_d2_grounded"
     # TTS profile 话题（与 RobotClients.TTS_PROFILE_FIELDS 对齐）
     tts_target_topic: "/guest_profile/target"
     tts_guest_name_topic: "/guest_profile/guest_name"

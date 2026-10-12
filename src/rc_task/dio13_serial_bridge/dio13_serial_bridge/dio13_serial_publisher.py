@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """
-ROS 2 serial bridge for Arduino DIO13 reporting.
+ROS 2 serial bridge for an Arduino Nano D2 active-low input.
 
 Expected Arduino serial lines:
-    DIO13=HIGH
-    DIO13=LOW
+    NANO_D2=GROUNDED
+    NANO_D2=RELEASED
 
 This node publishes:
-    /dio13_state      -> std_msgs/Bool
-    /dio13_state_text -> std_msgs/String
+    /nano_d2_grounded -> std_msgs/Bool
+    /nano_d2_state    -> std_msgs/String
 """
 
 from __future__ import annotations
@@ -23,18 +23,18 @@ import serial
 from serial import SerialException
 
 
-class DIO13SerialPublisher(Node):
-    """Read Arduino serial text and publish DIO13 state as ROS 2 topics."""
+class NanoD2SerialPublisher(Node):
+    """Read Nano D2 serial text and publish whether the input is grounded."""
 
     def __init__(self) -> None:
-        super().__init__('dio13_serial_publisher')
+        super().__init__('nano_d2_serial_publisher')
 
         # Parameters so beginners can change settings without editing the code.
         self.declare_parameter('port', '/dev/ttyUSB0')
         self.declare_parameter('baud_rate', 115200)
         self.declare_parameter('read_period_sec', 0.02)
-        self.declare_parameter('topic_name', '/dio13_state')
-        self.declare_parameter('text_topic_name', '/dio13_state_text')
+        self.declare_parameter('topic_name', '/nano_d2_grounded')
+        self.declare_parameter('text_topic_name', '/nano_d2_state')
         self.declare_parameter('publish_only_on_change', False)
         self.declare_parameter('reconnect_period_sec', 2.0)
 
@@ -102,19 +102,24 @@ class DIO13SerialPublisher(Node):
         self._connect_serial()
 
     def _handle_line(self, raw_line: str) -> None:
-        """Parse a single serial line from Arduino."""
+        """Parse one Nano input report from Arduino.
+
+        ``True`` means the D2 pin is physically connected to GND.  This is
+        deliberately independent of the electrical level: with INPUT_PULLUP,
+        a grounded pin reads LOW.
+        """
         # Ignore unrelated debug text from the Arduino.
-        if not raw_line.startswith('DIO13='):
+        if not raw_line.startswith('NANO_D2='):
             return
 
         payload = raw_line.split('=', 1)[1].strip().upper()
 
-        if payload == 'HIGH':
+        if payload == 'GROUNDED':
             state = True
-        elif payload == 'LOW':
+        elif payload == 'RELEASED':
             state = False
         else:
-            self.get_logger().warning(f'Unexpected DIO13 payload: {raw_line}')
+            self.get_logger().warning(f'Unexpected Nano D2 payload: {raw_line}')
             return
 
         if (
@@ -151,7 +156,7 @@ class DIO13SerialPublisher(Node):
 def main(args: list[str] | None = None) -> None:
     """ROS 2 entry point."""
     rclpy.init(args=args)
-    node = DIO13SerialPublisher()
+    node = NanoD2SerialPublisher()
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:

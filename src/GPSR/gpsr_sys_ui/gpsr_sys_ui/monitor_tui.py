@@ -31,6 +31,7 @@ from .presentation import (
     queue_rows as shared_queue_rows,
     text_value as shared_text_value,
     truncate as shared_truncate,
+    validation_rows as shared_validation_rows,
     wrap_text as shared_wrap_text,
 )
 
@@ -123,11 +124,11 @@ def _health_attr(value: str) -> int:
     value = str(value or "").upper()
     if value in {"OK", "HEALTHY", "ACTIVE", "RUNNING", "READY", "ONLINE", "SUCCEEDED", "EXECUTING", "ACCEPTED", "DONE", "COMPLETED", "LISTENING", "SPEAKING"}:
         return _attr(PAIR_OK, bold=True)
-    if value in {"WARN", "WARNING", "BLOCKED", "STALE", "INACTIVE", "RECOVERING", "RETRYING", "SKIPPED", "CANCELED", "UNKNOWN", "PENDING", "IN QUEUE", "STOP", "SLOWDOWN", "LIMIT", "APPROACH"}:
+    if value in {"WARN", "WARNING", "BLOCKED", "PARTIAL", "STALE", "INACTIVE", "RECOVERING", "RETRYING", "SKIPPED", "CANCELED", "UNKNOWN", "PENDING", "IN QUEUE", "STOP", "SLOWDOWN", "LIMIT", "APPROACH"}:
         return _attr(PAIR_WARN, bold=True)
     if "PERSISTENT" in value or "BLOCKED" in value or "NOT_MOVING" in value:
         return _attr(PAIR_WARN, bold=True)
-    if value in {"ERROR", "FAILED", "FAIL", "MISSING", "OFFLINE", "FATAL", "ABORTED"}:
+    if value in {"ERROR", "FAILED", "FAIL", "MISSING", "UNAVAILABLE", "OFFLINE", "FATAL", "ABORTED"}:
         return _attr(PAIR_ERROR, bold=True)
     return _attr(PAIR_MUTED)
 
@@ -260,6 +261,7 @@ _pad = shared_pad
 _queue_rows = shared_queue_rows
 _text = shared_text_value
 _truncate = shared_truncate
+_validation_rows = shared_validation_rows
 _wrap_text = shared_wrap_text
 
 
@@ -447,7 +449,7 @@ class MonitorTui:
             for idx, col in enumerate(fitted):
                 value = row.get(col.key, "-")
                 attr = base_attr
-                if col.key in {"health", "state", "actual", "expected", "status"}:
+                if col.key in {"health", "state", "actual", "expected", "status", "preflight", "readiness"}:
                     attr = _health_attr(_text(value))
                 elif col.key in {"severity", "level"}:
                     attr = _severity_attr(_text(value))
@@ -497,6 +499,17 @@ class MonitorTui:
         completed_count = _dig(context, "completed_count", default=0)
         queue_length = _dig(context, "queue_length", default=0)
         y = self._metric(win, y, "Queue progress", f"{completed_count}/{queue_length} completed")
+        # Section: Overview exposes only compact readiness context for the active command.
+        preflight = _dig(context, "preflight", default={}) or {}
+        if bool(preflight.get("present")):
+            preflight_state = _text(preflight.get("state", "UNKNOWN"))
+            y = self._metric(win, y, "Preflight", preflight_state, status=preflight_state)
+            readiness = (
+                f"{int(preflight.get('ready_count', 0) or 0)} ready / "
+                f"{int(preflight.get('unavailable_count', 0) or 0)} unavailable / "
+                f"{int(preflight.get('blocked_count', 0) or 0)} blocked"
+            )
+            y = self._metric(win, y, "Skill readiness", readiness)
         retry = _dig(context, "retry_attempt", default=None)
         retry_limit = _dig(context, "retry_limit", default=None)
         if retry is not None or retry_limit is not None:
@@ -574,6 +587,18 @@ class MonitorTui:
         completed_count = _dig(gpsr, "completed_count", default=0)
         queue_length = _dig(gpsr, "queue_length", default=0)
         y = self._metric(win, y, "Queue progress", f"{completed_count}/{queue_length} completed")
+        # Section: Show readiness beside queue progress without conflating it with execution.
+        preflight = _dig(gpsr, "preflight", default={}) or {}
+        preflight_present = bool(preflight.get("present"))
+        preflight_state = _text(preflight.get("state", "UNKNOWN")) if preflight_present else "NOT AVAILABLE"
+        y = self._metric(win, y, "Preflight", preflight_state, status=preflight_state if preflight_present else "")
+        if preflight_present:
+            readiness = (
+                f"{int(preflight.get('ready_count', 0) or 0)} ready / "
+                f"{int(preflight.get('unavailable_count', 0) or 0)} unavailable / "
+                f"{int(preflight.get('blocked_count', 0) or 0)} blocked"
+            )
+            y = self._metric(win, y, "Skill readiness", readiness)
         y = self._metric(win, y, "Current domain", _dig(gpsr, "current_domain", default="-"))
         y = self._metric(win, y, "Current skill", _dig(gpsr, "current_skill", default="-"))
         y = self._metric(win, y, "Retry", f"{_text(_dig(gpsr, 'retry_attempt', default=0))}/{_text(_dig(gpsr, 'retry_limit', default=0))}")
@@ -590,6 +615,29 @@ class MonitorTui:
             self._safe_add(win, y, 2, line, _attr(PAIR_VALUE), content_width)
             y += 1
 
+        # Section: Detailed preflight diagnostics stay on GPSR rather than Lifecycle or Overview.
+        y = self._section(win, y + 1, "Pre-execution validation")
+        if preflight_present and int(preflight.get("item_count", 0) or 0) > 0:
+            y = self._draw_table(
+                win,
+                y,
+                _validation_rows(_dig(gpsr, "queue", default=[])),
+                [
+                    Column("number", "#", 4, 2),
+                    Column("skill", "SKILL", 20, 8, grow=1),
+                    Column("readiness", "READINESS", 12, 8),
+                    Column("reason", "REASON", 28, 10, grow=2),
+                    Column("resource", "RESOURCE / BLOCKED BY", 30, 12, grow=2),
+                    Column("message", "MESSAGE", 34, 12, grow=3),
+                ],
+            )
+        elif preflight_present:
+            self._safe_add(win, y, 2, "No per-action validation details were reported.", _attr(PAIR_MUTED), content_width)
+            y += 1
+        else:
+            self._safe_add(win, y, 2, "Pre-execution validation: NOT AVAILABLE", _attr(PAIR_MUTED), content_width)
+            y += 1
+
         y = self._section(win, y + 1, "Action queue", "current action is marked with >")
         self._draw_table(
             win,
@@ -601,6 +649,7 @@ class MonitorTui:
                 Column("skill", "SKILL", 22, 10, grow=1),
                 Column("target", "TARGET", 18, 8, grow=1),
                 Column("params", "PARAMS", 40, 12, grow=3),
+                Column("preflight", "PREFLIGHT", 12, 8),
                 Column("state", "STATUS", 12, 8),
                 Column("attempt", "ATTEMPT", 9, 7, align="right"),
             ],
