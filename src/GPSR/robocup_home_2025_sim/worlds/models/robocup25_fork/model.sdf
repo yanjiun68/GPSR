@@ -1,0 +1,115 @@
+<sdf version="1.9">
+  <model name="robocup25_fork">
+    <static>false</static>
+    <allow_auto_disable>false</allow_auto_disable>
+    <link name="base_link">
+      <gravity>true</gravity>
+      <self_collide>false</self_collide>
+      <inertial>
+        <mass>0.01100</mass>
+        <pose>0.00000 0.00000 0.00600 0.00000 0.00000 0.00000</pose>
+        <inertia>
+          <ixx>0.00000119</ixx>
+          <iyy>0.00003607</iyy>
+          <izz>0.00003700</izz>
+          <ixy>0</ixy>
+          <ixz>0</ixz>
+          <iyz>0</iyz>
+        </inertia>
+      </inertial>
+      <collision name="proxy_collision">
+        <pose>0.00000 0.00000 0.00600 0.00000 0.00000 0.00000</pose>
+        <geometry>
+          <box>
+            <size>0.198 0.034 0.012</size>
+          </box>
+        </geometry>
+        <surface>
+          <friction>
+            <ode>
+              <mu>0.8</mu>
+              <mu2>0.8</mu2>
+            </ode>
+          </friction>
+        </surface>
+      </collision>
+      <visual name="pink_handle_0">
+        <geometry>
+          <mesh>
+            <uri>model://robocup25_fork/meshes/000_pink_handle.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.8353 0.5294 0.6471 1.0000</ambient>
+          <diffuse>0.8353 0.5294 0.6471 1.0000</diffuse>
+        </material>
+      </visual>
+      <visual name="handle_tip_1">
+        <geometry>
+          <mesh>
+            <uri>model://robocup25_fork/meshes/001_handle_tip.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.8353 0.5294 0.6471 1.0000</ambient>
+          <diffuse>0.8353 0.5294 0.6471 1.0000</diffuse>
+        </material>
+      </visual>
+      <visual name="fork_neck_2">
+        <geometry>
+          <mesh>
+            <uri>model://robocup25_fork/meshes/002_fork_neck.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.8353 0.5294 0.6471 1.0000</ambient>
+          <diffuse>0.8353 0.5294 0.6471 1.0000</diffuse>
+        </material>
+      </visual>
+      <visual name="fork_tine0_3">
+        <geometry>
+          <mesh>
+            <uri>model://robocup25_fork/meshes/003_fork_tine0.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.8353 0.5294 0.6471 1.0000</ambient>
+          <diffuse>0.8353 0.5294 0.6471 1.0000</diffuse>
+        </material>
+      </visual>
+      <visual name="fork_tine1_4">
+        <geometry>
+          <mesh>
+            <uri>model://robocup25_fork/meshes/004_fork_tine1.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.8353 0.5294 0.6471 1.0000</ambient>
+          <diffuse>0.8353 0.5294 0.6471 1.0000</diffuse>
+        </material>
+      </visual>
+      <visual name="fork_tine2_5">
+        <geometry>
+          <mesh>
+            <uri>model://robocup25_fork/meshes/005_fork_tine2.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.8353 0.5294 0.6471 1.0000</ambient>
+          <diffuse>0.8353 0.5294 0.6471 1.0000</diffuse>
+        </material>
+      </visual>
+      <visual name="fork_tine3_6">
+        <geometry>
+          <mesh>
+            <uri>model://robocup25_fork/meshes/006_fork_tine3.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.8353 0.5294 0.6471 1.0000</ambient>
+          <diffuse>0.8353 0.5294 0.6471 1.0000</diffuse>
+        </material>
+      </visual>
+    </link>
+  </model>
+</sdf>

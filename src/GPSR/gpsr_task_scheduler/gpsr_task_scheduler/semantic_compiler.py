@@ -629,6 +629,52 @@ def _compile_semantic_steps(
         )
         compiled.append(return_step)
 
+    # Section: A room-qualified object search consumes the immediately preceding
+    # arrival at that same room.  Clause ordering alone is not an execution guard.
+    for index, step in enumerate(compiled):
+        if step.skill_name != "FIND_OBJECT" or index == 0:
+            continue
+        prior = compiled[index - 1]
+        search_location = str(step.arguments.get("target_location", ""))
+        arrival_location = str(prior.arguments.get("target_location", ""))
+        if prior.skill_name == "NAVIGATE" and search_location == arrival_location:
+            if prior.step_id not in step.dependencies:
+                step.dependencies.append(prior.step_id)
+
+    # Section: "where it is relative to furniture" requests grounded output; it
+    # is not a request to find a person/furniture or an image-space filter.
+    grounded_report = bool(re.search(
+        r"\b(?:where\s+(?:it|the\s+\w+)\s+is|where\s+is\s+(?:it|the\s+\w+))"
+        r"[^.]*\brelative\s+to\s+(?:the\s+)?furniture\b",
+        context.normalized_text,
+        re.IGNORECASE,
+    ))
+    if grounded_report:
+        find_step = next((item for item in compiled if item.skill_name == "FIND_OBJECT"), None)
+        say_step = next((item for item in reversed(compiled) if item.skill_name == "SAY"), None)
+        if find_step is not None and say_step is not None:
+            compiled = [
+                item for item in compiled
+                if not (
+                    item.skill_name in {"FIND_PERSON", "FIND_PERSON_BY_ATTRIBUTE"}
+                    and str(item.arguments.get("target_person", "")) == "operator"
+                )
+            ]
+            query = dict(find_step.arguments.get("query", {}))
+            fields = list(query.get("requested_fields", []))
+            if "furniture_relative_location" not in fields:
+                fields.append("furniture_relative_location")
+            query["requested_fields"] = fields
+            find_step.arguments["query"] = query
+            find_step.result_variable = "found_object"
+            prefix = "The" if str(find_step.arguments.get("object_name", "")) == "bowl" else "I found the"
+            say_step.arguments = {
+                "text_template": f"{prefix} {{name}} {{furniture_relative_phrase}}.",
+                "substitution": "found_object",
+                "requires_data": ["found_object"],
+            }
+            say_step.dependencies = [find_step.step_id]
+
     result = SchedulerResult(command_id, first_request, compiled, _dedupe_issues(issues), command_context=context)
     return _finalize_result(result, context, config)
 

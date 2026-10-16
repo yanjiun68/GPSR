@@ -1,0 +1,213 @@
+<sdf version="1.9">
+  <model name="robocup25_water">
+    <static>false</static>
+    <allow_auto_disable>false</allow_auto_disable>
+    <link name="base_link">
+      <gravity>true</gravity>
+      <self_collide>false</self_collide>
+      <inertial>
+        <mass>0.54000</mass>
+        <pose>0.00000 0.00000 0.10500 0.00000 0.00000 0.00000</pose>
+        <inertia>
+          <ixx>0.00214056</ixx>
+          <iyy>0.00214056</iyy>
+          <izz>0.00031212</izz>
+          <ixy>0</ixy>
+          <ixz>0</ixz>
+          <iyz>0</iyz>
+        </inertia>
+      </inertial>
+      <collision name="proxy_collision">
+        <pose>0.00000 0.00000 0.10500 0.00000 0.00000 0.00000</pose>
+        <geometry>
+          <cylinder>
+            <radius>0.034</radius>
+            <length>0.21</length>
+          </cylinder>
+        </geometry>
+        <surface>
+          <friction>
+            <ode>
+              <mu>0.8</mu>
+              <mu2>0.8</mu2>
+            </ode>
+          </friction>
+        </surface>
+      </collision>
+      <visual name="transparent_bottle_0">
+        <geometry>
+          <mesh>
+            <uri>model://robocup25_water/meshes/000_transparent_bottle.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.8078 0.8784 0.9333 0.5500</ambient>
+          <diffuse>0.8078 0.8784 0.9333 0.5500</diffuse>
+        </material>
+        <transparency>0.450</transparency>
+      </visual>
+      <visual name="bottle_rib_1">
+        <geometry>
+          <mesh>
+            <uri>model://robocup25_water/meshes/001_bottle_rib.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.8078 0.8784 0.9333 0.7000</ambient>
+          <diffuse>0.8078 0.8784 0.9333 0.7000</diffuse>
+        </material>
+        <transparency>0.300</transparency>
+      </visual>
+      <visual name="bottle_rib_2">
+        <geometry>
+          <mesh>
+            <uri>model://robocup25_water/meshes/002_bottle_rib.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.8078 0.8784 0.9333 0.7000</ambient>
+          <diffuse>0.8078 0.8784 0.9333 0.7000</diffuse>
+        </material>
+        <transparency>0.300</transparency>
+      </visual>
+      <visual name="bottle_rib_3">
+        <geometry>
+          <mesh>
+            <uri>model://robocup25_water/meshes/003_bottle_rib.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.8078 0.8784 0.9333 0.7000</ambient>
+          <diffuse>0.8078 0.8784 0.9333 0.7000</diffuse>
+        </material>
+        <transparency>0.300</transparency>
+      </visual>
+      <visual name="bottle_rib_4">
+        <geometry>
+          <mesh>
+            <uri>model://robocup25_water/meshes/004_bottle_rib.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.8078 0.8784 0.9333 0.7000</ambient>
+          <diffuse>0.8078 0.8784 0.9333 0.7000</diffuse>
+        </material>
+        <transparency>0.300</transparency>
+      </visual>
+      <visual name="bottle_rib_5">
+        <geometry>
+          <mesh>
+            <uri>model://robocup25_water/meshes/005_bottle_rib.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.8078 0.8784 0.9333 0.7000</ambient>
+          <diffuse>0.8078 0.8784 0.9333 0.7000</diffuse>
+        </material>
+        <transparency>0.300</transparency>
+      </visual>
+      <visual name="bottle_rib_6">
+        <geometry>
+          <mesh>
+            <uri>model://robocup25_water/meshes/006_bottle_rib.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.8078 0.8784 0.9333 0.7000</ambient>
+          <diffuse>0.8078 0.8784 0.9333 0.7000</diffuse>
+        </material>
+        <transparency>0.300</transparency>
+      </visual>
+      <visual name="bottle_rib_7">
+        <geometry>
+          <mesh>
+            <uri>model://robocup25_water/meshes/007_bottle_rib.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.8078 0.8784 0.9333 0.7000</ambient>
+          <diffuse>0.8078 0.8784 0.9333 0.7000</diffuse>
+        </material>
+        <transparency>0.300</transparency>
+      </visual>
+      <visual name="bottle_rib_8">
+        <geometry>
+          <mesh>
+            <uri>model://robocup25_water/meshes/008_bottle_rib.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.8078 0.8784 0.9333 0.7000</ambient>
+          <diffuse>0.8078 0.8784 0.9333 0.7000</diffuse>
+        </material>
+        <transparency>0.300</transparency>
+      </visual>
+      <visual name="bottle_label_9">
+        <geometry>
+          <mesh>
+            <uri>model://robocup25_water/meshes/009_bottle_label.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.0510 0.5412 0.7686 1.0000</ambient>
+          <diffuse>0.0510 0.5412 0.7686 1.0000</diffuse>
+        </material>
+      </visual>
+      <visual name="label_top_10">
+        <geometry>
+          <mesh>
+            <uri>model://robocup25_water/meshes/010_label_top.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.5137 0.7412 0.8980 1.0000</ambient>
+          <diffuse>0.5137 0.7412 0.8980 1.0000</diffuse>
+        </material>
+      </visual>
+      <visual name="label_bottom_11">
+        <geometry>
+          <mesh>
+            <uri>model://robocup25_water/meshes/011_label_bottom.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.0000 0.2392 0.3961 1.0000</ambient>
+          <diffuse>0.0000 0.2392 0.3961 1.0000</diffuse>
+        </material>
+      </visual>
+      <visual name="cap_12">
+        <geometry>
+          <mesh>
+            <uri>model://robocup25_water/meshes/012_cap.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.0510 0.5412 0.7686 1.0000</ambient>
+          <diffuse>0.0510 0.5412 0.7686 1.0000</diffuse>
+        </material>
+      </visual>
+      <visual name="cap_ring_13">
+        <geometry>
+          <mesh>
+            <uri>model://robocup25_water/meshes/013_cap_ring.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.9725 0.9686 0.9333 1.0000</ambient>
+          <diffuse>0.9725 0.9686 0.9333 1.0000</diffuse>
+        </material>
+      </visual>
+      <visual name="letters_crystal_14">
+        <geometry>
+          <mesh>
+            <uri>model://robocup25_water/meshes/014_letters_crystal.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.9725 0.9686 0.9333 1.0000</ambient>
+          <diffuse>0.9725 0.9686 0.9333 1.0000</diffuse>
+        </material>
+      </visual>
+    </link>
+  </model>
+</sdf>

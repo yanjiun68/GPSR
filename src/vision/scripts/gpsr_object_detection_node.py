@@ -79,7 +79,7 @@ class GpsrObjectDetectionNode(LifecycleNode):
         self.declare_parameter("ready_topic", "/perception/object_detector_ready")
         self.declare_parameter("enable_model_warmup", True)
         # Section: Qwen settings mirror test_camera.py while adding a ROS-safe structured output contract.
-        self.declare_parameter("qwen_model_path", "/home/yanjiun68/ai/models/UnifoLM-ER-1")
+        self.declare_parameter("qwen_model_path", "/home/yanjiun68/ai/models/UnifoLM-ER-Flow")
         self.declare_parameter(
             "qwen_prompt_path",
             str(Path(get_package_share_directory("vision")) / "config" / "qwen_world_prompt.txt"),
@@ -574,7 +574,7 @@ class GpsrObjectDetectionNode(LifecycleNode):
             raise FileNotFoundError(f"Qwen model path does not exist: {model_path}")
         if not prompt_path.is_file():
             raise FileNotFoundError(f"Qwen world-sensing prompt does not exist: {prompt_path}")
-        # Section: Match test_camera.py's local-only UnifoLM-ER-1 NF4 loading policy.
+        # Section: Match test_camera.py's local-only UnifoLM-ER-Flow NF4 loading policy.
         from transformers import (
             AutoProcessor,
             BitsAndBytesConfig,
@@ -607,7 +607,7 @@ class GpsrObjectDetectionNode(LifecycleNode):
                 + ", ".join(self.yolo_class_prompts)
                 + "."
             )
-        self.get_logger().info(f"Loaded UnifoLM-ER-1 world-sensing model in NF4: {model_path}")
+        self.get_logger().info(f"Loaded UnifoLM-ER-Flow world-sensing model in NF4: {model_path}")
 
     def qwen_inference_worker(
         self,

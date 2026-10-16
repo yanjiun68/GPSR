@@ -35,6 +35,7 @@ def generate_launch_description() -> LaunchDescription:
     target_status_topic = LaunchConfiguration("target_status_topic")
     search_config_file = LaunchConfiguration("search_config_file")
     object_knowledge_file = LaunchConfiguration("object_knowledge_file")
+    furniture_map_file = LaunchConfiguration("furniture_map_file")
     default_timeout_sec = LaunchConfiguration("default_timeout_sec")
     # Section: Reuse the existing navigation stack without launching duplicate Nav2 nodes.
     enable_navigation = LaunchConfiguration("enable_navigation")
@@ -69,6 +70,8 @@ def generate_launch_description() -> LaunchDescription:
             "inference_backend": inference_backend,
             "qwen_query_topic": detector_query_topic,
             "yolo_model_path": yolo_model_path,
+            "object_knowledge_file": object_knowledge_file,
+            "furniture_map_file": furniture_map_file,
             "confidence_threshold": 0.35,
             "exclude_classes": ["person"],
             "publish_annotated_image": True,
@@ -143,10 +146,10 @@ def generate_launch_description() -> LaunchDescription:
     # Section: Return only the detector, state-machine server, and one lifecycle manager.
     return LaunchDescription([
         DeclareLaunchArgument("use_sim_time", default_value="false", description="Use simulation time."),
-        DeclareLaunchArgument("rgb_topic", default_value="/camera/camera/color/image_raw", description="RGB image topic used by the object detector."),
+        DeclareLaunchArgument("rgb_topic", default_value="/camera/color/image_raw", description="RGB image topic used by the object detector."),
         DeclareLaunchArgument("enable_depth", default_value="true", description="Use aligned depth when locating a found object."),
-        DeclareLaunchArgument("depth_topic", default_value="/camera/camera/aligned_depth_to_color/image_raw", description="Aligned depth image topic for FIND_OBJECT."),
-        DeclareLaunchArgument("camera_info_topic", default_value="/camera/camera/color/camera_info", description="Color CameraInfo topic for depth projection."),
+        DeclareLaunchArgument("depth_topic", default_value="/camera/depth/image_raw", description="Aligned depth image topic for FIND_OBJECT."),
+        DeclareLaunchArgument("camera_info_topic", default_value="/camera/color/camera_info", description="Color CameraInfo topic for depth projection."),
         DeclareLaunchArgument("show_gui", default_value="false", description="Show object-detector debug windows."),
         DeclareLaunchArgument("inference_backend", default_value="yolo", description="Detector backend: qwen or yolo."),
         DeclareLaunchArgument("yolo_model_path", default_value=default_yolo_model_path, description="YOLO model path when inference_backend:=yolo."),
@@ -159,6 +162,7 @@ def generate_launch_description() -> LaunchDescription:
         DeclareLaunchArgument("target_status_topic", default_value="/gpsr/find_object/target_status", description="Latched FIND_OBJECT mission-status topic."),
         DeclareLaunchArgument("search_config_file", default_value=default_search_config_file, description="Installed FIND_OBJECT search policy."),
         DeclareLaunchArgument("object_knowledge_file", default_value=default_object_knowledge_file, description="Installed object aliases and category policy."),
+        DeclareLaunchArgument("furniture_map_file", default_value="", description="Optional mapped furniture priors for metric RGB-D grounding."),
         DeclareLaunchArgument("default_timeout_sec", default_value="300.0", description="Default FIND_OBJECT action timeout in seconds."),
         DeclareLaunchArgument("enable_navigation", default_value="true", description="Navigate to configured waypoints and use Nav2 Spin for object search."),
         DeclareLaunchArgument("named_navigation_action", default_value="/nav/navigate_named_pose", description="Existing named-waypoint navigation action."),

@@ -1,0 +1,123 @@
+<?xml version="1.0"?>
+<!--
+  Add-on structural chassis for my_car.urdf.xacro (ROS 2 / Xacro).
+
+  Frame of reference: parent="baseup_link", with +X forward, +Y left, +Z up.
+  Each beam is drawn as a 30 mm square extrusion. For inertial estimates,
+  it is modeled as a hollow square tube (default 2 mm wall thickness), NOT
+  a measured or manufacturer-specific 30x30 T-slot/L-angle mass profile.
+-->
+<robot xmlns:xacro="http://ros.org/wiki/xacro">
+
+  <material name="alu3030_silver">
+    <color rgba="0.72 0.76 0.80 1.0"/>
+  </material>
+
+  <!-- One axis-aligned 30x30 profile beam in a fixed parent frame. -->
+  <xacro:macro name="alu3030_beam" params="parent prefix id axis length x y z outer area density">
+    <xacro:property name="span" value="${float(length)}"/>
+    <xacro:property name="w" value="${float(outer)}"/>
+    <xacro:property name="sx" value="${span if axis == 'x' else w}"/>
+    <xacro:property name="sy" value="${span if axis == 'y' else w}"/>
+    <xacro:property name="sz" value="${span if axis == 'z' else w}"/>
+    <xacro:property name="m" value="${float(area) * span * float(density)}"/>
+
+    <link name="${prefix}_${id}">
+      <visual>
+        <geometry><box size="${sx} ${sy} ${sz}"/></geometry>
+        <material name="alu3030_silver"/>
+      </visual>
+      <collision>
+        <geometry><box size="${sx} ${sy} ${sz}"/></geometry>
+      </collision>
+      <inertial>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <mass value="${m}"/>
+        <inertia ixx="${m*(sy*sy+sz*sz)/12.0}" ixy="0" ixz="0"
+                 iyy="${m*(sx*sx+sz*sz)/12.0}" iyz="0"
+                 izz="${m*(sx*sx+sy*sy)/12.0}"/>
+      </inertial>
+    </link>
+    <joint name="${prefix}_${id}_joint" type="fixed">
+      <parent link="${parent}"/>
+      <child link="${prefix}_${id}"/>
+      <origin xyz="${x} ${y} ${z}" rpy="0 0 0"/>
+    </joint>
+  </xacro:macro>
+
+  <xacro:macro name="aluminium_3030_frame" params="
+      parent
+      prefix:=alu3030
+      rear_x:=-0.121
+      half_width:=0.125
+      forward_length:=0.30
+      red_height:=1.33
+      bottom_z:=0.0335
+      arm_x:=0.037
+      arm_base_z:=0.445
+      arm_clearance:=0.015
+      profile_size:=0.03
+      wall_thickness:=0.002
+      aluminium_density:=2700.0">
+
+    <xacro:property name="xr" value="${float(rear_x)}"/>
+    <xacro:property name="hw" value="${float(half_width)}"/>
+    <xacro:property name="depth" value="${float(forward_length)}"/>
+    <xacro:property name="red_h" value="${float(red_height)}"/>
+    <xacro:property name="zb" value="${float(bottom_z)}"/>
+    <xacro:property name="armx" value="${float(arm_x)}"/>
+    <xacro:property name="armz" value="${float(arm_base_z)}"/>
+    <xacro:property name="clearance" value="${float(arm_clearance)}"/>
+    <xacro:property name="size_m" value="${float(profile_size)}"/>
+    <xacro:property name="wall_m" value="${float(wall_thickness)}"/>
+    <xacro:property name="rho" value="${float(aluminium_density)}"/>
+
+    <xacro:property name="profile_area" value="${size_m*size_m - (size_m-2.0*wall_m)*(size_m-2.0*wall_m)}"/>
+    <xacro:property name="front_x" value="${xr + depth}"/>
+    <xacro:property name="lower_top_z" value="${armz - clearance}"/>
+    <xacro:property name="lower_height" value="${lower_top_z - zb}"/>
+    <xacro:property name="lower_center_z" value="${(lower_top_z + zb)/2.0}"/>
+    <xacro:property name="rail_z" value="${lower_top_z - size_m/2.0}"/>
+    <xacro:property name="blue_z" value="${zb + red_h - size_m/2.0}"/>
+
+    <!-- Two uninterrupted 1.33 m camera-side uprights. -->
+    <xacro:alu3030_beam parent="${parent}" prefix="${prefix}" id="red_left"
+      axis="z" length="${red_h}" x="${xr}" y="${hw}" z="${zb+red_h/2.0}"
+      outer="${size_m}" area="${profile_area}" density="${rho}"/>
+    <xacro:alu3030_beam parent="${parent}" prefix="${prefix}" id="red_right"
+      axis="z" length="${red_h}" x="${xr}" y="${-hw}" z="${zb+red_h/2.0}"
+      outer="${size_m}" area="${profile_area}" density="${rho}"/>
+
+    <!-- Camera top span, along robot Y. -->
+    <xacro:alu3030_beam parent="${parent}" prefix="${prefix}" id="blue_camera_top"
+      axis="y" length="${2.0*hw}" x="${xr}" y="0" z="${blue_z}"
+      outer="${size_m}" area="${profile_area}" density="${rho}"/>
+
+    <!-- Front vertical posts. -->
+    <xacro:alu3030_beam parent="${parent}" prefix="${prefix}" id="green_front_left"
+      axis="z" length="${lower_height}" x="${front_x}" y="${hw}" z="${lower_center_z}"
+      outer="${size_m}" area="${profile_area}" density="${rho}"/>
+    <xacro:alu3030_beam parent="${parent}" prefix="${prefix}" id="green_front_right"
+      axis="z" length="${lower_height}" x="${front_x}" y="${-hw}" z="${lower_center_z}"
+      outer="${size_m}" area="${profile_area}" density="${rho}"/>
+
+    <!-- Rectangular upper rim, 30 cm forward by 25 cm lateral. -->
+    <xacro:alu3030_beam parent="${parent}" prefix="${prefix}" id="green_side_left"
+      axis="x" length="${depth}" x="${xr+depth/2.0}" y="${hw}" z="${rail_z}"
+      outer="${size_m}" area="${profile_area}" density="${rho}"/>
+    <xacro:alu3030_beam parent="${parent}" prefix="${prefix}" id="green_side_right"
+      axis="x" length="${depth}" x="${xr+depth/2.0}" y="${-hw}" z="${rail_z}"
+      outer="${size_m}" area="${profile_area}" density="${rho}"/>
+    <xacro:alu3030_beam parent="${parent}" prefix="${prefix}" id="green_rear_cross"
+      axis="y" length="${2.0*hw}" x="${xr}" y="0" z="${rail_z}"
+      outer="${size_m}" area="${profile_area}" density="${rho}"/>
+    <xacro:alu3030_beam parent="${parent}" prefix="${prefix}" id="green_front_cross"
+      axis="y" length="${2.0*hw}" x="${front_x}" y="0" z="${rail_z}"
+      outer="${size_m}" area="${profile_area}" density="${rho}"/>
+
+    <!-- Central vertical support below the manipulator base. -->
+    <xacro:alu3030_beam parent="${parent}" prefix="${prefix}" id="yellow_arm_support"
+      axis="z" length="${lower_height}" x="${armx}" y="0" z="${lower_center_z}"
+      outer="${size_m}" area="${profile_area}" density="${rho}"/>
+  </xacro:macro>
+</robot>

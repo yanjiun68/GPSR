@@ -18,7 +18,7 @@
   </xacro:if>
 
   <material name="interbotix_black">
-    <texture filename="package://interbotix_xsarm_descriptions/meshes/interbotix_black.png"/>
+    <texture filename="package://robot_description/meshes/arm/arm/interbotix_black.png"/>
   </material>
 
   <xacro:if value="$(arg use_world_frame)">
@@ -33,14 +33,14 @@
     <visual>
       <origin rpy="0 0 ${-pi/2}" xyz="0 0 0"/>
       <geometry>
-        <mesh filename="package://interbotix_xsarm_descriptions/meshes/rx200_meshes/rx200_1_base.stl" scale="0.001 0.001 0.001"/>
+        <mesh filename="package://robot_description/meshes/arm/arm/rx200_meshes/rx200_1_base.stl" scale="0.001 0.001 0.001"/>
       </geometry>
       <material name="interbotix_black"/>
     </visual>
     <collision>
       <origin rpy="0 0 ${-pi/2}" xyz="0 0 0"/>
       <geometry>
-        <mesh filename="package://interbotix_xsarm_descriptions/meshes/rx200_meshes/rx200_1_base.stl" scale="0.001 0.001 0.001"/>
+        <mesh filename="package://robot_description/meshes/arm/arm/rx200_meshes/rx200_1_base.stl" scale="0.001 0.001 0.001"/>
       </geometry>
     </collision>
     <inertial>
@@ -73,14 +73,14 @@
     <visual>
       <origin rpy="0 0 ${-pi/2}" xyz="0 0 0.0015"/>
       <geometry>
-        <mesh filename="package://interbotix_xsarm_descriptions/meshes/rx200_meshes/rx200_2_shoulder.stl" scale="0.001 0.001 0.001"/>
+        <mesh filename="package://robot_description/meshes/arm/arm/rx200_meshes/rx200_2_shoulder.stl" scale="0.001 0.001 0.001"/>
       </geometry>
       <material name="interbotix_black"/>
     </visual>
     <collision>
       <origin rpy="0 0 ${-pi/2}" xyz="0 0 0.0015"/>
       <geometry>
-        <mesh filename="package://interbotix_xsarm_descriptions/meshes/rx200_meshes/rx200_2_shoulder.stl" scale="0.001 0.001 0.001"/>
+        <mesh filename="package://robot_description/meshes/arm/arm/rx200_meshes/rx200_2_shoulder.stl" scale="0.001 0.001 0.001"/>
       </geometry>
     </collision>
     <inertial>
@@ -113,14 +113,14 @@
     <visual>
       <origin rpy="0 0 ${pi/2}" xyz="0 0 0"/>
       <geometry>
-        <mesh filename="package://interbotix_xsarm_descriptions/meshes/rx200_meshes/rx200_3_upper_arm.stl" scale="0.001 0.001 0.001"/>
+        <mesh filename="package://robot_description/meshes/arm/arm/rx200_meshes/rx200_3_upper_arm.stl" scale="0.001 0.001 0.001"/>
       </geometry>
       <material name="interbotix_black"/>
     </visual>
     <collision>
       <origin rpy="0 0 ${pi/2}" xyz="0 0 0"/>
       <geometry>
-        <mesh filename="package://interbotix_xsarm_descriptions/meshes/rx200_meshes/rx200_3_upper_arm.stl" scale="0.001 0.001 0.001"/>
+        <mesh filename="package://robot_description/meshes/arm/arm/rx200_meshes/rx200_3_upper_arm.stl" scale="0.001 0.001 0.001"/>
       </geometry>
     </collision>
     <inertial>
@@ -153,14 +153,14 @@
     <visual>
       <origin rpy="0 0 ${pi/2}" xyz="0 0 0"/>
       <geometry>
-        <mesh filename="package://interbotix_xsarm_descriptions/meshes/rx200_meshes/rx200_4_forearm.stl" scale="0.001 0.001 0.001"/>
+        <mesh filename="package://robot_description/meshes/arm/arm/rx200_meshes/rx200_4_forearm.stl" scale="0.001 0.001 0.001"/>
       </geometry>
       <material name="interbotix_black"/>
     </visual>
     <collision>
       <origin rpy="0 0 ${pi/2}" xyz="0 0 0"/>
       <geometry>
-        <mesh filename="package://interbotix_xsarm_descriptions/meshes/rx200_meshes/rx200_4_forearm.stl" scale="0.001 0.001 0.001"/>
+        <mesh filename="package://robot_description/meshes/arm/arm/rx200_meshes/rx200_4_forearm.stl" scale="0.001 0.001 0.001"/>
       </geometry>
     </collision>
     <inertial>
@@ -193,14 +193,14 @@
     <visual>
       <origin rpy="0 0 ${pi/2}" xyz="0 0 0"/>
       <geometry>
-        <mesh filename="package://interbotix_xsarm_descriptions/meshes/rx200_meshes/rx200_5_wrist.stl" scale="0.001 0.001 0.001"/>
+        <mesh filename="package://robot_description/meshes/arm/arm/rx200_meshes/rx200_5_wrist.stl" scale="0.001 0.001 0.001"/>
       </geometry>
       <material name="interbotix_black"/>
     </visual>
     <collision>
       <origin rpy="0 0 ${pi/2}" xyz="0 0 0"/>
       <geometry>
-        <mesh filename="package://interbotix_xsarm_descriptions/meshes/rx200_meshes/rx200_5_wrist.stl" scale="0.001 0.001 0.001"/>
+        <mesh filename="package://robot_description/meshes/arm/arm/rx200_meshes/rx200_5_wrist.stl" scale="0.001 0.001 0.001"/>
       </geometry>
     </collision>
     <inertial>
@@ -233,14 +233,14 @@
     <visual>
       <origin rpy="0 0 ${pi/2}" xyz="-0.02 0 0"/>
       <geometry>
-        <mesh filename="package://interbotix_xsarm_descriptions/meshes/rx200_meshes/rx200_6_gripper.stl" scale="0.001 0.001 0.001"/>
+        <mesh filename="package://robot_description/meshes/arm/arm/rx200_meshes/rx200_6_gripper.stl" scale="0.001 0.001 0.001"/>
       </geometry>
       <material name="interbotix_black"/>
     </visual>
     <collision>
       <origin rpy="0 0 ${pi/2}" xyz="-0.02 0 0"/>
       <geometry>
-        <mesh filename="package://interbotix_xsarm_descriptions/meshes/rx200_meshes/rx200_6_gripper.stl" scale="0.001 0.001 0.001"/>
+        <mesh filename="package://robot_description/meshes/arm/arm/rx200_meshes/rx200_6_gripper.stl" scale="0.001 0.001 0.001"/>
       </geometry>
     </collision>
     <inertial>
@@ -287,14 +287,14 @@
     <visual>
       <origin rpy="0 0 ${pi/2}" xyz="-0.0685 0 0"/>
       <geometry>
-        <mesh filename="package://interbotix_xsarm_descriptions/meshes/rx200_meshes/rx200_7_gripper_prop.stl" scale="0.001 0.001 0.001"/>
+        <mesh filename="package://robot_description/meshes/arm/arm/rx200_meshes/rx200_7_gripper_prop.stl" scale="0.001 0.001 0.001"/>
       </geometry>
       <material name="interbotix_black"/>
     </visual>
     <collision>
       <origin rpy="0 0 ${pi/2}" xyz="-0.0685 0 0"/>
       <geometry>
-        <mesh filename="package://interbotix_xsarm_descriptions/meshes/rx200_meshes/rx200_7_gripper_prop.stl" scale="0.001 0.001 0.001"/>
+        <mesh filename="package://robot_description/meshes/arm/arm/rx200_meshes/rx200_7_gripper_prop.stl" scale="0.001 0.001 0.001"/>
       </geometry>
     </collision>
     <inertial>
@@ -319,14 +319,14 @@
       <visual>
         <origin rpy="0 0 0" xyz="0 0 0"/>
         <geometry>
-          <mesh filename="package://interbotix_xsarm_descriptions/meshes/rx200_meshes/rx200_10_ar_tag.stl" scale="0.001 0.001 0.001"/>
+          <mesh filename="package://robot_description/meshes/arm/arm/rx200_meshes/rx200_10_ar_tag.stl" scale="0.001 0.001 0.001"/>
         </geometry>
         <material name="interbotix_black"/>
       </visual>
       <collision>
         <origin rpy="0 0 0" xyz="0 0 0"/>
         <geometry>
-          <mesh filename="package://interbotix_xsarm_descriptions/meshes/rx200_meshes/rx200_10_ar_tag.stl" scale="0.001 0.001 0.001"/>
+          <mesh filename="package://robot_description/meshes/arm/arm/rx200_meshes/rx200_10_ar_tag.stl" scale="0.001 0.001 0.001"/>
         </geometry>
       </collision>
       <inertial>
@@ -353,14 +353,14 @@
       <visual>
         <origin rpy="0 0 ${pi/2}" xyz="-0.063 0 0"/>
         <geometry>
-          <mesh filename="package://interbotix_xsarm_descriptions/meshes/rx200_meshes/rx200_8_gripper_bar.stl" scale="0.001 0.001 0.001"/>
+          <mesh filename="package://robot_description/meshes/arm/arm/rx200_meshes/rx200_8_gripper_bar.stl" scale="0.001 0.001 0.001"/>
         </geometry>
         <material name="interbotix_black"/>
       </visual>
       <collision>
         <origin rpy="0 0 ${pi/2}" xyz="-0.063 0 0"/>
         <geometry>
-          <mesh filename="package://interbotix_xsarm_descriptions/meshes/rx200_meshes/rx200_8_gripper_bar.stl" scale="0.001 0.001 0.001"/>
+          <mesh filename="package://robot_description/meshes/arm/arm/rx200_meshes/rx200_8_gripper_bar.stl" scale="0.001 0.001 0.001"/>
         </geometry>
       </collision>
       <inertial>
@@ -411,14 +411,14 @@
         <visual>
           <origin rpy="${pi} ${pi} 0" xyz="0 0.005 0"/>
           <geometry>
-            <mesh filename="package://interbotix_xsarm_descriptions/meshes/rx200_meshes/rx200_9_gripper_finger.stl" scale="0.001 0.001 0.001"/>
+            <mesh filename="package://robot_description/meshes/arm/arm/rx200_meshes/rx200_9_gripper_finger.stl" scale="0.001 0.001 0.001"/>
           </geometry>
           <material name="interbotix_black"/>
         </visual>
         <collision>
           <origin rpy="${pi} ${pi} 0" xyz="0 0.005 0"/>
           <geometry>
-            <mesh filename="package://interbotix_xsarm_descriptions/meshes/rx200_meshes/rx200_9_gripper_finger.stl" scale="0.001 0.001 0.001"/>
+            <mesh filename="package://robot_description/meshes/arm/arm/rx200_meshes/rx200_9_gripper_finger.stl" scale="0.001 0.001 0.001"/>
           </geometry>
         </collision>
         <inertial>
@@ -454,14 +454,14 @@
         <visual>
           <origin rpy="0 ${pi} 0" xyz="0 -0.005 0"/>
           <geometry>
-            <mesh filename="package://interbotix_xsarm_descriptions/meshes/rx200_meshes/rx200_9_gripper_finger.stl" scale="0.001 0.001 0.001"/>
+            <mesh filename="package://robot_description/meshes/arm/arm/rx200_meshes/rx200_9_gripper_finger.stl" scale="0.001 0.001 0.001"/>
           </geometry>
           <material name="interbotix_black"/>
         </visual>
         <collision>
           <origin rpy="0 ${pi} 0" xyz="0 -0.005 0"/>
           <geometry>
-            <mesh filename="package://interbotix_xsarm_descriptions/meshes/rx200_meshes/rx200_9_gripper_finger.stl" scale="0.001 0.001 0.001"/>
+            <mesh filename="package://robot_description/meshes/arm/arm/rx200_meshes/rx200_9_gripper_finger.stl" scale="0.001 0.001 0.001"/>
           </geometry>
         </collision>
         <inertial>

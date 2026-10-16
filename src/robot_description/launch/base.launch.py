@@ -23,8 +23,8 @@ def generate_launch_description():
     default_model_path = os.path.join(
         pkg_robot_description,
         'urdf',
-        'main',
-        'base.urdf.xacro'
+        'sim',
+        'my_car.urdf.xacro'
     )
 
     # Launch args
@@ -33,6 +33,7 @@ def generate_launch_description():
     use_joint_state_publisher = LaunchConfiguration('use_joint_state_publisher')
     robot_state_publisher_name = LaunchConfiguration('robot_state_publisher_name')
     joint_state_publisher_name = LaunchConfiguration('joint_state_publisher_name')
+    use_rviz = LaunchConfiguration('use_rviz')
 
     declare_model_arg = DeclareLaunchArgument(
         name='model',
@@ -64,8 +65,22 @@ def generate_launch_description():
         description='Node name for joint_state_publisher'
     )
 
+    declare_use_rviz_arg = DeclareLaunchArgument(
+        'use_rviz',
+        default_value='false',
+        description='Start RViz2 with the robot-description configuration'
+    )
+
     # Run xacro → URDF
-    robot_description = Command(['xacro ', model])
+    robot_description = ParameterValue(
+        Command(['xacro ', model]),
+        value_type=str
+    )
+
+    sim_time_parameter = ParameterValue(
+        use_sim_time,
+        value_type=bool
+    )
 
     # Nodes
     robot_state_publisher_node = Node(
@@ -73,7 +88,7 @@ def generate_launch_description():
         executable='robot_state_publisher',
         name=robot_state_publisher_name,
         parameters=[{
-            'use_sim_time': use_sim_time,
+            'use_sim_time': sim_time_parameter,
             'robot_description': robot_description
         }],
         output='screen'
@@ -83,7 +98,23 @@ def generate_launch_description():
         package='joint_state_publisher',
         executable='joint_state_publisher',
         name=joint_state_publisher_name,
+        parameters=[{
+            'rate': 10,
+            'publish_default_positions': True,
+            'use_sim_time': sim_time_parameter
+        }],
         condition=IfCondition(use_joint_state_publisher),
+        output='screen'
+    )
+
+    rviz_node = Node(
+        package='rviz2',
+        executable='rviz2',
+        name='rviz2',
+        arguments=['-d', os.path.join(
+            pkg_robot_description, 'rviz', 'base.rviz')],
+        parameters=[{'use_sim_time': sim_time_parameter}],
+        condition=IfCondition(use_rviz),
         output='screen'
     )
 
@@ -93,6 +124,8 @@ def generate_launch_description():
         declare_use_joint_state_publisher_arg,
         declare_robot_state_publisher_name_arg,
         declare_joint_state_publisher_name_arg,
+        declare_use_rviz_arg,
         joint_state_publisher_node,
         robot_state_publisher_node,
+        rviz_node,
     ])

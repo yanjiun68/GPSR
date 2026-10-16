@@ -45,6 +45,12 @@ class GpsrLifecycleManager final : public rclcpp::Node {
 
   // Special function: Load the registry and expose serialized lifecycle operations.
   GpsrLifecycleManager() : rclcpp::Node("gpsr_lifecycle_manager") {
+    // Lifecycle operations synchronously wait for responses from the managed
+    // nodes. Put those client callbacks in a reentrant group so the
+    // MultiThreadedExecutor can deliver them while a prepare/cleanup service
+    // callback is waiting. The default mutually-exclusive group deadlocks here.
+    lifecycle_client_group_ =
+        create_callback_group(rclcpp::CallbackGroupType::Reentrant);
     const auto default_path =
         ament_index_cpp::get_package_share_directory("robot_yasmin_tasks") +
         "/config/skill_registry.yaml";
@@ -67,8 +73,12 @@ class GpsrLifecycleManager final : public rclcpp::Node {
       nodes.insert(spec.lifecycle_nodes.begin(), spec.lifecycle_nodes.end());
     }
     for (const auto &node : nodes) {
-      state_clients_[node] = create_client<GetState>(node + "/get_state");
-      change_clients_[node] = create_client<ChangeState>(node + "/change_state");
+      state_clients_[node] = create_client<GetState>(
+          node + "/get_state", rmw_qos_profile_services_default,
+          lifecycle_client_group_);
+      change_clients_[node] = create_client<ChangeState>(
+          node + "/change_state", rmw_qos_profile_services_default,
+          lifecycle_client_group_);
     }
     prepare_service_ = create_service<Manage>(
         GPSR_PREPARE_SKILL_SERVICE, [this](const Manage::Request::SharedPtr request,
@@ -462,6 +472,7 @@ class GpsrLifecycleManager final : public rclcpp::Node {
   std::string prepared_skill_;
   std::map<std::string, rclcpp::Client<GetState>::SharedPtr> state_clients_;
   std::map<std::string, rclcpp::Client<ChangeState>::SharedPtr> change_clients_;
+  rclcpp::CallbackGroup::SharedPtr lifecycle_client_group_;
   rclcpp::Service<Manage>::SharedPtr prepare_service_;
   rclcpp::Service<Manage>::SharedPtr cleanup_service_;
   rclcpp::Service<Manage>::SharedPtr recover_service_;

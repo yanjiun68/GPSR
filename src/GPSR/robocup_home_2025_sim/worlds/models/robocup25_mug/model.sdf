@@ -1,0 +1,270 @@
+<sdf version="1.9">
+  <model name="robocup25_mug">
+    <static>false</static>
+    <allow_auto_disable>false</allow_auto_disable>
+    <link name="base_link">
+      <gravity>true</gravity>
+      <self_collide>false</self_collide>
+      <inertial>
+        <mass>0.28000</mass>
+        <pose>0.00000 0.00000 0.05500 0.00000 0.00000 0.00000</pose>
+        <inertia>
+          <ixx>0.00047161</ixx>
+          <iyy>0.00047161</iyy>
+          <izz>0.00037856</izz>
+          <ixy>0</ixy>
+          <ixz>0</ixz>
+          <iyz>0</iyz>
+        </inertia>
+      </inertial>
+      <collision name="proxy_collision">
+        <pose>0.00000 0.00000 0.05500 0.00000 0.00000 0.00000</pose>
+        <geometry>
+          <cylinder>
+            <radius>0.052</radius>
+            <length>0.11</length>
+          </cylinder>
+        </geometry>
+        <surface>
+          <friction>
+            <ode>
+              <mu>0.8</mu>
+              <mu2>0.8</mu2>
+            </ode>
+          </friction>
+        </surface>
+      </collision>
+      <visual name="cream_cup_0">
+        <geometry>
+          <mesh>
+            <uri>model://robocup25_mug/meshes/000_cream_cup.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.9059 0.8667 0.7098 1.0000</ambient>
+          <diffuse>0.9059 0.8667 0.7098 1.0000</diffuse>
+        </material>
+      </visual>
+      <visual name="handle00_1">
+        <geometry>
+          <mesh>
+            <uri>model://robocup25_mug/meshes/001_handle00.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.9059 0.8667 0.7098 1.0000</ambient>
+          <diffuse>0.9059 0.8667 0.7098 1.0000</diffuse>
+        </material>
+      </visual>
+      <visual name="handle01_2">
+        <geometry>
+          <mesh>
+            <uri>model://robocup25_mug/meshes/002_handle01.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.9059 0.8667 0.7098 1.0000</ambient>
+          <diffuse>0.9059 0.8667 0.7098 1.0000</diffuse>
+        </material>
+      </visual>
+      <visual name="handle02_3">
+        <geometry>
+          <mesh>
+            <uri>model://robocup25_mug/meshes/003_handle02.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.9059 0.8667 0.7098 1.0000</ambient>
+          <diffuse>0.9059 0.8667 0.7098 1.0000</diffuse>
+        </material>
+      </visual>
+      <visual name="handle03_4">
+        <geometry>
+          <mesh>
+            <uri>model://robocup25_mug/meshes/004_handle03.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.9059 0.8667 0.7098 1.0000</ambient>
+          <diffuse>0.9059 0.8667 0.7098 1.0000</diffuse>
+        </material>
+      </visual>
+      <visual name="handle04_5">
+        <geometry>
+          <mesh>
+            <uri>model://robocup25_mug/meshes/005_handle04.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.9059 0.8667 0.7098 1.0000</ambient>
+          <diffuse>0.9059 0.8667 0.7098 1.0000</diffuse>
+        </material>
+      </visual>
+      <visual name="handle05_6">
+        <geometry>
+          <mesh>
+            <uri>model://robocup25_mug/meshes/006_handle05.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.9059 0.8667 0.7098 1.0000</ambient>
+          <diffuse>0.9059 0.8667 0.7098 1.0000</diffuse>
+        </material>
+      </visual>
+      <visual name="handle06_7">
+        <geometry>
+          <mesh>
+            <uri>model://robocup25_mug/meshes/007_handle06.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.9059 0.8667 0.7098 1.0000</ambient>
+          <diffuse>0.9059 0.8667 0.7098 1.0000</diffuse>
+        </material>
+      </visual>
+      <visual name="handle07_8">
+        <geometry>
+          <mesh>
+            <uri>model://robocup25_mug/meshes/008_handle07.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.9059 0.8667 0.7098 1.0000</ambient>
+          <diffuse>0.9059 0.8667 0.7098 1.0000</diffuse>
+        </material>
+      </visual>
+      <visual name="handle08_9">
+        <geometry>
+          <mesh>
+            <uri>model://robocup25_mug/meshes/009_handle08.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.9059 0.8667 0.7098 1.0000</ambient>
+          <diffuse>0.9059 0.8667 0.7098 1.0000</diffuse>
+        </material>
+      </visual>
+      <visual name="handle09_10">
+        <geometry>
+          <mesh>
+            <uri>model://robocup25_mug/meshes/010_handle09.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.9059 0.8667 0.7098 1.0000</ambient>
+          <diffuse>0.9059 0.8667 0.7098 1.0000</diffuse>
+        </material>
+      </visual>
+      <visual name="handle10_11">
+        <geometry>
+          <mesh>
+            <uri>model://robocup25_mug/meshes/011_handle10.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.9059 0.8667 0.7098 1.0000</ambient>
+          <diffuse>0.9059 0.8667 0.7098 1.0000</diffuse>
+        </material>
+      </visual>
+      <visual name="handle11_12">
+        <geometry>
+          <mesh>
+            <uri>model://robocup25_mug/meshes/012_handle11.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.9059 0.8667 0.7098 1.0000</ambient>
+          <diffuse>0.9059 0.8667 0.7098 1.0000</diffuse>
+        </material>
+      </visual>
+      <visual name="handle12_13">
+        <geometry>
+          <mesh>
+            <uri>model://robocup25_mug/meshes/013_handle12.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.9059 0.8667 0.7098 1.0000</ambient>
+          <diffuse>0.9059 0.8667 0.7098 1.0000</diffuse>
+        </material>
+      </visual>
+      <visual name="handle13_14">
+        <geometry>
+          <mesh>
+            <uri>model://robocup25_mug/meshes/014_handle13.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.9059 0.8667 0.7098 1.0000</ambient>
+          <diffuse>0.9059 0.8667 0.7098 1.0000</diffuse>
+        </material>
+      </visual>
+      <visual name="handle14_15">
+        <geometry>
+          <mesh>
+            <uri>model://robocup25_mug/meshes/015_handle14.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.9059 0.8667 0.7098 1.0000</ambient>
+          <diffuse>0.9059 0.8667 0.7098 1.0000</diffuse>
+        </material>
+      </visual>
+      <visual name="handle15_16">
+        <geometry>
+          <mesh>
+            <uri>model://robocup25_mug/meshes/016_handle15.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.9059 0.8667 0.7098 1.0000</ambient>
+          <diffuse>0.9059 0.8667 0.7098 1.0000</diffuse>
+        </material>
+      </visual>
+      <visual name="handle16_17">
+        <geometry>
+          <mesh>
+            <uri>model://robocup25_mug/meshes/017_handle16.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.9059 0.8667 0.7098 1.0000</ambient>
+          <diffuse>0.9059 0.8667 0.7098 1.0000</diffuse>
+        </material>
+      </visual>
+      <visual name="handle17_18">
+        <geometry>
+          <mesh>
+            <uri>model://robocup25_mug/meshes/018_handle17.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.9059 0.8667 0.7098 1.0000</ambient>
+          <diffuse>0.9059 0.8667 0.7098 1.0000</diffuse>
+        </material>
+      </visual>
+      <visual name="mug_decoration_19">
+        <geometry>
+          <mesh>
+            <uri>model://robocup25_mug/meshes/019_mug_decoration.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.6627 0.4745 0.2706 1.0000</ambient>
+          <diffuse>0.6627 0.4745 0.2706 1.0000</diffuse>
+        </material>
+      </visual>
+      <visual name="letters_good_day_20">
+        <geometry>
+          <mesh>
+            <uri>model://robocup25_mug/meshes/020_letters_good_day.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.2824 0.1412 0.1176 1.0000</ambient>
+          <diffuse>0.2824 0.1412 0.1176 1.0000</diffuse>
+        </material>
+      </visual>
+    </link>
+  </model>
+</sdf>

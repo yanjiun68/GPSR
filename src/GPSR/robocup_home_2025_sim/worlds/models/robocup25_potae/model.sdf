@@ -1,0 +1,159 @@
+<sdf version="1.9">
+  <model name="robocup25_potae">
+    <static>false</static>
+    <allow_auto_disable>false</allow_auto_disable>
+    <link name="base_link">
+      <gravity>true</gravity>
+      <self_collide>false</self_collide>
+      <inertial>
+        <mass>0.04200</mass>
+        <pose>0.00000 0.00000 0.08800 0.00000 0.00000 0.00000</pose>
+        <inertia>
+          <ixx>0.00011550</ixx>
+          <iyy>0.00019802</iyy>
+          <izz>0.00009669</izz>
+          <ixy>0</ixy>
+          <ixz>0</ixz>
+          <iyz>0</iyz>
+        </inertia>
+      </inertial>
+      <collision name="proxy_collision">
+        <pose>0.00000 0.00000 0.08800 0.00000 0.00000 0.00000</pose>
+        <geometry>
+          <box>
+            <size>0.16 0.045 0.176</size>
+          </box>
+        </geometry>
+        <surface>
+          <friction>
+            <ode>
+              <mu>0.8</mu>
+              <mu2>0.8</mu2>
+            </ode>
+          </friction>
+        </surface>
+      </collision>
+      <visual name="sealed_pouch_0">
+        <geometry>
+          <mesh>
+            <uri>model://robocup25_potae/meshes/000_sealed_pouch.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.7882 0.1059 0.1608 1.0000</ambient>
+          <diffuse>0.7882 0.1059 0.1608 1.0000</diffuse>
+        </material>
+      </visual>
+      <visual name="top_seal_1">
+        <geometry>
+          <mesh>
+            <uri>model://robocup25_potae/meshes/001_top_seal.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.1137 0.1255 0.1412 1.0000</ambient>
+          <diffuse>0.1137 0.1255 0.1412 1.0000</diffuse>
+        </material>
+      </visual>
+      <visual name="bottom_seal_2">
+        <geometry>
+          <mesh>
+            <uri>model://robocup25_potae/meshes/002_bottom_seal.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.1137 0.1255 0.1412 1.0000</ambient>
+          <diffuse>0.1137 0.1255 0.1412 1.0000</diffuse>
+        </material>
+      </visual>
+      <visual name="lower_panel_3">
+        <geometry>
+          <mesh>
+            <uri>model://robocup25_potae/meshes/003_lower_panel.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.9647 0.6549 0.1176 1.0000</ambient>
+          <diffuse>0.9647 0.6549 0.1176 1.0000</diffuse>
+        </material>
+      </visual>
+      <visual name="letters_potae_4">
+        <geometry>
+          <mesh>
+            <uri>model://robocup25_potae/meshes/004_letters_potae.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.0000 0.2392 0.3961 1.0000</ambient>
+          <diffuse>0.0000 0.2392 0.3961 1.0000</diffuse>
+        </material>
+      </visual>
+      <visual name="letters_potato_snack_5">
+        <geometry>
+          <mesh>
+            <uri>model://robocup25_potae/meshes/005_letters_potato_snack.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.9725 0.9686 0.9333 1.0000</ambient>
+          <diffuse>0.9725 0.9686 0.9333 1.0000</diffuse>
+        </material>
+      </visual>
+      <visual name="curly_chip0_6">
+        <geometry>
+          <mesh>
+            <uri>model://robocup25_potae/meshes/006_curly_chip0.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.9686 0.7412 0.1922 1.0000</ambient>
+          <diffuse>0.9686 0.7412 0.1922 1.0000</diffuse>
+        </material>
+      </visual>
+      <visual name="curly_chip1_7">
+        <geometry>
+          <mesh>
+            <uri>model://robocup25_potae/meshes/007_curly_chip1.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.9686 0.7412 0.1922 1.0000</ambient>
+          <diffuse>0.9686 0.7412 0.1922 1.0000</diffuse>
+        </material>
+      </visual>
+      <visual name="curly_chip2_8">
+        <geometry>
+          <mesh>
+            <uri>model://robocup25_potae/meshes/008_curly_chip2.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.9686 0.7412 0.1922 1.0000</ambient>
+          <diffuse>0.9686 0.7412 0.1922 1.0000</diffuse>
+        </material>
+      </visual>
+      <visual name="curly_chip3_9">
+        <geometry>
+          <mesh>
+            <uri>model://robocup25_potae/meshes/009_curly_chip3.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.9686 0.7412 0.1922 1.0000</ambient>
+          <diffuse>0.9686 0.7412 0.1922 1.0000</diffuse>
+        </material>
+      </visual>
+      <visual name="curly_chip4_10">
+        <geometry>
+          <mesh>
+            <uri>model://robocup25_potae/meshes/010_curly_chip4.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.9686 0.7412 0.1922 1.0000</ambient>
+          <diffuse>0.9686 0.7412 0.1922 1.0000</diffuse>
+        </material>
+      </visual>
+    </link>
+  </model>
+</sdf>

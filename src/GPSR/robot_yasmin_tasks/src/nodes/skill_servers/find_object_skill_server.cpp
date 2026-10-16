@@ -9,7 +9,9 @@
 #include <chrono>
 #include <cmath>
 #include <condition_variable>
+#include <cv_bridge/cv_bridge.h>
 #include <future>
+#include <geometry_msgs/msg/point_stamped.hpp>
 #include <limits>
 #include <map>
 #include <memory>
@@ -24,10 +26,15 @@
 #include <robot_ai_interfaces/action/find_object.hpp>
 #include <robot_ai_interfaces/action/navigate_named_pose.hpp>
 #include <set>
+#include <sensor_msgs/msg/camera_info.hpp>
+#include <sensor_msgs/msg/image.hpp>
 #include <std_msgs/msg/bool.hpp>
 #include <std_msgs/msg/string.hpp>
 #include <string>
 #include <thread>
+#include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
+#include <tf2_ros/buffer.h>
+#include <tf2_ros/transform_listener.h>
 #include <vector>
 
 namespace robot_yasmin_tasks {
@@ -90,7 +97,13 @@ class FindObjectServer final : public rclcpp_lifecycle::LifecycleNode {
     declare_parameter<bool>("enable_navigation", true);
     declare_parameter<double>("camera_horizontal_fov_deg", 69.4);
     declare_parameter<std::string>("object_knowledge_file", "");
+    declare_parameter<std::string>("furniture_map_file", "");
+    declare_parameter<double>("depth_max_age_sec", 0.75);
+    declare_parameter<double>("depth_min_valid_ratio", 0.5);
+    declare_parameter<double>("support_height_tolerance_m", 0.12);
     declare_parameter<double>("default_timeout_sec", 300.0);
+    tf_buffer_ = std::make_unique<tf2_ros::Buffer>(get_clock());
+    tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
     rclcpp::QoS qos(1);
     qos.reliable().transient_local();
     status_publisher_ = create_publisher<std_msgs::msg::String>(
@@ -105,6 +118,7 @@ class FindObjectServer final : public rclcpp_lifecycle::LifecycleNode {
         std::max(0.1, get_parameter("default_timeout_sec").as_double());
     if (!load_object_knowledge()) return CallbackReturn::FAILURE;
     if (!load_search_policy()) return CallbackReturn::FAILURE;
+    if (!load_furniture_map()) return CallbackReturn::FAILURE;
     detection_subscription_ = create_subscription<DetectionArray>(
         get_parameter("detections_topic").as_string(), rclcpp::SensorDataQoS(),
         std::bind(&FindObjectServer::detections_callback, this, std::placeholders::_1));
@@ -113,6 +127,16 @@ class FindObjectServer final : public rclcpp_lifecycle::LifecycleNode {
     ready_subscription_ = create_subscription<std_msgs::msg::Bool>(
         get_parameter("detector_ready_topic").as_string(), ready_qos,
         std::bind(&FindObjectServer::ready_callback, this, std::placeholders::_1));
+    depth_subscription_ = create_subscription<sensor_msgs::msg::Image>(
+        get_parameter("depth_topic").as_string(), rclcpp::SensorDataQoS(),
+        [this](sensor_msgs::msg::Image::SharedPtr message) {
+          std::lock_guard<std::mutex> lock(depth_mutex_); depth_image_ = message;
+        });
+    camera_info_subscription_ = create_subscription<sensor_msgs::msg::CameraInfo>(
+        get_parameter("camera_info_topic").as_string(), rclcpp::SensorDataQoS(),
+        [this](sensor_msgs::msg::CameraInfo::SharedPtr message) {
+          std::lock_guard<std::mutex> lock(depth_mutex_); camera_info_ = message;
+        });
     // Section: One active FIND_OBJECT goal publishes its typed Qwen query before
     // waiting for fresh frames.
     detector_query_publisher_ = create_publisher<std_msgs::msg::String>(
@@ -718,7 +742,7 @@ class FindObjectServer final : public rclcpp_lifecycle::LifecycleNode {
                         : !spatial_relation.empty()
                             ? "image_relation_" + spatial_relation
                             : "highest_confidence";
-    return Json{
+    Json payload{
         {"object_id", candidate_key(detection)},
         {"name", clean_symbol(detection.name)},
         {"confidence", detection.confidence},
@@ -727,6 +751,120 @@ class FindObjectServer final : public rclcpp_lifecycle::LifecycleNode {
         {"attributes", detection_attributes(detection)},
         {"selection_reason", reason},
         {"query", query}};
+    payload["furniture_relative_location"] = localize_and_ground(detection);
+    if (payload["furniture_relative_location"].value("valid", false)) {
+      auto reference = payload["furniture_relative_location"]["reference_name"].get<std::string>();
+      std::replace(reference.begin(), reference.end(), '_', ' ');
+      payload["furniture_relative_phrase"] = "on the " + reference;
+    }
+    return payload;
+  }
+
+  struct FurniturePrior {
+    std::string name;
+    double x{}, y{}, yaw{}, size_x{}, size_y{}, top_z{};
+  };
+
+  bool load_furniture_map() {
+    furniture_priors_.clear();
+    object_heights_.clear();
+    const auto path = get_parameter("furniture_map_file").as_string();
+    if (path.empty()) return true;
+    try {
+      const auto root = YAML::LoadFile(path);
+      for (const auto &entry : root["furniture"]) {
+        FurniturePrior prior;
+        prior.name = entry["name"].as<std::string>();
+        prior.x = entry["x"].as<double>(); prior.y = entry["y"].as<double>();
+        prior.yaw = entry["yaw"].as<double>();
+        prior.size_x = entry["size_x"].as<double>();
+        prior.size_y = entry["size_y"].as<double>();
+        prior.top_z = entry["top_z"].as<double>();
+        furniture_priors_.push_back(prior);
+      }
+      if (root["object_heights_m"])
+        for (const auto &entry : root["object_heights_m"])
+          object_heights_[clean_symbol(entry.first.as<std::string>())] = entry.second.as<double>();
+      return true;
+    } catch (const std::exception &error) {
+      RCLCPP_ERROR(get_logger(), "Cannot load mapped furniture priors: %s", error.what());
+      return false;
+    }
+  }
+
+  Json localize_and_ground(const Detection &detection) const {
+    Json invalid{{"valid", false}, {"target_source", "rgbd_detection"},
+                 {"reference_source", "mapped_furniture_prior"}};
+    if (!get_parameter("enable_depth").as_bool()) {
+      invalid["reason"] = "DEPTH_DISABLED"; return invalid;
+    }
+    sensor_msgs::msg::Image::SharedPtr depth;
+    sensor_msgs::msg::CameraInfo::SharedPtr info;
+    { std::lock_guard<std::mutex> lock(depth_mutex_); depth = depth_image_; info = camera_info_; }
+    if (!depth || !info) { invalid["reason"] = "NO_REGISTERED_DEPTH"; return invalid; }
+    const rclcpp::Time detection_time(detection.stamp);
+    const rclcpp::Time depth_time(depth->header.stamp);
+    if (std::abs((depth_time - detection_time).seconds()) >
+        get_parameter("depth_max_age_sec").as_double()) {
+      invalid["reason"] = "STALE_DEPTH"; return invalid;
+    }
+    if (info->k[0] <= 0.0 || info->k[4] <= 0.0) {
+      invalid["reason"] = "INVALID_CAMERA_INFO"; return invalid;
+    }
+    cv_bridge::CvImageConstPtr cv_depth;
+    try { cv_depth = cv_bridge::toCvShare(depth); }
+    catch (const cv_bridge::Exception &) { invalid["reason"] = "UNSUPPORTED_DEPTH"; return invalid; }
+    const int u0 = std::max(0, static_cast<int>(detection.center_u) - 10);
+    const int v0 = std::max(0, static_cast<int>(detection.center_v) - 10);
+    const int u1 = std::min(static_cast<int>(depth->width), u0 + 20);
+    const int v1 = std::min(static_cast<int>(depth->height), v0 + 20);
+    std::vector<float> ranges;
+    for (int v = v0; v < v1; ++v) for (int u = u0; u < u1; ++u) {
+      float value = std::numeric_limits<float>::quiet_NaN();
+      if (depth->encoding == "32FC1") value = cv_depth->image.at<float>(v, u);
+      else if (depth->encoding == "16UC1") value = cv_depth->image.at<std::uint16_t>(v, u) * 0.001F;
+      if (std::isfinite(value) && value > 0.15F && value < 6.0F) ranges.push_back(value);
+    }
+    const auto sample_count = std::max(1, (u1-u0)*(v1-v0));
+    if (ranges.size() / static_cast<double>(sample_count) <
+        get_parameter("depth_min_valid_ratio").as_double()) {
+      invalid["reason"] = "INSUFFICIENT_VALID_DEPTH"; return invalid;
+    }
+    std::nth_element(ranges.begin(), ranges.begin()+ranges.size()/2, ranges.end());
+    const double z = ranges[ranges.size()/2];
+    geometry_msgs::msg::PointStamped optical, mapped;
+    optical.header = depth->header;
+    optical.point.z = z;
+    optical.point.x = (detection.center_u - info->k[2]) * z / info->k[0];
+    optical.point.y = (detection.center_v - info->k[5]) * z / info->k[4];
+    try { mapped = tf_buffer_->transform(optical, "map", tf2::durationFromSec(0.3)); }
+    catch (const tf2::TransformException &error) {
+      invalid["reason"] = "TF_FAILED"; invalid["detail"] = error.what(); return invalid;
+    }
+    const auto height = object_heights_.find(clean_symbol(detection.name));
+    if (height == object_heights_.end()) {
+      invalid["reason"] = "UNKNOWN_OBJECT_HEIGHT"; return invalid;
+    }
+    const double bottom_z = mapped.point.z - height->second / 2.0;
+    for (const auto &prior : furniture_priors_) {
+      const double dx = mapped.point.x-prior.x, dy = mapped.point.y-prior.y;
+      const double local_x = std::cos(prior.yaw)*dx + std::sin(prior.yaw)*dy;
+      const double local_y = -std::sin(prior.yaw)*dx + std::cos(prior.yaw)*dy;
+      const bool overlap = std::abs(local_x) <= prior.size_x/2.0 &&
+                           std::abs(local_y) <= prior.size_y/2.0;
+      const bool supported = std::abs(bottom_z-prior.top_z) <=
+          get_parameter("support_height_tolerance_m").as_double();
+      if (overlap && supported) return Json{{"valid", true}, {"relation", "on"},
+          {"reference_name", prior.name}, {"frame_id", "map"},
+          {"target_source", "rgbd_detection"},
+          {"reference_source", "mapped_furniture_prior"},
+          {"target_point", {{"x", mapped.point.x}, {"y", mapped.point.y}, {"z", mapped.point.z}}},
+          {"estimated_bottom_z", bottom_z}, {"support_top_z", prior.top_z},
+          {"depth_m", z}, {"depth_stamp_sec", depth_time.seconds()}};
+    }
+    invalid["reason"] = "NO_SUPPORTING_FURNITURE";
+    invalid["target_point"] = {{"x", mapped.point.x}, {"y", mapped.point.y}, {"z", mapped.point.z}};
+    return invalid;
   }
 
   // Special function: Send a sanitized goal query to the lifecycle-owned Qwen detector.
@@ -988,7 +1126,18 @@ class FindObjectServer final : public rclcpp_lifecycle::LifecycleNode {
       result->found_viewpoint = found_viewpoint;
       result->viewpoints_searched = viewpoints_searched;
       result->navigation_failures = navigation_failures;
-      result->selection_json = selection_payload(*best, query).dump();
+      const auto selection = selection_payload(*best, query);
+      result->selection_json = selection.dump();
+      const auto grounding = selection.value("furniture_relative_location", Json::object());
+      if (grounding.value("valid", false) && grounding.contains("target_point")) {
+        const auto &point = grounding.at("target_point");
+        result->object_pose.header.frame_id = "map";
+        result->object_pose.header.stamp = now();
+        result->object_pose.pose.position.x = point.value("x", 0.0);
+        result->object_pose.pose.position.y = point.value("y", 0.0);
+        result->object_pose.pose.position.z = point.value("z", 0.0);
+        result->object_pose.pose.orientation.w = 1.0;
+      }
       result->message = !facing_succeeded
                             ? "Target verified, but the final target-facing spin failed."
                             : goal->approach_target
@@ -1056,6 +1205,8 @@ class FindObjectServer final : public rclcpp_lifecycle::LifecycleNode {
     action_server_.reset();
     detection_subscription_.reset();
     ready_subscription_.reset();
+    depth_subscription_.reset();
+    camera_info_subscription_.reset();
     detector_query_publisher_.reset();
     named_navigation_client_.reset();
     spin_client_.reset();
@@ -1097,10 +1248,19 @@ class FindObjectServer final : public rclcpp_lifecycle::LifecycleNode {
   std::optional<std::chrono::steady_clock::time_point> last_detection_time_;
   std::optional<std::chrono::steady_clock::time_point> last_ready_time_;
   std::vector<Detection> detections_;
+  mutable std::mutex depth_mutex_;
+  sensor_msgs::msg::Image::SharedPtr depth_image_;
+  sensor_msgs::msg::CameraInfo::SharedPtr camera_info_;
+  std::vector<FurniturePrior> furniture_priors_;
+  std::map<std::string, double> object_heights_;
+  std::unique_ptr<tf2_ros::Buffer> tf_buffer_;
+  std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr status_publisher_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr detector_query_publisher_;
   rclcpp::Subscription<DetectionArray>::SharedPtr detection_subscription_;
   rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr ready_subscription_;
+  rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr depth_subscription_;
+  rclcpp::Subscription<sensor_msgs::msg::CameraInfo>::SharedPtr camera_info_subscription_;
   rclcpp_action::Client<NavigateNamedPose>::SharedPtr named_navigation_client_;
   rclcpp_action::Client<Spin>::SharedPtr spin_client_;
   rclcpp_action::Server<Action>::SharedPtr action_server_;

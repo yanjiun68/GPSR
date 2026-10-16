@@ -26,13 +26,23 @@ install(
   DESTINATION share/${PROJECT_NAME}/launch
 )
 
-if(FALSE) # Section: Tests disabled for production-only workspace builds.
-  find_package(ament_lint_auto QUIET)
-  if(ament_lint_auto_FOUND)
-    set(ament_cmake_copyright_FOUND TRUE)
-    set(ament_cmake_cpplint_FOUND TRUE)
-    ament_lint_auto_find_test_dependencies()
-  endif()
+install(
+  DIRECTORY rviz/
+  DESTINATION share/${PROJECT_NAME}/rviz
+)
+
+install(
+  PROGRAMS scripts/diagnose_robot_description.py
+  DESTINATION lib/${PROJECT_NAME}
+)
+
+if(BUILD_TESTING)
+  find_package(ament_cmake_pytest REQUIRED)
+  ament_add_pytest_test(
+    robot_description_integrity
+    test
+    TIMEOUT 60
+  )
 endif()
 
 ament_package()

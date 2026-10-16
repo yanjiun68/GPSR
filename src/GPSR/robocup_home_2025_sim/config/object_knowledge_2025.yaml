@@ -1,0 +1,42 @@
+# RoboCup@Home Malaysia 2025 simulation vocabulary.  This deliberately stays
+# separate from robot_yasmin_tasks/config/object_knowledge.yaml (Incheon 2026).
+objects:
+  cola: {aliases: [cola, coke, cola can], detector_label: cola can, category: drinks, probable_locations: [living_room]}
+  coffee: {aliases: [coffee, coffee can], detector_label: coffee can, category: drinks, probable_locations: [living_room]}
+  water: {aliases: [water, water bottle], detector_label: water bottle, category: drinks, probable_locations: [living_room]}
+  milk: {aliases: [milk, milk carton], detector_label: milk carton, category: drinks, probable_locations: [living_room]}
+  cereal: {aliases: [cereal, cereal box], detector_label: cereal box, category: food, probable_locations: [dining_room]}
+  tom_yam_cup_noodle: {aliases: [tom yam cup noodle, tom-yam cup noodle], detector_label: cup noodles, category: food, probable_locations: [dining_room]}
+  yen_ta_four_cup_noodle: {aliases: [yen ta four cup noodle, yen-ta-four cup noodle], detector_label: cup noodles, category: food, probable_locations: [dining_room]}
+  biscuit_roll: {aliases: [biscuit roll], detector_label: biscuit roll, category: snacks, probable_locations: [dining_room]}
+  paprika: {aliases: [paprika], detector_label: paprika snack bag, category: snacks, probable_locations: [dining_room]}
+  potae: {aliases: [potae], detector_label: potato snack bag, category: snacks, probable_locations: [dining_room]}
+  cornae: {aliases: [cornae], detector_label: corn snack bag, category: snacks, probable_locations: [dining_room]}
+  pringles: {aliases: [pringles, pringles can], detector_label: pringles can, category: snacks, probable_locations: [dining_room]}
+  lay_stax: {aliases: [lay stax, lays stax], detector_label: potato chips can, category: snacks, probable_locations: [dining_room]}
+  pocky: {aliases: [pocky, pocky box], detector_label: pocky box, category: snacks, probable_locations: [dining_room]}
+  spoon: {aliases: [spoon], detector_label: spoon, category: tableware, probable_locations: [dining_room]}
+  plate: {aliases: [plate], detector_label: plate, category: tableware, probable_locations: [dining_room]}
+  cup: {aliases: [cup, drinking cup], detector_label: cup, category: tableware, probable_locations: [dining_room]}
+  mug: {aliases: [mug, coffee mug], detector_label: mug, category: tableware, probable_locations: [dining_room]}
+  fork: {aliases: [fork], detector_label: fork, category: tableware, probable_locations: [dining_room]}
+  bowl: {aliases: [bowl], detector_label: bowl, category: tableware, probable_locations: [dining_room]}
+
+categories:
+  drinks:
+    aliases: [drink, beverages, beverage]
+    members: [cola, coffee, water, milk]
+    probable_locations: [living_room]
+  food:
+    aliases: [foods]
+    members: [cereal, tom_yam_cup_noodle, yen_ta_four_cup_noodle]
+    probable_locations: [dining_room]
+  snacks:
+    aliases: [snack]
+    members: [biscuit_roll, paprika, potae, cornae, pringles, lay_stax, pocky]
+    probable_locations: [dining_room]
+  tableware:
+    aliases: [dish, dishes, cutlery]
+    members: [spoon, plate, cup, mug, fork, bowl]
+    probable_locations: [dining_room]
+wildcards: [object, any_object]

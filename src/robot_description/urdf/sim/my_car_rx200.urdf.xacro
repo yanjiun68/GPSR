@@ -1,0 +1,9 @@
+<?xml version="1.0"?>
+<robot name="omni_robot_rx200" xmlns:xacro="http://ros.org/wiki/xacro">
+
+  <!-- RX200 variant of the shared simulation robot. All chassis, sensor,
+       wheel, and Gazebo definitions come from my_car.urdf.xacro. -->
+  <xacro:arg name="arm_model" default="rx200"/>
+  <xacro:include filename="$(find robot_description)/urdf/sim/my_car.urdf.xacro"/>
+
+</robot>

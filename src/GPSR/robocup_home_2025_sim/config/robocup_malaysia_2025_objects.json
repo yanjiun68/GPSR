@@ -1,0 +1,426 @@
+{
+  "source_archive": "RoboCup_MY2025_GPSR_URDF_Gazebo_Objects.zip",
+  "note": "20 supplied RoboCup Malaysia Open 2025 GPSR Gazebo models",
+  "items": [
+    {
+      "id": "cola",
+      "official_name": "Cola",
+      "category": "drinks",
+      "model": "robocup25_cola",
+      "image_source": "cola.jpg",
+      "object_dimensions_m": [
+        0.064,
+        0.064,
+        0.141
+      ],
+      "dimensions_source": "supplied Gazebo collision proxy",
+      "world_pose_xyz_yaw": [
+        -2.0,
+        -1.48,
+        0.473,
+        0
+      ],
+      "appearance": "SUPPLIED_STL_VISUALS",
+      "mass_kg": 0.29
+    },
+    {
+      "id": "coffee",
+      "official_name": "Coffee",
+      "category": "drinks",
+      "model": "robocup25_coffee",
+      "image_source": "coffee.jpg",
+      "object_dimensions_m": [
+        0.064,
+        0.064,
+        0.141
+      ],
+      "dimensions_source": "supplied Gazebo collision proxy",
+      "world_pose_xyz_yaw": [
+        -1.83,
+        -1.48,
+        0.473,
+        0
+      ],
+      "appearance": "SUPPLIED_STL_VISUALS",
+      "mass_kg": 0.29
+    },
+    {
+      "id": "water",
+      "official_name": "Water",
+      "category": "drinks",
+      "model": "robocup25_water",
+      "image_source": "water.jpg",
+      "object_dimensions_m": [
+        0.068,
+        0.068,
+        0.21
+      ],
+      "dimensions_source": "supplied Gazebo collision proxy",
+      "world_pose_xyz_yaw": [
+        -1.65,
+        -1.48,
+        0.473,
+        0
+      ],
+      "appearance": "SUPPLIED_STL_VISUALS",
+      "mass_kg": 0.54
+    },
+    {
+      "id": "milk",
+      "official_name": "Milk",
+      "category": "drinks",
+      "model": "robocup25_milk",
+      "image_source": "milk.jpg",
+      "object_dimensions_m": [
+        0.068,
+        0.052,
+        0.188
+      ],
+      "dimensions_source": "supplied Gazebo collision proxy",
+      "world_pose_xyz_yaw": [
+        -1.47,
+        -1.48,
+        0.473,
+        0
+      ],
+      "appearance": "SUPPLIED_STL_VISUALS",
+      "mass_kg": 1.03
+    },
+    {
+      "id": "cereal",
+      "official_name": "Cereal",
+      "category": "food",
+      "model": "robocup25_cereal",
+      "image_source": "cereal.jpg",
+      "object_dimensions_m": [
+        0.14,
+        0.05,
+        0.178
+      ],
+      "dimensions_source": "supplied Gazebo collision proxy",
+      "world_pose_xyz_yaw": [
+        0.65,
+        2.53,
+        1.305,
+        0
+      ],
+      "appearance": "SUPPLIED_STL_VISUALS",
+      "mass_kg": 0.15
+    },
+    {
+      "id": "tom_yam_cup_noodle",
+      "official_name": "Tom-Yam Cup Noodle",
+      "category": "food",
+      "model": "robocup25_tom_yam_cup_noodle",
+      "image_source": "cup_noodle-1.jpg",
+      "object_dimensions_m": [
+        0.112,
+        0.112,
+        0.126
+      ],
+      "dimensions_source": "supplied Gazebo collision proxy",
+      "world_pose_xyz_yaw": [
+        0.89,
+        2.53,
+        1.305,
+        0
+      ],
+      "appearance": "SUPPLIED_STL_VISUALS",
+      "mass_kg": 0.11
+    },
+    {
+      "id": "yen_ta_four_cup_noodle",
+      "official_name": "Yen-Ta-Four Cup Noodle",
+      "category": "food",
+      "model": "robocup25_yen_ta_four_cup_noodle",
+      "image_source": "cup_noodle-2.jpg",
+      "object_dimensions_m": [
+        0.112,
+        0.112,
+        0.126
+      ],
+      "dimensions_source": "supplied Gazebo collision proxy",
+      "world_pose_xyz_yaw": [
+        1.13,
+        2.53,
+        1.305,
+        0
+      ],
+      "appearance": "SUPPLIED_STL_VISUALS",
+      "mass_kg": 0.11
+    },
+    {
+      "id": "biscuit_roll",
+      "official_name": "Biscuit Roll",
+      "category": "snacks",
+      "model": "robocup25_biscuit_roll",
+      "image_source": "biscuit-roll.jpg",
+      "object_dimensions_m": [
+        0.145,
+        0.048,
+        0.145
+      ],
+      "dimensions_source": "supplied Gazebo collision proxy",
+      "world_pose_xyz_yaw": [
+        1.46,
+        2.45,
+        1.065,
+        0
+      ],
+      "appearance": "SUPPLIED_STL_VISUALS",
+      "mass_kg": 0.15
+    },
+    {
+      "id": "paprika",
+      "official_name": "Paprika",
+      "category": "snacks",
+      "model": "robocup25_paprika",
+      "image_source": "paprika.jpg",
+      "object_dimensions_m": [
+        0.16,
+        0.045,
+        0.176
+      ],
+      "dimensions_source": "supplied Gazebo collision proxy",
+      "world_pose_xyz_yaw": [
+        1.65,
+        2.45,
+        1.065,
+        0
+      ],
+      "appearance": "SUPPLIED_STL_VISUALS",
+      "mass_kg": 0.042
+    },
+    {
+      "id": "potae",
+      "official_name": "Potae",
+      "category": "snacks",
+      "model": "robocup25_potae",
+      "image_source": "potae.jpg",
+      "object_dimensions_m": [
+        0.16,
+        0.045,
+        0.176
+      ],
+      "dimensions_source": "supplied Gazebo collision proxy",
+      "world_pose_xyz_yaw": [
+        1.84,
+        2.45,
+        1.065,
+        0
+      ],
+      "appearance": "SUPPLIED_STL_VISUALS",
+      "mass_kg": 0.042
+    },
+    {
+      "id": "cornae",
+      "official_name": "Cornae",
+      "category": "snacks",
+      "model": "robocup25_cornae",
+      "image_source": "cornae.jpg",
+      "object_dimensions_m": [
+        0.16,
+        0.045,
+        0.176
+      ],
+      "dimensions_source": "supplied Gazebo collision proxy",
+      "world_pose_xyz_yaw": [
+        2.025,
+        2.45,
+        1.065,
+        0
+      ],
+      "appearance": "SUPPLIED_STL_VISUALS",
+      "mass_kg": 0.042
+    },
+    {
+      "id": "pringles",
+      "official_name": "Pringles",
+      "category": "snacks",
+      "model": "robocup25_pringles",
+      "image_source": "pringles.jpg",
+      "object_dimensions_m": [
+        0.1,
+        0.1,
+        0.146
+      ],
+      "dimensions_source": "supplied Gazebo collision proxy",
+      "world_pose_xyz_yaw": [
+        1.48,
+        2.69,
+        1.065,
+        0
+      ],
+      "appearance": "SUPPLIED_STL_VISUALS",
+      "mass_kg": 0.16
+    },
+    {
+      "id": "lay_stax",
+      "official_name": "Lay Stax",
+      "category": "snacks",
+      "model": "robocup25_lay_stax",
+      "image_source": "lay-stax.jpg",
+      "object_dimensions_m": [
+        0.1,
+        0.1,
+        0.146
+      ],
+      "dimensions_source": "supplied Gazebo collision proxy",
+      "world_pose_xyz_yaw": [
+        1.73,
+        2.69,
+        1.065,
+        0
+      ],
+      "appearance": "SUPPLIED_STL_VISUALS",
+      "mass_kg": 0.16
+    },
+    {
+      "id": "pocky",
+      "official_name": "Pocky",
+      "category": "snacks",
+      "model": "robocup25_pocky",
+      "image_source": "pocky.jpg",
+      "object_dimensions_m": [
+        0.094,
+        0.027,
+        0.212
+      ],
+      "dimensions_source": "supplied Gazebo collision proxy",
+      "world_pose_xyz_yaw": [
+        1.97,
+        2.69,
+        1.065,
+        0
+      ],
+      "appearance": "SUPPLIED_STL_VISUALS",
+      "mass_kg": 0.15
+    },
+    {
+      "id": "spoon",
+      "official_name": "Spoon",
+      "category": "tableware",
+      "model": "robocup25_spoon",
+      "image_source": "spoon.jpg",
+      "object_dimensions_m": [
+        0.186,
+        0.049,
+        0.012
+      ],
+      "dimensions_source": "supplied Gazebo collision proxy",
+      "world_pose_xyz_yaw": [
+        2.4,
+        0.91,
+        0.745,
+        0
+      ],
+      "appearance": "SUPPLIED_STL_VISUALS",
+      "mass_kg": 0.012
+    },
+    {
+      "id": "plate",
+      "official_name": "Plate",
+      "category": "tableware",
+      "model": "robocup25_plate",
+      "image_source": "plate.jpg",
+      "object_dimensions_m": [
+        0.252,
+        0.252,
+        0.02
+      ],
+      "dimensions_source": "supplied Gazebo collision proxy",
+      "world_pose_xyz_yaw": [
+        2.1,
+        0.63,
+        0.745,
+        0
+      ],
+      "appearance": "SUPPLIED_STL_VISUALS",
+      "mass_kg": 0.32
+    },
+    {
+      "id": "cup",
+      "official_name": "Cup",
+      "category": "tableware",
+      "model": "robocup25_cup",
+      "image_source": "cup.jpg",
+      "object_dimensions_m": [
+        0.1,
+        0.1,
+        0.123
+      ],
+      "dimensions_source": "supplied Gazebo collision proxy",
+      "world_pose_xyz_yaw": [
+        2.69,
+        0.63,
+        0.745,
+        0
+      ],
+      "appearance": "SUPPLIED_STL_VISUALS",
+      "mass_kg": 0.13
+    },
+    {
+      "id": "mug",
+      "official_name": "Mug",
+      "category": "tableware",
+      "model": "robocup25_mug",
+      "image_source": "mug.jpg",
+      "object_dimensions_m": [
+        0.104,
+        0.104,
+        0.11
+      ],
+      "dimensions_source": "supplied Gazebo collision proxy",
+      "world_pose_xyz_yaw": [
+        2.13,
+        0.91,
+        0.745,
+        0
+      ],
+      "appearance": "SUPPLIED_STL_VISUALS",
+      "mass_kg": 0.28
+    },
+    {
+      "id": "fork",
+      "official_name": "Fork",
+      "category": "tableware",
+      "model": "robocup25_fork",
+      "image_source": "fork.jpg",
+      "object_dimensions_m": [
+        0.198,
+        0.034,
+        0.012
+      ],
+      "dimensions_source": "supplied Gazebo collision proxy",
+      "world_pose_xyz_yaw": [
+        2.69,
+        0.91,
+        0.745,
+        0
+      ],
+      "appearance": "SUPPLIED_STL_VISUALS",
+      "mass_kg": 0.011
+    },
+    {
+      "id": "bowl",
+      "official_name": "Bowl",
+      "category": "tableware",
+      "model": "robocup25_bowl",
+      "image_source": "bowl.jpg",
+      "object_dimensions_m": [
+        0.22,
+        0.22,
+        0.057
+      ],
+      "dimensions_source": "supplied Gazebo collision proxy",
+      "world_pose_xyz_yaw": [
+        2.39,
+        0.63,
+        0.745,
+        0
+      ],
+      "appearance": "SUPPLIED_STL_VISUALS",
+      "mass_kg": 0.33
+    }
+  ]
+}

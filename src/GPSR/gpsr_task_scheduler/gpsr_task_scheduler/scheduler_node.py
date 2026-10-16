@@ -1010,9 +1010,11 @@ class GpsrTaskSchedulerNode(Node):
         config = getattr(self, "config", None)
         say_timeout = float(config.timeout_for("SAY")) if config is not None else 30.0
         say_retries = int(config.retries_for("SAY")) if config is not None else 0
-        # Section: Keep the synthetic execution-consent window short without changing
-        # ordinary ASK_AND_LISTEN task timeouts requested by a GPSR command.
-        confirmation_timeout = 6.0  # Allow six seconds for the confirmation prompt's TTS response.
+        # Section: Bound the execution-consent exchange while leaving enough time
+        # for real Piper playback, the acoustic echo guard, and the four-second
+        # microphone window.  Six seconds expired during the prompt itself on the
+        # competition host, before the operator could answer.
+        confirmation_timeout = 20.0
         # Section: Put deterministic speech and confirmation steps first so no external language model can alter executable intent.
         executable["steps"] = [{
             "step_id": summary_step_id,

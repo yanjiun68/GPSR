@@ -5,20 +5,16 @@ ARENA_MODELS="$PWD/src/m-e/my_robot_nav/world/models"
 export IGN_GAZEBO_RESOURCE_PATH="$ARENA_MODELS${IGN_GAZEBO_RESOURCE_PATH:+:$IGN_GAZEBO_RESOURCE_PATH}"
 
 
-
-# This is for pedestrain world.
-ign gazebo -r -v 4 \
-  "$PWD/src/m-e/iaig_nav_ros/worlds/iaig_ped_world.sdf"
-
-# Robocup arena ( full world validation)
-source /opt/ros/humble/setup.bash
-source install/local_setup.bash
+========================================================================================================
 
 # Arena + robot + bridge + saved SLAM map + AMCL/Nav2 + RViz
 ros2 launch my_robot_nav robocup_sim_nav.launch.py
 
-# Start a fresh live SLAM session instead of saved-map navigation:
-# ros2 launch my_robot_nav robocup_sim_nav.launch.py mode:=mapping
+Run commands : 
+ros2 launch gz_sim robocup_arena.launch.py \
+  start_side:=inside start_distance:=0.8 enable_camera:=false
 
-# Attach navigation to an arena already running via robocup_arena.launch.py:
-# ros2 launch my_robot_nav robocup_sim_nav.launch.py start_sim:=false
+
+ros2 launch my_robot_nav robocup_localization.launch.py
+
+ros2 launch my_robot_nav robocup_nav_driver.launch.py

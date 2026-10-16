@@ -1,0 +1,10 @@
+# Reference only: start slam_toolbox with its upstream default parameters first.
+# Check that your robot provides scan topic and odometry TF, then tune:
+# base_frame: base_link
+# odom_frame: odom
+# map_frame: map
+# scan_topic: /scan
+# use_sim_time: true
+# minimum_travel_distance: 0.15
+# minimum_travel_heading: 0.15
+# transform_publish_period: 0.02

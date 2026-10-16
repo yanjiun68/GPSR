@@ -16,15 +16,4 @@ ros2 action send_goal --feedback \
 
 ros2 launch gpsr_task_scheduler gpsr_scheduler.launch.py   dry_run:=true   command_input_mode:=local   start_executor:=false   start_count_people_pipeline:=false   start_count_objects_pipeline:=false   start_find_object_pipeline:=false   start_find_person_pipeline:=false   start_find_person_attribute_pipeline:=false   start_follow_person_pipeline:=false   start_voice_tts:=true   start_voice_stt:=true   start_voice_command:=true   enable_navigation:=false   enable_perception:=false   enable_manipulation:=true   enable_tts:=true   enable_scheduler_viewer:=true auto_execute:=false 
 
-source /opt/ros/humble/setup.bash
-source install/setup.bash
 
-ros2 service call /gpsr/schedule_command \
-  robot_ai_interfaces/srv/ScheduleCommand \
-  "{
-    command_id: 'local_planner_001',
-    instruction: 'go to kitchen , find Axel and tell her the time',
-    dry_run: false,
-    execute: true,
-    overall_timeout_sec: 300.0
-  }"

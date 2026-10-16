@@ -125,12 +125,21 @@ list of waypoint names
 ros2 run my_robot_nav go_to_waypoint.py --list \
   --file /home/yanjiun68/workspace/WS1/PutrabotUPM-project/src/GPSR/gpsr_waypoint.yaml
 ===============================
-Navigate to pose 
+Navigate to pose  using # robot_ai_interfaces ( require navigate_named_pose_server )
 ------------------------------
 ros2 action send_goal --feedback \
   /nav/navigate_named_pose \
   robot_ai_interfaces/action/NavigateNamedPose \
   "{target_name: kitchen}"
+---------------------------------
+Navigate to pose using my_robot_nav internal waypoint command 
+ros2 run my_robot_nav go_to_waypoint.py bedroom \
+  --file "$PWD/src/m-e/my_robot_nav/config/gpsr_sim_waypoint.yaml"
+--------------------------------
+To obtain the list :
+ros2 run my_robot_nav go_to_waypoint.py \
+  --file "$PWD/src/m-e/my_robot_nav/config/gpsr_sim_waypoint.yaml" \
+  --list
 ===============================
 
 ===============================

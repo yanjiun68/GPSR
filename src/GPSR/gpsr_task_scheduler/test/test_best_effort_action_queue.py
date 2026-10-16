@@ -46,6 +46,43 @@ def _steps(command: str):
     return compile_command("best_effort_test", command, _config()).steps
 
 
+def test_room_arrival_guards_strict_object_search():
+    steps = _steps("Go to the living room and find the cola.")
+    assert [step.skill_name for step in steps] == ["NAVIGATE", "FIND_OBJECT"]
+    assert steps[1].dependencies == [steps[0].step_id]
+
+
+@pytest.mark.parametrize(
+    ("command", "object_name", "phrase"),
+    [
+        (
+            "Go to the living room, find the cola, and tell me where it is relative to the furniture.",
+            "coke",
+            "I found the {name} {furniture_relative_phrase}.",
+        ),
+        (
+            "Go to the dining room, find the bowl, and say where it is relative to the furniture.",
+            "bowl",
+            "The {name} {furniture_relative_phrase}.",
+        ),
+    ],
+)
+def test_furniture_relative_report_consumes_grounded_find_result(command, object_name, phrase):
+    steps = _steps(command)
+    assert [step.skill_name for step in steps] == ["NAVIGATE", "FIND_OBJECT", "SAY"]
+    navigate, find_object, say = steps
+    assert find_object.arguments["object_name"] == object_name
+    assert find_object.dependencies == [navigate.step_id]
+    assert "furniture_relative_location" in find_object.arguments["query"]["requested_fields"]
+    assert find_object.result_variable == "found_object"
+    assert say.dependencies == [find_object.step_id]
+    assert say.arguments == {
+        "text_template": phrase,
+        "substitution": "found_object",
+        "requires_data": ["found_object"],
+    }
+
+
 def test_independent_clause_has_no_artificial_success_dependency():
     """Special function: Verify queue order does not become a cross-clause dependency."""
     steps = _steps("find coke then count people in the living room")

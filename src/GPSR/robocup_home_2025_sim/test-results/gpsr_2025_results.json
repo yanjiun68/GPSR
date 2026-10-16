@@ -1,0 +1,465 @@
+{
+  "generated_unix_time": 1792050365.4577918,
+  "results": [
+    {
+      "evidence": {
+        "clearances_m": {
+          "bedroom": 0.667,
+          "dining_room": 0.9,
+          "instruction_point": 0.5,
+          "kitchen": 0.828,
+          "living_room": 0.65
+        },
+        "map": "/home/yanjiun68/workspace/WS1/PutrabotUPM-project/src/GPSR/robocup_home_2025_sim/maps/vision_geometric_reference.yaml",
+        "map_size": [
+          280,
+          220
+        ],
+        "resolution": 0.05,
+        "world": "/home/yanjiun68/workspace/WS1/PutrabotUPM-project/src/GPSR/robocup_home_2025_sim/worlds/robocup_home_2025_vision.sdf"
+      },
+      "reason": "world/map/waypoints/2025 knowledge parse and validate",
+      "status": "PASS",
+      "test_id": "static_parse"
+    },
+    {
+      "evidence": {
+        "finite_scan": true,
+        "topics": [
+          "clock",
+          "depth",
+          "odom",
+          "scan"
+        ]
+      },
+      "reason": "clock, finite LiDAR, and odometry observed",
+      "status": "PASS",
+      "test_id": "gazebo_bridge"
+    },
+    {
+      "evidence": {
+        "camera_info": [
+          640,
+          480,
+          "camera_color_optical_frame"
+        ],
+        "depth": [
+          640,
+          480,
+          "32FC1",
+          "camera_color_optical_frame"
+        ],
+        "fx_fy": [
+          462.1675733606097,
+          462.1675733606097
+        ],
+        "nonzero_depth_bytes": 10000,
+        "nonzero_rgb_bytes": 20000,
+        "rgb": [
+          640,
+          480,
+          "rgb8",
+          "camera_color_optical_frame"
+        ]
+      },
+      "reason": "live RGB, depth, and calibrated CameraInfo observed",
+      "status": "PASS",
+      "test_id": "rgbd_stream"
+    },
+    {
+      "evidence": {
+        "execute_action_queue": true,
+        "navigate_named_pose": true
+      },
+      "reason": "executor and named navigation actions available",
+      "status": "PASS",
+      "test_id": "action_servers"
+    },
+    {
+      "evidence": {
+        "accepted": false,
+        "cmd_vel_samples": 0,
+        "odometry_displacement_m": 0.0
+      },
+      "reason": "unknown named waypoint rejected without motion",
+      "status": "PASS",
+      "test_id": "invalid_waypoint"
+    },
+    {
+      "evidence": {
+        "cmd_vel_nonzero_samples": 101,
+        "final_odom_xy": [
+          -2.183461954060753,
+          -0.7685537686738239
+        ],
+        "initial_odom_xy": [
+          -2.4996736261666137,
+          -0.7295076583676453
+        ],
+        "odometry_displacement_m": 0.31861327703977854,
+        "outcome": "success",
+        "ros_status": 4,
+        "skill_results": [
+          {
+            "action_type": "NAVIGATE",
+            "message": "Reached waypoint \"instruction_point\".",
+            "outcome": "success",
+            "result_json": "{\"target\":\"instruction_point\",\"target_type\":\"named\"}"
+          }
+        ],
+        "success": true,
+        "wall_elapsed_sec": 5.825
+      },
+      "reason": "success",
+      "status": "PASS",
+      "test_id": "nav_0_instruction_point"
+    },
+    {
+      "evidence": {
+        "cmd_vel_nonzero_samples": 506,
+        "final_odom_xy": [
+          -2.47796663623305,
+          -0.6132788654288875
+        ],
+        "initial_odom_xy": [
+          -2.183461954060753,
+          -0.7685537686738239
+        ],
+        "odometry_displacement_m": 0.33293137941493306,
+        "outcome": "success",
+        "ros_status": 4,
+        "skill_results": [
+          {
+            "action_type": "NAVIGATE",
+            "message": "Reached waypoint \"living_room\".",
+            "outcome": "success",
+            "result_json": "{\"target\":\"living_room\",\"target_type\":\"named\"}"
+          }
+        ],
+        "success": true,
+        "wall_elapsed_sec": 25.288
+      },
+      "reason": "success",
+      "status": "PASS",
+      "test_id": "nav_1_living_room"
+    },
+    {
+      "evidence": {
+        "cmd_vel_nonzero_samples": 439,
+        "final_odom_xy": [
+          0.9258794761952708,
+          -1.285191316473111
+        ],
+        "initial_odom_xy": [
+          -2.47796663623305,
+          -0.6132788654288875
+        ],
+        "odometry_displacement_m": 3.4695294636249523,
+        "outcome": "success",
+        "ros_status": 4,
+        "skill_results": [
+          {
+            "action_type": "NAVIGATE",
+            "message": "Reached waypoint \"kitchen\".",
+            "outcome": "success",
+            "result_json": "{\"target\":\"kitchen\",\"target_type\":\"named\"}"
+          }
+        ],
+        "success": true,
+        "wall_elapsed_sec": 33.111
+      },
+      "reason": "success",
+      "status": "PASS",
+      "test_id": "nav_2_kitchen"
+    },
+    {
+      "evidence": {
+        "cmd_vel_nonzero_samples": 260,
+        "final_odom_xy": [
+          0.9288617873857706,
+          1.1904397185029412
+        ],
+        "initial_odom_xy": [
+          0.9258794761952708,
+          -1.285191316473111
+        ],
+        "odometry_displacement_m": 2.4756328313214455,
+        "outcome": "success",
+        "ros_status": 4,
+        "skill_results": [
+          {
+            "action_type": "NAVIGATE",
+            "message": "Reached waypoint \"dining_room\".",
+            "outcome": "success",
+            "result_json": "{\"target\":\"dining_room\",\"target_type\":\"named\"}"
+          }
+        ],
+        "success": true,
+        "wall_elapsed_sec": 12.987
+      },
+      "reason": "success",
+      "status": "PASS",
+      "test_id": "nav_3_dining_room"
+    },
+    {
+      "evidence": {
+        "cmd_vel_nonzero_samples": 683,
+        "final_odom_xy": [
+          -2.4795283773047827,
+          0.7285666325503467
+        ],
+        "initial_odom_xy": [
+          0.9288617873857706,
+          1.1904397185029412
+        ],
+        "odometry_displacement_m": 3.4395421588180413,
+        "outcome": "success",
+        "ros_status": 4,
+        "skill_results": [
+          {
+            "action_type": "NAVIGATE",
+            "message": "Reached waypoint \"bedroom\".",
+            "outcome": "success",
+            "result_json": "{\"target\":\"bedroom\",\"target_type\":\"named\"}"
+          }
+        ],
+        "success": true,
+        "wall_elapsed_sec": 38.925
+      },
+      "reason": "success",
+      "status": "PASS",
+      "test_id": "nav_4_bedroom"
+    },
+    {
+      "evidence": {
+        "cmd_vel_nonzero_samples": 279,
+        "final_odom_xy": [
+          -2.212266908113803,
+          -0.6945998320044622
+        ],
+        "initial_odom_xy": [
+          -2.4795283773047827,
+          0.7285666325503467
+        ],
+        "odometry_displacement_m": 1.4480440182354801,
+        "outcome": "success",
+        "ros_status": 4,
+        "skill_results": [
+          {
+            "action_type": "NAVIGATE",
+            "message": "Reached waypoint \"instruction_point\".",
+            "outcome": "success",
+            "result_json": "{\"target\":\"instruction_point\",\"target_type\":\"named\"}"
+          }
+        ],
+        "success": true,
+        "wall_elapsed_sec": 13.981
+      },
+      "reason": "success",
+      "status": "PASS",
+      "test_id": "nav_5_instruction_point"
+    },
+    {
+      "evidence": {
+        "detector_ready": false,
+        "frames": [],
+        "label_counts": {}
+      },
+      "reason": "detector not ready or fewer than five frames",
+      "status": "FAIL",
+      "test_id": "object_detector_frames"
+    },
+    {
+      "evidence": {
+        "cmd_vel_nonzero_samples": 0,
+        "final_odom_xy": [
+          -2.209486923054305,
+          -0.6950466544484191
+        ],
+        "initial_odom_xy": [
+          -2.209486923054305,
+          -0.6950466544484191
+        ],
+        "odometry_displacement_m": 0.0,
+        "outcome": "skill_unavailable",
+        "ros_status": 6,
+        "skill_results": [
+          {
+            "action_type": "FIND_OBJECT",
+            "message": "GPSR lifecycle manager response timed out",
+            "outcome": "skill_unavailable",
+            "result_json": "{}"
+          }
+        ],
+        "success": false,
+        "wall_elapsed_sec": 70.035
+      },
+      "reason": "skill_unavailable",
+      "status": "FAIL",
+      "test_id": "find_object_cola"
+    },
+    {
+      "evidence": {
+        "cmd_vel_nonzero_samples": 0,
+        "final_odom_xy": [
+          -2.209486923054305,
+          -0.6950466544484191
+        ],
+        "initial_odom_xy": [
+          -2.209486923054305,
+          -0.6950466544484191
+        ],
+        "odometry_displacement_m": 0.0,
+        "outcome": "skill_unavailable",
+        "ros_status": 6,
+        "skill_results": [
+          {
+            "action_type": "COUNT_OBJECTS",
+            "message": "GPSR lifecycle manager response timed out",
+            "outcome": "skill_unavailable",
+            "result_json": "{}"
+          }
+        ],
+        "success": false,
+        "wall_elapsed_sec": 70.039
+      },
+      "reason": "skill_unavailable",
+      "status": "FAIL",
+      "test_id": "count_objects_drinks"
+    },
+    {
+      "evidence": {
+        "cmd_vel_nonzero_samples": 0,
+        "final_odom_xy": [
+          -2.209486923054305,
+          -0.6950466544484191
+        ],
+        "initial_odom_xy": [
+          -2.209486923054305,
+          -0.6950466544484191
+        ],
+        "odometry_displacement_m": 0.0,
+        "outcome": "skill_unavailable",
+        "ros_status": 6,
+        "skill_results": [
+          {
+            "action_type": "NAVIGATE",
+            "message": "GPSR lifecycle manager response timed out",
+            "outcome": "skill_unavailable",
+            "result_json": "{}"
+          }
+        ],
+        "success": false,
+        "wall_elapsed_sec": 70.047
+      },
+      "reason": "skill_unavailable",
+      "status": "FAIL",
+      "test_id": "composite_nav_find"
+    },
+    {
+      "evidence": {
+        "cmd_vel_nonzero_samples": 0,
+        "final_odom_xy": [
+          -2.209486923054305,
+          -0.6950466544484191
+        ],
+        "initial_odom_xy": [
+          -2.209486923054305,
+          -0.6950466544484191
+        ],
+        "odometry_displacement_m": 0.0,
+        "outcome": "skill_unavailable",
+        "ros_status": 6,
+        "skill_results": [
+          {
+            "action_type": "FIND_OBJECT",
+            "message": "GPSR lifecycle manager response timed out",
+            "outcome": "skill_unavailable",
+            "result_json": "{}"
+          }
+        ],
+        "success": false,
+        "wall_elapsed_sec": 70.028
+      },
+      "reason": "skill_unavailable",
+      "status": "FAIL",
+      "test_id": "missing_object"
+    },
+    {
+      "evidence": {
+        "cmd_vel_nonzero_samples": 0,
+        "final_odom_xy": [
+          -2.209486923054305,
+          -0.6950466544484191
+        ],
+        "initial_odom_xy": [
+          -2.209486923054305,
+          -0.6950466544484191
+        ],
+        "odometry_displacement_m": 0.0,
+        "outcome": "skill_unavailable",
+        "ros_status": 6,
+        "skill_results": [
+          {
+            "action_type": "COUNT_PEOPLE",
+            "message": "GPSR lifecycle manager response timed out",
+            "outcome": "skill_unavailable",
+            "result_json": "{}"
+          }
+        ],
+        "success": false,
+        "wall_elapsed_sec": 70.008
+      },
+      "reason": "skill_unavailable",
+      "status": "FAIL",
+      "test_id": "count_people_absent"
+    },
+    {
+      "evidence": {
+        "cmd_vel_nonzero_samples": 0,
+        "final_odom_xy": [
+          -2.209486923054305,
+          -0.6950466544484191
+        ],
+        "initial_odom_xy": [
+          -2.209486923054305,
+          -0.6950466544484191
+        ],
+        "odometry_displacement_m": 0.0,
+        "outcome": "skill_unavailable",
+        "ros_status": 6,
+        "skill_results": [
+          {
+            "action_type": "FIND_PERSON",
+            "message": "GPSR lifecycle manager response timed out",
+            "outcome": "skill_unavailable",
+            "result_json": "{}"
+          }
+        ],
+        "success": false,
+        "wall_elapsed_sec": 70.058
+      },
+      "reason": "skill_unavailable",
+      "status": "FAIL",
+      "test_id": "find_person_absent"
+    },
+    {
+      "evidence": {},
+      "reason": "no trustworthy detector-visible human fixture is installed; no hard-coded mannequin success allowed",
+      "status": "NOT_EXECUTED",
+      "test_id": "person_fixture_positive"
+    },
+    {
+      "evidence": {},
+      "reason": "runner does not disrupt the sole live RGB-D publisher during the shared integration run",
+      "status": "NOT_EXECUTED",
+      "test_id": "stale_depth_failure"
+    }
+  ],
+  "totals": {
+    "FAIL": 7,
+    "INCONCLUSIVE": 0,
+    "NOT_EXECUTED": 2,
+    "PASS": 11
+  }
+}

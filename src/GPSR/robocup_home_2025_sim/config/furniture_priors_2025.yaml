@@ -1,0 +1,13 @@
+# Static arena-map priors. Target positions never come from this file: the
+# FIND_OBJECT server must independently obtain them from a fresh RGB-D detection.
+furniture:
+  - {name: coffee_table, x: -1.70, y: -1.48, yaw: 0.0, size_x: 0.77, size_y: 0.54, top_z: 0.47}
+  - {name: dining_table, x: 2.40, y: 0.77, yaw: 0.0, size_x: 0.90, size_y: 0.65, top_z: 0.745}
+  - {name: kitchen_cupboard, x: 0.74, y: -2.55, yaw: 3.141592654, size_x: 0.68, size_y: 0.63, top_z: 1.40}
+
+# Physical dimensions, not object poses. Used only to estimate the detected
+# object's bottom from its measured RGB-D point.
+object_heights_m:
+  cola: 0.122
+  bowl: 0.080
+  cereal: 0.205

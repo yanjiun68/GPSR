@@ -1,0 +1,1 @@
+add panels for more configs. Class : rviz_common -> { Displays , Selection , Tool Properties} add Visualization Manager

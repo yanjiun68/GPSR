@@ -1,0 +1,148 @@
+<sdf version="1.9">
+  <model name="robocup25_milk">
+    <static>false</static>
+    <allow_auto_disable>false</allow_auto_disable>
+    <link name="base_link">
+      <gravity>true</gravity>
+      <self_collide>false</self_collide>
+      <inertial>
+        <mass>1.03000</mass>
+        <pose>0.00000 0.00000 0.09400 0.00000 0.00000 0.00000</pose>
+        <inertia>
+          <ixx>0.00326579</ixx>
+          <iyy>0.00343059</iyy>
+          <izz>0.00062899</izz>
+          <ixy>0</ixy>
+          <ixz>0</ixz>
+          <iyz>0</iyz>
+        </inertia>
+      </inertial>
+      <collision name="proxy_collision">
+        <pose>0.00000 0.00000 0.09400 0.00000 0.00000 0.00000</pose>
+        <geometry>
+          <box>
+            <size>0.068 0.052 0.188</size>
+          </box>
+        </geometry>
+        <surface>
+          <friction>
+            <ode>
+              <mu>0.8</mu>
+              <mu2>0.8</mu2>
+            </ode>
+          </friction>
+        </surface>
+      </collision>
+      <visual name="carton_body_0">
+        <geometry>
+          <mesh>
+            <uri>model://robocup25_milk/meshes/000_carton_body.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.0510 0.5412 0.7686 1.0000</ambient>
+          <diffuse>0.0510 0.5412 0.7686 1.0000</diffuse>
+        </material>
+      </visual>
+      <visual name="milk_lower_1">
+        <geometry>
+          <mesh>
+            <uri>model://robocup25_milk/meshes/001_milk_lower.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.9725 0.9686 0.9333 1.0000</ambient>
+          <diffuse>0.9725 0.9686 0.9333 1.0000</diffuse>
+        </material>
+      </visual>
+      <visual name="splash_blue_2">
+        <geometry>
+          <mesh>
+            <uri>model://robocup25_milk/meshes/002_splash_blue.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.5137 0.7412 0.8980 1.0000</ambient>
+          <diffuse>0.5137 0.7412 0.8980 1.0000</diffuse>
+        </material>
+      </visual>
+      <visual name="folded_top_3">
+        <geometry>
+          <mesh>
+            <uri>model://robocup25_milk/meshes/003_folded_top.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.9098 0.1490 0.1686 1.0000</ambient>
+          <diffuse>0.9098 0.1490 0.1686 1.0000</diffuse>
+        </material>
+      </visual>
+      <visual name="top_line_4">
+        <geometry>
+          <mesh>
+            <uri>model://robocup25_milk/meshes/004_top_line.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.9725 0.9686 0.9333 1.0000</ambient>
+          <diffuse>0.9725 0.9686 0.9333 1.0000</diffuse>
+        </material>
+      </visual>
+      <visual name="brand_disc_5">
+        <geometry>
+          <mesh>
+            <uri>model://robocup25_milk/meshes/005_brand_disc.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.9725 0.9686 0.9333 1.0000</ambient>
+          <diffuse>0.9725 0.9686 0.9333 1.0000</diffuse>
+        </material>
+      </visual>
+      <visual name="brand_inner_6">
+        <geometry>
+          <mesh>
+            <uri>model://robocup25_milk/meshes/006_brand_inner.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.0000 0.2392 0.3961 1.0000</ambient>
+          <diffuse>0.0000 0.2392 0.3961 1.0000</diffuse>
+        </material>
+      </visual>
+      <visual name="letters_foremost_7">
+        <geometry>
+          <mesh>
+            <uri>model://robocup25_milk/meshes/007_letters_foremost.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.9725 0.9686 0.9333 1.0000</ambient>
+          <diffuse>0.9725 0.9686 0.9333 1.0000</diffuse>
+        </material>
+      </visual>
+      <visual name="letters_100_8">
+        <geometry>
+          <mesh>
+            <uri>model://robocup25_milk/meshes/008_letters_100.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.9725 0.9686 0.9333 1.0000</ambient>
+          <diffuse>0.9725 0.9686 0.9333 1.0000</diffuse>
+        </material>
+      </visual>
+      <visual name="milk_carton_orange_mark_9">
+        <geometry>
+          <mesh>
+            <uri>model://robocup25_milk/meshes/009_milk_carton_orange_mark.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.9098 0.1490 0.1686 1.0000</ambient>
+          <diffuse>0.9098 0.1490 0.1686 1.0000</diffuse>
+        </material>
+      </visual>
+    </link>
+  </model>
+</sdf>

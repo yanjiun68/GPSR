@@ -1,0 +1,171 @@
+<sdf version="1.9">
+  <model name="robocup25_cola">
+    <static>false</static>
+    <allow_auto_disable>false</allow_auto_disable>
+    <link name="base_link">
+      <gravity>true</gravity>
+      <self_collide>false</self_collide>
+      <inertial>
+        <mass>0.29000</mass>
+        <pose>0.00000 0.00000 0.07050 0.00000 0.00000 0.00000</pose>
+        <inertia>
+          <ixx>0.00055470</ixx>
+          <iyy>0.00055470</iyy>
+          <izz>0.00014848</izz>
+          <ixy>0</ixy>
+          <ixz>0</ixz>
+          <iyz>0</iyz>
+        </inertia>
+      </inertial>
+      <collision name="proxy_collision">
+        <pose>0.00000 0.00000 0.07050 0.00000 0.00000 0.00000</pose>
+        <geometry>
+          <cylinder>
+            <radius>0.032</radius>
+            <length>0.141</length>
+          </cylinder>
+        </geometry>
+        <surface>
+          <friction>
+            <ode>
+              <mu>0.8</mu>
+              <mu2>0.8</mu2>
+            </ode>
+          </friction>
+        </surface>
+      </collision>
+      <visual name="can_wall_0">
+        <geometry>
+          <mesh>
+            <uri>model://robocup25_cola/meshes/000_can_wall.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.0235 0.2157 0.4941 1.0000</ambient>
+          <diffuse>0.0235 0.2157 0.4941 1.0000</diffuse>
+        </material>
+      </visual>
+      <visual name="upper_color_1">
+        <geometry>
+          <mesh>
+            <uri>model://robocup25_cola/meshes/001_upper_color.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.7882 0.1059 0.1608 1.0000</ambient>
+          <diffuse>0.7882 0.1059 0.1608 1.0000</diffuse>
+        </material>
+      </visual>
+      <visual name="center_field_2">
+        <geometry>
+          <mesh>
+            <uri>model://robocup25_cola/meshes/002_center_field.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.9725 0.9686 0.9333 1.0000</ambient>
+          <diffuse>0.9725 0.9686 0.9333 1.0000</diffuse>
+        </material>
+      </visual>
+      <visual name="lower_gloss_3">
+        <geometry>
+          <mesh>
+            <uri>model://robocup25_cola/meshes/003_lower_gloss.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.0235 0.2157 0.4941 1.0000</ambient>
+          <diffuse>0.0235 0.2157 0.4941 1.0000</diffuse>
+        </material>
+      </visual>
+      <visual name="can_top_4">
+        <geometry>
+          <mesh>
+            <uri>model://robocup25_cola/meshes/004_can_top.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.6941 0.7255 0.7373 1.0000</ambient>
+          <diffuse>0.6941 0.7255 0.7373 1.0000</diffuse>
+        </material>
+      </visual>
+      <visual name="can_top_rim_5">
+        <geometry>
+          <mesh>
+            <uri>model://robocup25_cola/meshes/005_can_top_rim.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.4549 0.4902 0.5020 1.0000</ambient>
+          <diffuse>0.4549 0.4902 0.5020 1.0000</diffuse>
+        </material>
+      </visual>
+      <visual name="can_bottom_rim_6">
+        <geometry>
+          <mesh>
+            <uri>model://robocup25_cola/meshes/006_can_bottom_rim.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.6941 0.7255 0.7373 1.0000</ambient>
+          <diffuse>0.6941 0.7255 0.7373 1.0000</diffuse>
+        </material>
+      </visual>
+      <visual name="pull_ring_7">
+        <geometry>
+          <mesh>
+            <uri>model://robocup25_cola/meshes/007_pull_ring.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.4549 0.4902 0.5020 1.0000</ambient>
+          <diffuse>0.4549 0.4902 0.5020 1.0000</diffuse>
+        </material>
+      </visual>
+      <visual name="pull_latch_8">
+        <geometry>
+          <mesh>
+            <uri>model://robocup25_cola/meshes/008_pull_latch.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.6941 0.7255 0.7373 1.0000</ambient>
+          <diffuse>0.6941 0.7255 0.7373 1.0000</diffuse>
+        </material>
+      </visual>
+      <visual name="letters_est_9">
+        <geometry>
+          <mesh>
+            <uri>model://robocup25_cola/meshes/009_letters_est.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.0000 0.2392 0.3961 1.0000</ambient>
+          <diffuse>0.0000 0.2392 0.3961 1.0000</diffuse>
+        </material>
+      </visual>
+      <visual name="diagonal_red_10">
+        <geometry>
+          <mesh>
+            <uri>model://robocup25_cola/meshes/010_diagonal_red.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.7882 0.1059 0.1608 1.0000</ambient>
+          <diffuse>0.7882 0.1059 0.1608 1.0000</diffuse>
+        </material>
+      </visual>
+      <visual name="blue_banner_11">
+        <geometry>
+          <mesh>
+            <uri>model://robocup25_cola/meshes/011_blue_banner.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.0510 0.5412 0.7686 1.0000</ambient>
+          <diffuse>0.0510 0.5412 0.7686 1.0000</diffuse>
+        </material>
+      </visual>
+    </link>
+  </model>
+</sdf>
