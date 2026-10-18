@@ -1,0 +1,8 @@
+# Enable or disable a registered Gazebo object by its friendly name (for
+# example, "cola") or its world entity name (for example, "object_2025_cola").
+string object_name
+bool enabled
+---
+bool success
+bool active
+string message
