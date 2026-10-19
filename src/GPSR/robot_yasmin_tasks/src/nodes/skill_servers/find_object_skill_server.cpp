@@ -305,7 +305,7 @@ class FindObjectServer final : public rclcpp_lifecycle::LifecycleNode {
       local_scan_step_deg_ = root["scan"]["local_step_deg"]
                                   ? root["scan"]["local_step_deg"].as<double>() : 15.0;
       local_scan_max_yaw_deg_ = root["scan"]["local_max_yaw_deg"]
-                                     ? root["scan"]["local_max_yaw_deg"].as<double>() : 360.0;
+                                     ? root["scan"]["local_max_yaw_deg"].as<double>() : 1080.0;
     } catch (const std::exception &error) {
       RCLCPP_ERROR(get_logger(), "Unable to load FindObject search policy '%s': %s",
                    path.c_str(), error.what());
@@ -369,13 +369,17 @@ class FindObjectServer final : public rclcpp_lifecycle::LifecycleNode {
            result_future.get().code == rclcpp_action::ResultCode::SUCCEEDED;
   }
 
-  // Special function: Generate bounded local-search headings for a full in-place sweep.
+  // Special function: Generate bounded local-search headings for up to three
+  // complete in-place sweeps.
   std::vector<double> local_scan_headings() const {
     // Section: Clamp malformed policy values so one goal cannot request unbounded motion.
     const auto step = std::clamp(local_scan_step_deg_, 5.0, 90.0);
-    const auto maximum = std::clamp(local_scan_max_yaw_deg_, step, 360.0);
+    constexpr double kMaximumLocalSearchYawDeg = 3.0 * 360.0;
+    const auto maximum =
+        std::clamp(local_scan_max_yaw_deg_, step, kMaximumLocalSearchYawDeg);
     std::vector<double> headings;
-    for (double heading = 0.0; heading < maximum; heading += step)
+    // Include the terminal heading so the last round closes at the arrival heading.
+    for (double heading = 0.0; heading <= maximum; heading += step)
       headings.push_back(heading);
     return headings.empty() ? std::vector<double>{0.0} : headings;
   }
@@ -1239,7 +1243,7 @@ class FindObjectServer final : public rclcpp_lifecycle::LifecycleNode {
   double scan_action_timeout_sec_{20.0};
   double confirmation_timeout_sec_{3.0};
   double local_scan_step_deg_{15.0};
-  double local_scan_max_yaw_deg_{360.0};
+  double local_scan_max_yaw_deg_{1080.0};
   std::mutex mutex_;
   std::condition_variable condition_;
   std::uint64_t sequence_{0};

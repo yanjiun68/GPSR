@@ -15,9 +15,9 @@
       ],
       "dimensions_source": "supplied Gazebo collision proxy",
       "world_pose_xyz_yaw": [
-        -2.0,
-        -1.48,
-        0.473,
+        2.05,
+        -0.39,
+        0.75,
         0
       ],
       "appearance": "SUPPLIED_STL_VISUALS",
@@ -57,9 +57,9 @@
       ],
       "dimensions_source": "supplied Gazebo collision proxy",
       "world_pose_xyz_yaw": [
-        -1.65,
-        -1.48,
-        0.473,
+        2.55,
+        -0.39,
+        0.75,
         0
       ],
       "appearance": "SUPPLIED_STL_VISUALS",
@@ -78,9 +78,9 @@
       ],
       "dimensions_source": "supplied Gazebo collision proxy",
       "world_pose_xyz_yaw": [
-        -1.47,
-        -1.48,
-        0.473,
+        2.3,
+        -0.39,
+        0.75,
         0
       ],
       "appearance": "SUPPLIED_STL_VISUALS",

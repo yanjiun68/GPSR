@@ -47,6 +47,12 @@ class GpsrVoiceCommandNode final : public rclcpp::Node {
     post_tts_guard_ = std::chrono::milliseconds{post_tts_guard_ms};
     declare_parameter<std::string>("prompt_text",
                                    "Please give me a GPSR command after the beep.");
+    declare_parameter<std::string>(
+        "timeout_retry_prompt_text",
+        "I did not hear a command. Please try again after the beep.");
+    declare_parameter<std::string>(
+        "invalid_command_retry_prompt_text",
+        "I could not understand a valid GPSR command. Please try again after the beep.");
     tts_ = create_client<voice_interfaces::srv::SayText>("/voice/tts/say");
     stt_service_ =
         create_client<voice_interfaces::srv::TranscribeAudio>("/voice/stt/transcribe");
@@ -95,13 +101,17 @@ class GpsrVoiceCommandNode final : public rclcpp::Node {
     std::lock_guard<std::mutex> lock(state_mutex_);
     if (busy_ || awaiting_result_ || scheduler_state_ != "WAITING_FOR_COMMAND") return;
     busy_ = true;
-    std::thread([this]() { run_cycle(); }).detach();
+    const bool retry_prompt_spoken = retry_prompt_spoken_;
+    retry_prompt_spoken_ = false;
+    std::thread([this, retry_prompt_spoken]() {
+      run_cycle(retry_prompt_spoken);
+    }).detach();
   }
 
   // Special function: Prompt, listen, and submit exactly one correlated transcript.
-  void run_cycle() {
+  void run_cycle(bool retry_prompt_spoken) {
     // Section: Do not arm command STT unless the complete prompt playback succeeded.
-    if (!say(get_parameter("prompt_text").as_string())) {
+    if (!retry_prompt_spoken && !say(get_parameter("prompt_text").as_string())) {
       RCLCPP_WARN(get_logger(), "GPSR command prompt failed; leaving command intake idle.");
       std::lock_guard<std::mutex> lock(state_mutex_);
       busy_ = false;
@@ -137,6 +147,13 @@ class GpsrVoiceCommandNode final : public rclcpp::Node {
       RCLCPP_INFO(get_logger(),
                   "No command received within %.1f s; re-arming command input.",
                   timeout);
+      // Section: Tell the operator why another listening window is starting.
+      if (!say(get_parameter("timeout_retry_prompt_text").as_string())) {
+        RCLCPP_WARN(get_logger(),
+                    "GPSR timeout retry prompt failed; leaving command intake idle.");
+        break;
+      }
+      wait_for_post_tts_guard();
     }
     std::lock_guard<std::mutex> lock(state_mutex_);
     if (!awaiting_result_) busy_ = false;
@@ -195,6 +212,8 @@ class GpsrVoiceCommandNode final : public rclcpp::Node {
     }
     const bool retry_command_registration =
         result.value("request_new_command", false);
+    const bool invalid_command = !result.value("accepted", false);
+    const bool retry_command_input = retry_command_registration || invalid_command;
     std::string response_text;
     // Section: A declined execution confirmation rejects only this command and reopens voice intake.
     if (retry_command_registration) {
@@ -204,10 +223,11 @@ class GpsrVoiceCommandNode final : public rclcpp::Node {
       response_text = result.at("execution").value("success", false)
                           ? "I received the command."
                           : "The command is rejected.";
-    } else if (!result.value("accepted", false)) {
-      response_text = "The command is rejected.";
+    } else if (invalid_command) {
+      response_text =
+          get_parameter("invalid_command_retry_prompt_text").as_string();
     }
-    if (!response_text.empty()) say(response_text);
+    const bool response_spoken = !response_text.empty() && say(response_text);
     {
       // Section: Release the completed command before attempting a fresh registry entry.
       std::lock_guard<std::mutex> lock(state_mutex_);
@@ -215,11 +235,15 @@ class GpsrVoiceCommandNode final : public rclcpp::Node {
       busy_ = false;
       active_command_id_.clear();
       clarification_attempt_ = 0;
+      // Section: Do not repeat the generic prompt after the invalid-input retry
+      // instruction has already told the operator to try again.
+      retry_prompt_spoken_ = invalid_command && response_spoken;
     }
-    // Section: Prompt for a fresh command immediately after a declined confirmation;
-    // the state gate keeps this harmless if the scheduler has not yet republished ready.
-    if (retry_command_registration) {
-      RCLCPP_INFO(get_logger(), "Command was canceled; re-arming GPSR command intake.");
+    // Section: Prompt for a fresh command after cancellation or invalid input; the
+    // state gate keeps this harmless if the scheduler has not yet republished ready.
+    if (retry_command_input) {
+      RCLCPP_INFO(get_logger(),
+                  "Command was canceled or invalid; re-arming GPSR command intake.");
       start_once();
     }
   }
@@ -302,6 +326,7 @@ class GpsrVoiceCommandNode final : public rclcpp::Node {
   bool busy_{false};
   bool awaiting_result_{false};
   bool listening_{false};
+  bool retry_prompt_spoken_{false};
   // Section: Shared post-playback delay for initial commands and clarification replies.
   std::chrono::milliseconds post_tts_guard_{400};
   std::string active_command_id_;

@@ -45,8 +45,8 @@ ITEMS = [
 
 # All supplied models use an origin at the bottom centre.
 PLACEMENTS = {
-    'cola': (-2.00, -1.48, .473, 0), 'coffee': (-1.83, -1.48, .473, 0),
-    'water': (-1.65, -1.48, .473, 0), 'milk': (-1.47, -1.48, .473, 0),
+    'cola': (2.05, -.39, .75, 0), 'coffee': (-1.83, -1.48, .473, 0),
+    'water': (2.55, -.39, .75, 0), 'milk': (2.30, -.39, .75, 0),
     'cereal': (.65, 2.53, 1.305, 0),
     'tom_yam_cup_noodle': (.89, 2.53, 1.305, 0),
     'yen_ta_four_cup_noodle': (1.13, 2.53, 1.305, 0),

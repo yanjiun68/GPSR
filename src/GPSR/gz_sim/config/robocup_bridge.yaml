@@ -49,3 +49,28 @@
   ros_type_name: sensor_msgs/msg/CameraInfo
   gz_type_name: ignition.msgs.CameraInfo
   direction: GZ_TO_ROS
+- ros_topic_name: /arm_camera/arm_camera/color/image_raw
+  gz_topic_name: /arm_camera/arm_camera/image
+  ros_type_name: sensor_msgs/msg/Image
+  gz_type_name: ignition.msgs.Image
+  direction: GZ_TO_ROS
+- ros_topic_name: /arm_camera/arm_camera/aligned_depth_to_color/image_raw
+  gz_topic_name: /arm_camera/arm_camera/depth_image
+  ros_type_name: sensor_msgs/msg/Image
+  gz_type_name: ignition.msgs.Image
+  direction: GZ_TO_ROS
+- ros_topic_name: /arm_camera/arm_camera/color/camera_info
+  gz_topic_name: /arm_camera/arm_camera/camera_info
+  ros_type_name: sensor_msgs/msg/CameraInfo
+  gz_type_name: ignition.msgs.CameraInfo
+  direction: GZ_TO_ROS
+- ros_topic_name: /piper/arm_joint_trajectory
+  gz_topic_name: /piper/arm_joint_trajectory
+  ros_type_name: trajectory_msgs/msg/JointTrajectory
+  gz_type_name: ignition.msgs.JointTrajectory
+  direction: ROS_TO_GZ
+- ros_topic_name: /piper/gripper_joint_trajectory
+  gz_topic_name: /piper/gripper_joint_trajectory
+  ros_type_name: trajectory_msgs/msg/JointTrajectory
+  gz_type_name: ignition.msgs.JointTrajectory
+  direction: ROS_TO_GZ

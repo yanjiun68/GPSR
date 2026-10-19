@@ -1,8 +1,8 @@
 name,category,x,y,z_bottom,yaw,mesh_model
-cola,drinks,-2.0,-1.48,0.473,0,robocup25_cola
+cola,drinks,2.05,-0.39,0.75,0,robocup25_cola
 coffee,drinks,-1.83,-1.48,0.473,0,robocup25_coffee
-water,drinks,-1.65,-1.48,0.473,0,robocup25_water
-milk,drinks,-1.47,-1.48,0.473,0,robocup25_milk
+water,drinks,2.55,-0.39,0.75,0,robocup25_water
+milk,drinks,2.3,-0.39,0.75,0,robocup25_milk
 cereal,food,0.65,2.53,1.305,0,robocup25_cereal
 tom_yam_cup_noodle,food,0.89,2.53,1.305,0,robocup25_tom_yam_cup_noodle
 yen_ta_four_cup_noodle,food,1.13,2.53,1.305,0,robocup25_yen_ta_four_cup_noodle

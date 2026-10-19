@@ -13,6 +13,8 @@
   <!-- Piper is the default arm. Its standalone world joint is disabled
        because arm_base_link is mounted to this mobile base. -->
   <xacro:arg name="piper_standalone" default="false"/>
+  <!-- This model supplies its own rendered D435i and Gazebo sensor below. -->
+  <xacro:arg name="piper_include_arm_camera" default="false"/>
   <xacro:if value="${'$(arg arm_model)' == 'piper'}">
     <xacro:include filename="$(find agx_arm_description)/agx_arm_urdf/piper/urdf/piper_with_gripper_description.xacro"/>
   </xacro:if>
@@ -271,6 +273,17 @@
     <origin xyz="-0.121 0 1.272" rpy="0 0 0"/>
   </xacro:sensor_d435i>
 
+  <!-- Piper eye-in-hand D435i. The sensor macro defines arm_camera_link at
+       the physical camera centre, so compensate for its bottom-screw origin
+       to place that centre 0.05 m along -X, 0.025 m along +Y, and 0.05 m
+       along +Z from the joint6/link6 TF. -->
+  <xacro:if value="${'$(arg arm_model)' == 'piper'}">
+    <xacro:sensor_d435i parent="link6" name="arm_camera"
+                         use_nominal_extrinsics="true">
+      <origin xyz="-0.0375 0.0075 0.0394" rpy="0 ${3 * pi / 2} 0"/>
+    </xacro:sensor_d435i>
+  </xacro:if>
+
   <!-- Gazebo Plugins and Sensors.
        This machine runs ign-gazebo 6, whose system plugins still use
        the ignition::gazebo::systems::* class names even when the
@@ -314,6 +327,83 @@
       name="ignition::gazebo::systems::JointStatePublisher">
       <topic>/joint_states</topic>
     </plugin>
+
+    <xacro:if value="${'$(arg arm_model)' == 'piper'}">
+      <plugin
+        filename="libignition-gazebo-joint-trajectory-controller-system.so"
+        name="ignition::gazebo::systems::JointTrajectoryController">
+        <topic>/piper/arm_joint_trajectory</topic>
+        <joint_name>joint1</joint_name>
+        <initial_position>0.0</initial_position>
+        <position_p_gain>80</position_p_gain>
+        <position_i_gain>0.1</position_i_gain>
+        <position_d_gain>8</position_d_gain>
+        <position_i_min>-2</position_i_min>
+        <position_i_max>2</position_i_max>
+        <position_cmd_min>-100</position_cmd_min>
+        <position_cmd_max>100</position_cmd_max>
+        <joint_name>joint2</joint_name>
+        <initial_position>0.0</initial_position>
+        <position_p_gain>80</position_p_gain>
+        <position_i_gain>0.1</position_i_gain>
+        <position_d_gain>8</position_d_gain>
+        <position_i_min>-2</position_i_min>
+        <position_i_max>2</position_i_max>
+        <position_cmd_min>-100</position_cmd_min>
+        <position_cmd_max>100</position_cmd_max>
+        <joint_name>joint3</joint_name>
+        <initial_position>0.0</initial_position>
+        <position_p_gain>70</position_p_gain>
+        <position_i_gain>0.1</position_i_gain>
+        <position_d_gain>7</position_d_gain>
+        <position_i_min>-2</position_i_min>
+        <position_i_max>2</position_i_max>
+        <position_cmd_min>-100</position_cmd_min>
+        <position_cmd_max>100</position_cmd_max>
+        <joint_name>joint4</joint_name>
+        <initial_position>0.0</initial_position>
+        <position_p_gain>50</position_p_gain>
+        <position_i_gain>0.05</position_i_gain>
+        <position_d_gain>5</position_d_gain>
+        <position_i_min>-1</position_i_min>
+        <position_i_max>1</position_i_max>
+        <position_cmd_min>-50</position_cmd_min>
+        <position_cmd_max>50</position_cmd_max>
+        <joint_name>joint5</joint_name>
+        <initial_position>0.0</initial_position>
+        <position_p_gain>40</position_p_gain>
+        <position_i_gain>0.05</position_i_gain>
+        <position_d_gain>4</position_d_gain>
+        <position_i_min>-1</position_i_min>
+        <position_i_max>1</position_i_max>
+        <position_cmd_min>-40</position_cmd_min>
+        <position_cmd_max>40</position_cmd_max>
+        <joint_name>joint6</joint_name>
+        <initial_position>0.0</initial_position>
+        <position_p_gain>30</position_p_gain>
+        <position_i_gain>0.02</position_i_gain>
+        <position_d_gain>3</position_d_gain>
+        <position_i_min>-1</position_i_min>
+        <position_i_max>1</position_i_max>
+        <position_cmd_min>-30</position_cmd_min>
+        <position_cmd_max>30</position_cmd_max>
+      </plugin>
+
+      <plugin
+        filename="libignition-gazebo-joint-trajectory-controller-system.so"
+        name="ignition::gazebo::systems::JointTrajectoryController">
+        <topic>/piper/gripper_joint_trajectory</topic>
+        <joint_name>gripper</joint_name>
+        <initial_position>0.0</initial_position>
+        <position_p_gain>25</position_p_gain>
+        <position_i_gain>0.02</position_i_gain>
+        <position_d_gain>2</position_d_gain>
+        <position_i_min>-0.5</position_i_min>
+        <position_i_max>0.5</position_i_max>
+        <position_cmd_min>-10</position_cmd_min>
+        <position_cmd_max>10</position_cmd_max>
+      </plugin>
+    </xacro:if>
   </gazebo>
 
   <gazebo reference="lidar_link">
@@ -369,6 +459,33 @@
           <clip>
             <near>0.3</near>
             <far>10.0</far>
+          </clip>
+        </depth_camera>
+      </camera>
+    </sensor>
+  </gazebo>
+
+  <gazebo reference="arm_camera_link">
+    <sensor name="arm_rgbd_camera" type="rgbd_camera">
+      <always_on>true</always_on>
+      <update_rate>30</update_rate>
+      <topic>/arm_camera/arm_camera</topic>
+      <gz_frame_id>arm_camera_color_optical_frame</gz_frame_id>
+      <camera>
+        <horizontal_fov>1.2112</horizontal_fov>
+        <image>
+          <width>640</width>
+          <height>480</height>
+          <format>R8G8B8</format>
+        </image>
+        <clip>
+          <near>0.10</near>
+          <far>5.0</far>
+        </clip>
+        <depth_camera>
+          <clip>
+            <near>0.10</near>
+            <far>5.0</far>
           </clip>
         </depth_camera>
       </camera>

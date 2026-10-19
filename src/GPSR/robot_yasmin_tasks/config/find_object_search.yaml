@@ -19,14 +19,17 @@ retry:
 
 # Section: Object aliases, categories, members, detector labels, and priors live in object_knowledge.yaml.
 
-# Section: Angles are desired offsets from the arrival heading, not raw wheel commands.
+# Section: Search every object location with three complete rotations. Angles are
+# desired offsets from the arrival heading, not raw wheel commands. Keeping the
+# headings cumulative makes each adjacent Nav2 Spin request a positive 60-degree
+# step, including when a new round crosses the arrival heading.
 scan:
-  fast_angles_deg: [0, 60, -60]
-  # Section: LOCAL scope uses a full circle of small relative Nav2 Spin increments.
+  fast_angles_deg: [0, 60, 120, 180, 240, 300, 360, 420, 480, 540, 600, 660, 720, 780, 840, 900, 960, 1020, 1080]
+  # Section: LOCAL scope uses three full circles of small relative Nav2 Spin increments.
   local_step_deg: 15.0
-  local_max_yaw_deg: 360.0
-  extended_angles_deg: [120, -120]
-  exhaustive_angles_deg: [180]
+  local_max_yaw_deg: 1080.0
+  extended_angles_deg: []
+  exhaustive_angles_deg: []
   settle_interval_sec: 0.5
   action_timeout_sec: 20.0
 

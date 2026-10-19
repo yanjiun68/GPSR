@@ -8,3 +8,9 @@
 [submodule "src/arm-lifting-piper"]
 	path = src/arm-lifting-piper
 	url = https://github.com/Putrabot-UPM/arm-lifting-piper.git
+[submodule "ros_p"]
+	path = ros_p
+	url = git@gitlab.com:yanjiun68/ros_p.git
+[submodule "src/sts_hardware_interface"]
+	path = src/sts_hardware_interface
+	url = git@github.com:Putrabot-UPM/sts_hardware_interface.git

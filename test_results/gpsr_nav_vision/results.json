@@ -1,0 +1,101 @@
+{
+  "date": "2026-10-15",
+  "revision": "27c9d5b5",
+  "environment": {
+    "ros_distribution": "humble",
+    "gazebo_version": "6.18.0",
+    "world": "robocup_home_2025_vision.sdf",
+    "ros_domain_id": 186,
+    "gpu": "NVIDIA GeForce RTX 4060 Laptop GPU"
+  },
+  "overall_status": "FAIL",
+  "patterns": {
+    "navigate_find_object": "FAIL",
+    "navigate_count_objects": "FAIL"
+  },
+  "tests": [
+    {
+      "id": "STATIC_01",
+      "status": "PASS",
+      "actual": "69 passed in 1.52s"
+    },
+    {
+      "id": "N01",
+      "status": "PASS",
+      "command": "NavigateNamedPose(living_room)",
+      "navigation": {
+        "result": "SUCCESS",
+        "start_xy": [-2.01, -0.71],
+        "target_xy": [-2.60, -0.60],
+        "final_xy": [-2.44, -0.62],
+        "position_error_m": 0.162,
+        "heading_error_deg": 2.0
+      }
+    },
+    {
+      "id": "P1",
+      "status": "FAIL",
+      "command_id": "clean_find_01",
+      "command": "Go to the living room and find the cola.",
+      "plan": ["NAVIGATE(living_room)", "FIND_OBJECT(coke)"],
+      "navigation": {"result": "SUCCESS", "duration_sec": 9.06},
+      "vision": {
+        "result": "RECOVERABLE_FAILURE",
+        "detected_object": null,
+        "detection_frames": 0,
+        "reason": "Qwen response was malformed JSON: Expecting ',' delimiter"
+      },
+      "gpsr_result": "partial_success",
+      "returned_to_instruction_point": true,
+      "total_duration_sec": 67.8
+    },
+    {
+      "id": "P2",
+      "status": "FAIL",
+      "command_id": "clean_count_01",
+      "command": "Count the spoons in the dining room.",
+      "plan": ["NAVIGATE(dining_room)", "COUNT_OBJECTS(spoon)"],
+      "navigation": {"result": "SUCCESS", "duration_sec": 17.57},
+      "vision": {
+        "result": "FAILED",
+        "count": null,
+        "detection_frames": 0,
+        "reason": "Qwen response was malformed JSON; no fresh detections within 5 seconds"
+      },
+      "gpsr_result": "partial_success",
+      "returned_to_instruction_point": true,
+      "total_duration_sec": 78.3
+    },
+    {
+      "id": "VU1",
+      "status": "PASS",
+      "condition": "vision model unavailable",
+      "actual": "skill_unavailable propagated; no false task success"
+    },
+    {
+      "id": "IV1",
+      "status": "PASS",
+      "command": "Go to the coffee table and find the cola.",
+      "actual": "Rejected with UNKNOWN_LOCATION before navigation"
+    },
+    {
+      "id": "VISION_UNIT",
+      "status": "FAIL",
+      "actual": "6 passed, 3 failed",
+      "reason": "System OpenCV 4.10 binary is incompatible with system NumPy 2.2.6"
+    }
+  ],
+  "required_case_groups": {
+    "F01_F05": "BLOCKED",
+    "F06": "BLOCKED",
+    "F07": "PASS",
+    "F08": "NOT_EXECUTED",
+    "C01_C08": "BLOCKED",
+    "C09_C10": "NOT_EXECUTED",
+    "C11_C12": "BLOCKED"
+  },
+  "modified_files": [
+    "src/GPSR/gpsr_task_scheduler/gpsr_task_scheduler/scheduler_node.py",
+    "src/vision/scripts/gpsr_object_detection_node.py"
+  ]
+}

@@ -14,6 +14,7 @@ install(DIRECTORY
 
 install(PROGRAMS
   scripts/generate_robocup2026_world.py
+  scripts/piper_trajectory_action_relay.py
   scripts/washer_controller.py
   scripts/washer_panel.py
   DESTINATION lib/${PROJECT_NAME}

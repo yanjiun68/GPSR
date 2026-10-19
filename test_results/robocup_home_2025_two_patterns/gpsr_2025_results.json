@@ -1,0 +1,426 @@
+{
+  "generated_unix_time": 1792050924.3074472,
+  "results": [
+    {
+      "evidence": {
+        "clearances_m": {
+          "bedroom": 0.667,
+          "dining_room": 0.9,
+          "instruction_point": 0.5,
+          "kitchen": 0.828,
+          "living_room": 0.65
+        },
+        "map": "/home/yanjiun68/workspace/WS1/PutrabotUPM-project/src/GPSR/robocup_home_2025_sim/maps/vision_geometric_reference.yaml",
+        "map_size": [
+          280,
+          220
+        ],
+        "resolution": 0.05,
+        "world": "/home/yanjiun68/workspace/WS1/PutrabotUPM-project/src/GPSR/robocup_home_2025_sim/worlds/robocup_home_2025_vision.sdf"
+      },
+      "reason": "world/map/waypoints/2025 knowledge parse and validate",
+      "status": "PASS",
+      "test_id": "static_parse"
+    },
+    {
+      "evidence": {
+        "finite_scan": true,
+        "topics": [
+          "clock",
+          "depth",
+          "odom",
+          "rgb",
+          "scan"
+        ]
+      },
+      "reason": "clock, finite LiDAR, and odometry observed",
+      "status": "PASS",
+      "test_id": "gazebo_bridge"
+    },
+    {
+      "evidence": {
+        "camera_info": [
+          640,
+          480,
+          "camera_color_optical_frame"
+        ],
+        "depth": [
+          640,
+          480,
+          "32FC1",
+          "camera_color_optical_frame"
+        ],
+        "fx_fy": [
+          462.1675733606097,
+          462.1675733606097
+        ],
+        "nonzero_depth_bytes": 10000,
+        "nonzero_rgb_bytes": 20000,
+        "rgb": [
+          640,
+          480,
+          "rgb8",
+          "camera_color_optical_frame"
+        ]
+      },
+      "reason": "live RGB, depth, and calibrated CameraInfo observed",
+      "status": "PASS",
+      "test_id": "rgbd_stream"
+    },
+    {
+      "evidence": {
+        "execute_action_queue": true,
+        "navigate_named_pose": true
+      },
+      "reason": "executor and named navigation actions available",
+      "status": "PASS",
+      "test_id": "action_servers"
+    },
+    {
+      "evidence": {
+        "accepted": false,
+        "cmd_vel_samples": 0,
+        "odometry_displacement_m": 0.0
+      },
+      "reason": "unknown named waypoint rejected without motion",
+      "status": "PASS",
+      "test_id": "invalid_waypoint"
+    },
+    {
+      "evidence": {
+        "detector_ready": false,
+        "frames": [],
+        "label_counts": {}
+      },
+      "reason": "detector not ready or fewer than five frames",
+      "status": "FAIL",
+      "test_id": "object_detector_frames"
+    },
+    {
+      "evidence": {
+        "cmd_vel_nonzero_samples": 0,
+        "final_odom_xy": [
+          -2.060001140207925,
+          -0.7200545942539136
+        ],
+        "initial_odom_xy": [
+          -2.060001140207925,
+          -0.7200545942539136
+        ],
+        "odometry_displacement_m": 0.0,
+        "outcome": "success",
+        "ros_status": 4,
+        "skill_results": [
+          {
+            "action_type": "NAVIGATE",
+            "message": "Reached waypoint \"instruction_point\".",
+            "outcome": "success",
+            "result_json": "{\"target\":\"instruction_point\",\"target_type\":\"named\"}"
+          }
+        ],
+        "success": true,
+        "wall_elapsed_sec": 0.083
+      },
+      "reason": "success",
+      "status": "PASS",
+      "test_id": "reset_A1"
+    },
+    {
+      "evidence": {
+        "cmd_vel_nonzero_samples": 152,
+        "final_odom_xy": [
+          -2.4614802721580804,
+          -0.6412276743281983
+        ],
+        "initial_odom_xy": [
+          -2.060001140207925,
+          -0.7200545942539136
+        ],
+        "odometry_displacement_m": 0.4091444447825553,
+        "outcome": "skill_unavailable",
+        "ros_status": 6,
+        "skill_results": [
+          {
+            "action_type": "NAVIGATE",
+            "message": "Reached waypoint \"living_room\".",
+            "outcome": "success",
+            "result_json": "{\"target\":\"living_room\",\"target_type\":\"named\"}"
+          },
+          {
+            "action_type": "FIND_OBJECT",
+            "message": "FIND_OBJECT prepare failed: Lifecycle transition rejected: /gpsr_object_detection_node",
+            "outcome": "skill_unavailable",
+            "result_json": "{}"
+          }
+        ],
+        "success": false,
+        "wall_elapsed_sec": 7.635
+      },
+      "reason": "skill_unavailable",
+      "status": "FAIL",
+      "test_id": "A1"
+    },
+    {
+      "evidence": {
+        "cmd_vel_nonzero_samples": 44,
+        "final_odom_xy": [
+          -2.166970113037091,
+          -0.7287761183741346
+        ],
+        "initial_odom_xy": [
+          -2.4614802721580804,
+          -0.6412276743281983
+        ],
+        "odometry_displacement_m": 0.3072473984923795,
+        "outcome": "success",
+        "ros_status": 4,
+        "skill_results": [
+          {
+            "action_type": "NAVIGATE",
+            "message": "Reached waypoint \"instruction_point\".",
+            "outcome": "success",
+            "result_json": "{\"target\":\"instruction_point\",\"target_type\":\"named\"}"
+          }
+        ],
+        "success": true,
+        "wall_elapsed_sec": 2.186
+      },
+      "reason": "success",
+      "status": "PASS",
+      "test_id": "reset_A2"
+    },
+    {
+      "evidence": {
+        "cmd_vel_nonzero_samples": 225,
+        "final_odom_xy": [
+          0.9488580083652356,
+          1.1235503206227901
+        ],
+        "initial_odom_xy": [
+          -2.166970113037091,
+          -0.7287761183741346
+        ],
+        "odometry_displacement_m": 3.6248445647680643,
+        "outcome": "skill_unavailable",
+        "ros_status": 6,
+        "skill_results": [
+          {
+            "action_type": "NAVIGATE",
+            "message": "Reached waypoint \"dining_room\".",
+            "outcome": "success",
+            "result_json": "{\"target\":\"dining_room\",\"target_type\":\"named\"}"
+          },
+          {
+            "action_type": "FIND_OBJECT",
+            "message": "FIND_OBJECT prepare failed: Lifecycle transition rejected: /gpsr_object_detection_node",
+            "outcome": "skill_unavailable",
+            "result_json": "{}"
+          }
+        ],
+        "success": false,
+        "wall_elapsed_sec": 11.295
+      },
+      "reason": "skill_unavailable",
+      "status": "FAIL",
+      "test_id": "A2"
+    },
+    {
+      "evidence": {
+        "cmd_vel_nonzero_samples": 333,
+        "final_odom_xy": [
+          -1.9525786042982987,
+          -0.7461014443908129
+        ],
+        "initial_odom_xy": [
+          0.9488580083652356,
+          1.1235503206227901
+        ],
+        "odometry_displacement_m": 3.451656434195461,
+        "outcome": "success",
+        "ros_status": 4,
+        "skill_results": [
+          {
+            "action_type": "NAVIGATE",
+            "message": "Reached waypoint \"instruction_point\".",
+            "outcome": "success",
+            "result_json": "{\"target\":\"instruction_point\",\"target_type\":\"named\"}"
+          }
+        ],
+        "success": true,
+        "wall_elapsed_sec": 16.677
+      },
+      "reason": "success",
+      "status": "PASS",
+      "test_id": "reset_B1"
+    },
+    {
+      "evidence": {
+        "cmd_vel_nonzero_samples": 165,
+        "final_odom_xy": [
+          -2.4617343872147726,
+          -0.6402363034098624
+        ],
+        "initial_odom_xy": [
+          -1.9525786042982987,
+          -0.7461014443908129
+        ],
+        "odometry_displacement_m": 0.5200452281794383,
+        "outcome": "skill_unavailable",
+        "ros_status": 6,
+        "skill_results": [
+          {
+            "action_type": "NAVIGATE",
+            "message": "Reached waypoint \"living_room\".",
+            "outcome": "success",
+            "result_json": "{\"target\":\"living_room\",\"target_type\":\"named\"}"
+          },
+          {
+            "action_type": "FIND_OBJECT",
+            "message": "FIND_OBJECT prepare failed: Lifecycle transition rejected: /gpsr_object_detection_node",
+            "outcome": "skill_unavailable",
+            "result_json": "{}"
+          }
+        ],
+        "success": false,
+        "wall_elapsed_sec": 8.225
+      },
+      "reason": "skill_unavailable",
+      "status": "FAIL",
+      "test_id": "B1"
+    },
+    {
+      "evidence": {
+        "cmd_vel_nonzero_samples": 49,
+        "final_odom_xy": [
+          -2.1869075354671788,
+          -0.7235424263711863
+        ],
+        "initial_odom_xy": [
+          -2.4617343872147726,
+          -0.6402363034098624
+        ],
+        "odometry_displacement_m": 0.2871753968646011,
+        "outcome": "success",
+        "ros_status": 4,
+        "skill_results": [
+          {
+            "action_type": "NAVIGATE",
+            "message": "Reached waypoint \"instruction_point\".",
+            "outcome": "success",
+            "result_json": "{\"target\":\"instruction_point\",\"target_type\":\"named\"}"
+          }
+        ],
+        "success": true,
+        "wall_elapsed_sec": 2.48
+      },
+      "reason": "success",
+      "status": "PASS",
+      "test_id": "reset_B2"
+    },
+    {
+      "evidence": {
+        "cmd_vel_nonzero_samples": 253,
+        "final_odom_xy": [
+          0.9580997376842832,
+          1.1574168960073614
+        ],
+        "initial_odom_xy": [
+          -2.1869075354671788,
+          -0.7235424263711863
+        ],
+        "odometry_displacement_m": 3.6645707416583404,
+        "outcome": "skill_unavailable",
+        "ros_status": 6,
+        "skill_results": [
+          {
+            "action_type": "NAVIGATE",
+            "message": "Reached waypoint \"dining_room\".",
+            "outcome": "success",
+            "result_json": "{\"target\":\"dining_room\",\"target_type\":\"named\"}"
+          },
+          {
+            "action_type": "FIND_OBJECT",
+            "message": "FIND_OBJECT prepare failed: Lifecycle transition rejected: /gpsr_object_detection_node",
+            "outcome": "skill_unavailable",
+            "result_json": "{}"
+          }
+        ],
+        "success": false,
+        "wall_elapsed_sec": 12.638
+      },
+      "reason": "skill_unavailable",
+      "status": "FAIL",
+      "test_id": "B2"
+    },
+    {
+      "evidence": {
+        "cmd_vel_nonzero_samples": 356,
+        "final_odom_xy": [
+          -1.9574146910387757,
+          -0.7544715685969526
+        ],
+        "initial_odom_xy": [
+          0.9580997376842832,
+          1.1574168960073614
+        ],
+        "odometry_displacement_m": 3.4864798701812956,
+        "outcome": "success",
+        "ros_status": 4,
+        "skill_results": [
+          {
+            "action_type": "NAVIGATE",
+            "message": "Reached waypoint \"instruction_point\".",
+            "outcome": "success",
+            "result_json": "{\"target\":\"instruction_point\",\"target_type\":\"named\"}"
+          }
+        ],
+        "success": true,
+        "wall_elapsed_sec": 17.778
+      },
+      "reason": "success",
+      "status": "PASS",
+      "test_id": "reset_N1"
+    },
+    {
+      "evidence": {
+        "cmd_vel_nonzero_samples": 180,
+        "final_odom_xy": [
+          -2.4629911910323012,
+          0.6980456115090742
+        ],
+        "initial_odom_xy": [
+          -1.9574146910387757,
+          -0.7544715685969526
+        ],
+        "odometry_displacement_m": 1.5379901676697636,
+        "outcome": "skill_unavailable",
+        "ros_status": 6,
+        "skill_results": [
+          {
+            "action_type": "NAVIGATE",
+            "message": "Reached waypoint \"bedroom\".",
+            "outcome": "success",
+            "result_json": "{\"target\":\"bedroom\",\"target_type\":\"named\"}"
+          },
+          {
+            "action_type": "FIND_OBJECT",
+            "message": "FIND_OBJECT prepare failed: Lifecycle transition rejected: /gpsr_object_detection_node",
+            "outcome": "skill_unavailable",
+            "result_json": "{}"
+          }
+        ],
+        "success": false,
+        "wall_elapsed_sec": 9.029
+      },
+      "reason": "skill_unavailable",
+      "status": "FAIL",
+      "test_id": "N1"
+    }
+  ],
+  "totals": {
+    "FAIL": 6,
+    "INCONCLUSIVE": 0,
+    "NOT_EXECUTED": 0,
+    "PASS": 10
+  }
+}

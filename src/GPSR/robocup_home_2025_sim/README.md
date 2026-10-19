@@ -64,6 +64,21 @@ resetting the world. Pass `start_sim:=true` to start the world in the same
 launch. The Gazebo bridge is the simulated base interface; do not start the
 serial hardware `base_driver.py` for this launch.
 
+`home25_nav_all.launch.py` also starts MoveIt, the Gazebo Piper trajectory
+relay, eye-in-hand perception, and the GPSR pick/place action adapter by
+default. Use one command for the complete simulated stack:
+
+```bash
+ros2 launch my_robot_nav home25_nav_all.launch.py \
+  start_sim:=true enable_camera:=true use_rviz:=true
+```
+
+Disable manipulation with `start_moveit:=false start_pick_place:=false`, or
+open a separate MoveIt view with `moveit_rviz:=true`. The public manipulation
+actions are `/manipulation/pick_object` and `/manipulation/place_object`.
+Place uses the selected object's calibrated AGX recipe; the adapter rejects an
+arbitrary non-empty `target_pose` instead of moving to an uncalibrated pose.
+
 To open the vision world independently, expose its model directory first:
 
 ```bash

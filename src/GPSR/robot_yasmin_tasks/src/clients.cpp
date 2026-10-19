@@ -1464,7 +1464,7 @@ SkillResultData ManipulationClient::pick_object(const Blackboard::SharedPtr &bla
     return make_skill_result(action.action_type, SUCCESS, "Object picked.",
                              Json{{"held_object", object}, {"simulated", true}});
   }
-  const double timeout = action.timeout_sec > 0.0 ? action.timeout_sec : 20.0;
+  const double timeout = action.timeout_sec > 0.0 ? action.timeout_sec : 60.0;
   if (!pick_client_ || !pick_client_->wait_for_action_server(
                            std::chrono::duration<double>(std::min(timeout, 5.0)))) {
     return make_skill_result(action.action_type, FAILED,
@@ -1517,7 +1517,7 @@ SkillResultData ManipulationClient::place_object(
     return make_skill_result(action.action_type, SUCCESS, "Object placed.",
                              Json{{"object", held}, {"simulated", true}});
   }
-  const double timeout = action.timeout_sec > 0.0 ? action.timeout_sec : 20.0;
+  const double timeout = action.timeout_sec > 0.0 ? action.timeout_sec : 60.0;
   if (!place_client_ || !place_client_->wait_for_action_server(
                             std::chrono::duration<double>(std::min(timeout, 5.0)))) {
     return make_skill_result(action.action_type, FAILED,
@@ -1585,7 +1585,7 @@ SkillResultData ManipulationClient::handover(const Blackboard::SharedPtr &blackb
         action.action_type, SUCCESS, "Object handed over.",
         Json{{"object", held}, {"recipient", recipient}, {"simulated", true}});
   }
-  const double timeout = action.timeout_sec > 0.0 ? action.timeout_sec : 20.0;
+  const double timeout = action.timeout_sec > 0.0 ? action.timeout_sec : 60.0;
   if (!handover_client_ || !handover_client_->wait_for_action_server(
                                std::chrono::duration<double>(std::min(timeout, 5.0)))) {
     return make_skill_result(action.action_type, FAILED, "Handover action unavailable.",

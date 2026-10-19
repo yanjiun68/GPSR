@@ -11,7 +11,9 @@
 
   <exec_depend>ament_index_python</exec_depend>
   <exec_depend>agx_arm_description</exec_depend>
+  <exec_depend>agx_arm_moveit</exec_depend>
   <exec_depend>depth_image_proc</exec_depend>
+  <exec_depend>control_msgs</exec_depend>
   <exec_depend>geometry_msgs</exec_depend>
   <exec_depend>launch</exec_depend>
   <exec_depend>launch_ros</exec_depend>
@@ -27,6 +29,7 @@
   <exec_depend>sensor_msgs</exec_depend>
   <exec_depend>std_msgs</exec_depend>
   <exec_depend>tf2_msgs</exec_depend>
+  <exec_depend>trajectory_msgs</exec_depend>
   <exec_depend>xacro</exec_depend>
 
   <export>

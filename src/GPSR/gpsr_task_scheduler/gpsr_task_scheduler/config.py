@@ -93,7 +93,7 @@ def default_config() -> SchedulerConfig:
             "shirt_color": ["red", "orange", "yellow", "green", "blue", "purple", "white", "black", "gray"],
             "glasses": ["yes"],
         },
-        skill_timeouts={"NAVIGATE": 60.0, "FIND_OBJECT": 300.0, "FIND_PERSON": 300.0, "FIND_PERSON_BY_ATTRIBUTE": 300.0, "EXTRACT_PERSON_INFO": 10.0, "COUNT_OBJECTS": 10.0, "COUNT_PEOPLE": 10.0, "PICK_OBJECT": 20.0, "PLACE_OBJECT": 20.0, "HANDOVER_OBJECT": 20.0, "FOLLOW_PERSON": 60.0, "GUIDE_PERSON": 60.0, "SAY": 8.0, "ASK_AND_LISTEN": 15.0, "FIXED_INFORMATION": 12.0},
+        skill_timeouts={"NAVIGATE": 60.0, "FIND_OBJECT": 300.0, "FIND_PERSON": 300.0, "FIND_PERSON_BY_ATTRIBUTE": 300.0, "EXTRACT_PERSON_INFO": 10.0, "COUNT_OBJECTS": 10.0, "COUNT_PEOPLE": 10.0, "PICK_OBJECT": 60.0, "PLACE_OBJECT": 60.0, "HANDOVER_OBJECT": 60.0, "FOLLOW_PERSON": 60.0, "GUIDE_PERSON": 60.0, "SAY": 8.0, "ASK_AND_LISTEN": 15.0, "FIXED_INFORMATION": 12.0},
         skill_retries={"NAVIGATE": 1, "FIND_OBJECT": 0, "FIND_PERSON": 0, "FIND_PERSON_BY_ATTRIBUTE": 0, "EXTRACT_PERSON_INFO": 0, "COUNT_OBJECTS": 0, "COUNT_PEOPLE": 0, "PICK_OBJECT": 0, "PLACE_OBJECT": 0, "HANDOVER_OBJECT": 0, "FOLLOW_PERSON": 0, "GUIDE_PERSON": 0, "SAY": 0, "ASK_AND_LISTEN": 0, "FIXED_INFORMATION": 0},
         actions={"execute_action_queue": "/execute_action_queue"},
         primitive_capabilities=load_primitive_registry(),
