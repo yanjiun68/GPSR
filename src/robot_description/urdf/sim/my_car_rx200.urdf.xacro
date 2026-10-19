@@ -6,4 +6,6 @@
   <xacro:arg name="arm_model" default="rx200"/>
   <xacro:include filename="$(find robot_description)/urdf/sim/my_car.urdf.xacro"/>
 
+
+
 </robot>

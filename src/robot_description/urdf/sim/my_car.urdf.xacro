@@ -4,6 +4,9 @@
   <!-- Select the manipulator while keeping one shared mobile-base model. -->
   <xacro:arg name="arm_model" default="piper"/>
 
+  <!-- Create the reusable xacro module for Agilex Piper X arm self-collision. -->
+  <xacro:arg name="enable_piper_self_collision" default="true"/>
+
   <!-- Frame enabled by default; pass enable_aluminium_frame:=false to disable. -->
   <xacro:arg name="enable_aluminium_frame" default="true"/>
 
@@ -19,6 +22,9 @@
   <xacro:if value="${'$(arg arm_model)' == 'rx200'}">
     <xacro:include filename="$(find robot_description)/urdf/arm/rx200.urdf.xacro"/>
   </xacro:if>
+
+  <!-- Register piper_gazebo_self_collision -->
+  <xacro:include filename="$(find agx_arm_description)/agx_arm_urdf/piper/urdf/piper_self_collision.gazebo.xacro"/>
 
   <!-- Reuse the real D435i frame tree so simulation and hardware publish the
        same camera_link/color/depth/infra optical frame names. -->
@@ -250,6 +256,12 @@
         profile_size="0.030"
         wall_thickness="0.002"
         aluminium_density="2700.0"/>
+  </xacro:if>
+
+  <!-- Description for self_collision of agx_piper -->
+  <xacro:if value="${'$(arg arm_model)' == 'piper'}">
+    <xacro:piper_gazebo_self_collision
+      enabled="$(arg enable_piper_self_collision)"/>
   </xacro:if>
 
   <!-- Real-robot D435i mount. The macro supplies camera_link plus nominal

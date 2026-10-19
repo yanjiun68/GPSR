@@ -198,6 +198,7 @@ def launch_setup(context, *args, **kwargs):
             'rvizconfig': rviz_config_launch_arg,
             'use_sim_time': use_sim_time_param,
             'robot_description': robot_description_launch_arg,
+            'external_urdf_loc': LaunchConfiguration('external_urdf_loc'),
         }.items(),
     )
 
@@ -336,6 +337,10 @@ def generate_launch_description():
     declared_arguments.extend(
         declare_interbotix_xsarm_robot_description_launch_arguments(
             hardware_type='gz_classic',
+            external_urdf_loc=PathJoinSubstitution([
+                FindPackageShare('interbotix_xsarm_descriptions'),
+                'urdf', 'rx200_with_wrist_camera.urdf.xacro',
+            ]),
         )
     )
 

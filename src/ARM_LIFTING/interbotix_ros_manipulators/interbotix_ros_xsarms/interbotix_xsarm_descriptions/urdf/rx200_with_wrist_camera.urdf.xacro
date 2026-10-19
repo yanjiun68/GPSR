@@ -1,0 +1,6 @@
+<?xml version="1.0"?>
+<!-- Extension fragment loaded by the official RX200 Xacro external_urdf_loc hook. -->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+  <xacro:include filename="$(find interbotix_xsarm_descriptions)/urdf/wrist_camera.xacro"/>
+  <xacro:include filename="$(find interbotix_xsarm_descriptions)/urdf/wrist_camera.gazebo.xacro"/>
+</robot>

@@ -88,6 +88,8 @@
       <disableFixedJointLumping>true</disableFixedJointLumping>
     </gazebo>
 
+    
+
   </xacro:macro>
 
 </robot>
