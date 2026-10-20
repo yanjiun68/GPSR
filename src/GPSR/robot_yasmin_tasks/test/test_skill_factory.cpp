@@ -11,6 +11,24 @@ TEST(SkillFactoryContracts, NotFoundRemainsRecoverable) {
   EXPECT_FALSE(is_fatal(NOT_FOUND));
 }
 
+// Special function: Verify compatibility callers receive structured validation data.
+TEST(SkillFactoryContracts, InvalidInputGetsFailureMetadata) {
+  const auto result =
+      make_skill_result("FIND_OBJECT", INVALID_INPUT, "missing target");
+  EXPECT_EQ(result.payload.at("failure_code"), INVALID_INPUT_FAILURE);
+  EXPECT_EQ(result.payload.at("failure_phase"), "validation");
+}
+
+// Special function: Verify explicit lifecycle failure details remain authoritative.
+TEST(SkillFactoryContracts, LifecycleFailureMetadataIsPreserved) {
+  const auto result = make_skill_result(
+      "FIND_OBJECT", SKILL_UNAVAILABLE, "prepare failed",
+      failure_payload(LIFECYCLE_SKILL_UNAVAILABLE, "lifecycle_prepare"), false,
+      true);
+  EXPECT_EQ(result.payload.at("failure_code"), LIFECYCLE_SKILL_UNAVAILABLE);
+  EXPECT_EQ(result.payload.at("failure_phase"), "lifecycle_prepare");
+}
+
 // Special function: Verify infrastructure and cancellation outcomes remain distinct.
 TEST(SkillFactoryContracts, TerminalOutcomeClassificationIsStable) {
   EXPECT_TRUE(is_fatal(CANCELED));

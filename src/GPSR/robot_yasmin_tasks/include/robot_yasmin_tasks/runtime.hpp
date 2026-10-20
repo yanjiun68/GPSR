@@ -41,6 +41,19 @@ inline constexpr char SKILL_UNAVAILABLE[] = "skill_unavailable";
 inline constexpr char SKIPPED_DEPENDENCY_FAILED[] = "skipped_dependency_failed";
 inline constexpr char PARTIAL_SUCCESS[] = "partial_success";
 
+// Section: Stable detailed failure codes carried inside SkillResult.result_json.
+inline constexpr char TARGET_OBJECT_NOT_FOUND[] = "TARGET_OBJECT_NOT_FOUND";
+inline constexpr char OBJECT_ATTRIBUTE_MISMATCH[] = "OBJECT_ATTRIBUTE_MISMATCH";
+inline constexpr char TARGET_PERSON_NOT_FOUND[] = "TARGET_PERSON_NOT_FOUND";
+inline constexpr char PERSON_ATTRIBUTE_MISMATCH[] = "PERSON_ATTRIBUTE_MISMATCH";
+inline constexpr char PERCEPTION_UNAVAILABLE[] = "PERCEPTION_UNAVAILABLE";
+inline constexpr char INVALID_INPUT_FAILURE[] = "INVALID_INPUT";
+inline constexpr char LIFECYCLE_SKILL_UNAVAILABLE[] = "LIFECYCLE_SKILL_UNAVAILABLE";
+inline constexpr char SKILL_UNAVAILABLE_FAILURE[] = "SKILL_UNAVAILABLE";
+inline constexpr char MANIPULATION_FAILED[] = "MANIPULATION_FAILED";
+inline constexpr char MANIPULATION_GOAL_REJECTED[] = "MANIPULATION_GOAL_REJECTED";
+inline constexpr char MANIPULATION_TIMEOUT[] = "MANIPULATION_TIMEOUT";
+
 // Section: Preserve canonical primitive identifiers and lifecycle endpoint names.
 inline constexpr char NAVIGATE[] = "NAVIGATE";
 inline constexpr char FIND_OBJECT[] = "FIND_OBJECT";
@@ -157,6 +170,11 @@ SkillResultData make_skill_result(
     const std::string &action_type, const std::string &outcome,
     const std::string &message, const Json &payload = Json::object(),
     bool recoverable = false, bool fatal = false);
+
+// Special function: Merge stable failure metadata into an existing result payload.
+Json failure_payload(const std::string &failure_code,
+                     const std::string &failure_phase,
+                     const Json &details = Json::object());
 
 // Special function: Classify queue outcomes exactly like the Python helper.
 bool is_recoverable(const std::string &outcome);

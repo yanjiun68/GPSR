@@ -78,8 +78,23 @@ SkillResultData make_skill_result(const std::string &action_type,
                                   const std::string &outcome,
                                   const std::string &message, const Json &payload,
                                   bool recoverable, bool fatal) {
-  // Section: Aggregate construction mirrors the Python factory without side effects.
-  return SkillResultData{action_type, outcome, message, payload, recoverable, fatal};
+  // Section: Every invalid/unavailable result has a stable code even when an older
+  // caller supplied only a human-readable message.
+  Json normalized = payload.is_object() ? payload : Json::object();
+  if (!normalized.contains("failure_code") && outcome == INVALID_INPUT) {
+    normalized.update(failure_payload(INVALID_INPUT_FAILURE, "validation"));
+  } else if (!normalized.contains("failure_code") && outcome == SKILL_UNAVAILABLE) {
+    normalized.update(failure_payload(SKILL_UNAVAILABLE_FAILURE, "skill_dispatch"));
+  }
+  return SkillResultData{action_type, outcome, message, normalized, recoverable, fatal};
+}
+
+Json failure_payload(const std::string &failure_code,
+                     const std::string &failure_phase, const Json &details) {
+  Json payload = details.is_object() ? details : Json::object();
+  payload["failure_code"] = failure_code;
+  payload["failure_phase"] = failure_phase;
+  return payload;
 }
 
 bool is_recoverable(const std::string &outcome) {

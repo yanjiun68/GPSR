@@ -220,7 +220,7 @@ def main():
     parser.add_argument('--json', action='store_true')
     args = parser.parse_args()
     share = Path(get_package_share_directory('robot_description'))
-    model = args.model or share / 'urdf/sim/my_car.urdf.xacro'
+    model = args.model or share / 'urdf/sim/my_car_rx200.urdf.xacro'
     report = {
         'package_discovery': result('PASS', str(share)),
         'model': result('PASS' if model.exists() else 'FAIL', str(model)),

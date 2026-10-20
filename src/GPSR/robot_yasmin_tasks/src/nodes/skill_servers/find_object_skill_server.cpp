@@ -399,6 +399,9 @@ class FindObjectServer final : public rclcpp_lifecycle::LifecycleNode {
   struct Observation final {
     std::optional<Detection> detection;
     bool saw_frame{false};
+    std::uint32_t target_class_detections{0};
+    std::uint32_t attribute_mismatch_detections{0};
+    Json attribute_mismatch_examples{Json::array()};
   };
 
   // Special function: Confirm a target from fresh frames while stationary at one viewpoint.
@@ -428,6 +431,22 @@ class FindObjectServer final : public rclcpp_lifecycle::LifecycleNode {
         frame = detections_;
       }
       observation.saw_frame = true;
+      // Section: Preserve the difference between an absent target class and a visible
+      // target whose semantic attributes do not satisfy the command.
+      for (const auto &detection : frame) {
+        const auto name = clean_symbol(detection.name);
+        if ((!wildcard && labels.count(name) == 0U) || detection.confidence < 0.50F)
+          continue;
+        ++observation.target_class_detections;
+        if (matches_attribute_filters(detection, query)) continue;
+        ++observation.attribute_mismatch_detections;
+        if (observation.attribute_mismatch_examples.size() < 5U) {
+          observation.attribute_mismatch_examples.push_back(
+              Json{{"object_name", name},
+                   {"confidence", detection.confidence},
+                   {"observed_attributes", detection_attributes(detection)}});
+        }
+      }
       const auto candidate = select_frame_candidate(frame, labels, wildcard, query);
       if (candidate) {
         const auto key = candidate_key(*candidate);
@@ -1003,6 +1022,9 @@ class FindObjectServer final : public rclcpp_lifecycle::LifecycleNode {
       bool saw_frame = false;
       bool observation_attempted = false;
       bool facing_succeeded = true;
+      std::uint32_t target_class_detections = 0U;
+      std::uint32_t attribute_mismatch_detections = 0U;
+      Json attribute_mismatch_examples = Json::array();
       unsigned navigation_failures = 0;
       std::string found_viewpoint;
       std::string found_room;
@@ -1058,6 +1080,13 @@ class FindObjectServer final : public rclcpp_lifecycle::LifecycleNode {
                                                   query, observation_deadline, room,
                                                   viewpoint);
           saw_frame = saw_frame || observation.saw_frame;
+          target_class_detections += observation.target_class_detections;
+          attribute_mismatch_detections +=
+              observation.attribute_mismatch_detections;
+          for (const auto &example : observation.attribute_mismatch_examples) {
+            if (attribute_mismatch_examples.size() >= 10U) break;
+            attribute_mismatch_examples.push_back(example);
+          }
           if (observation.detection) {
             best = observation.detection;
             found_viewpoint = viewpoint;
@@ -1088,6 +1117,10 @@ class FindObjectServer final : public rclcpp_lifecycle::LifecycleNode {
       result->navigation_failures = navigation_failures;
       result->viewpoints_searched = viewpoints_searched;
       result->message = "NAVIGATION_PREVENTED_OBSERVATION: no waypoint scan phase was reached.";
+      result->failure_json = Json{{"failure_code", "LOCATION_UNREACHABLE"},
+                                  {"failure_phase", "navigation"},
+                                  {"navigation_failures", navigation_failures},
+                                  {"viewpoints_searched", viewpoints_searched}}.dump();
       publish_status("NAVIGATION_FAILED", goal.get(), 0.0, true, result->result_code, "",
                      "NAVIGATION_PREVENTED_OBSERVATION", diagnostics);
       goal_handle->abort(result);
@@ -1105,6 +1138,10 @@ class FindObjectServer final : public rclcpp_lifecycle::LifecycleNode {
           diagnostics["ready_topic"].get<std::string>() + ", detections_topic=" +
           diagnostics["detections_topic"].get<std::string>() + ", detection_frames_during_goal=" +
           std::to_string(diagnostics["detection_frames_during_goal"].get<std::uint64_t>()) + ".";
+      result->failure_json = Json{{"failure_code", "PERCEPTION_UNAVAILABLE"},
+                                  {"failure_phase", "perception"},
+                                  {"reason", reason},
+                                  {"diagnostics", diagnostics}}.dump();
       result->navigation_failures = navigation_failures;
       result->viewpoints_searched = viewpoints_searched;
       publish_status("PERCEPTION_FAILED", goal.get(), 0.0, true, result->result_code,
@@ -1112,7 +1149,19 @@ class FindObjectServer final : public rclcpp_lifecycle::LifecycleNode {
       goal_handle->abort(result);
       } else if (!best) {
       result->result_code = Action::Result::NOT_FOUND;
-      result->message = "Target was not confirmed before the search deadline.";
+      const bool attribute_mismatch = attribute_mismatch_detections > 0U;
+      result->message = attribute_mismatch
+                            ? "Target objects were visible, but none matched all requested attributes."
+                            : "Target was not confirmed before the search deadline.";
+      result->failure_json =
+          Json{{"failure_code", attribute_mismatch
+                                    ? "OBJECT_ATTRIBUTE_MISMATCH"
+                                    : "TARGET_OBJECT_NOT_FOUND"},
+               {"failure_phase", "candidate_filtering"},
+               {"target_class_detections", target_class_detections},
+               {"attribute_mismatch_detections", attribute_mismatch_detections},
+               {"requested_filters", query.value("filters", Json::array())},
+               {"mismatch_examples", attribute_mismatch_examples}}.dump();
       result->navigation_failures = navigation_failures;
       result->viewpoints_searched = viewpoints_searched;
       publish_status("NOT_FOUND", goal.get(), best ? best->confidence : 0.0, true,
@@ -1132,6 +1181,7 @@ class FindObjectServer final : public rclcpp_lifecycle::LifecycleNode {
       result->navigation_failures = navigation_failures;
       const auto selection = selection_payload(*best, query);
       result->selection_json = selection.dump();
+      result->failure_json = "";
       const auto grounding = selection.value("furniture_relative_location", Json::object());
       if (grounding.value("valid", false) && grounding.contains("target_point")) {
         const auto &point = grounding.at("target_point");
@@ -1161,6 +1211,9 @@ class FindObjectServer final : public rclcpp_lifecycle::LifecycleNode {
       auto result = std::make_shared<Action::Result>();
       result->result_code = Action::Result::PERCEPTION_FAILED;
       result->message = std::string("FindObject worker failed: ") + error.what();
+      result->failure_json = Json{{"failure_code", "PERCEPTION_UNAVAILABLE"},
+                                  {"failure_phase", "perception_worker"},
+                                  {"reason", error.what()}}.dump();
       publish_status("INTERNAL_ERROR", goal.get(), 0.0, true, result->result_code, "",
                      error.what());
       goal_handle->abort(result);
@@ -1170,6 +1223,9 @@ class FindObjectServer final : public rclcpp_lifecycle::LifecycleNode {
       auto result = std::make_shared<Action::Result>();
       result->result_code = Action::Result::PERCEPTION_FAILED;
       result->message = "FindObject worker failed with an unknown exception.";
+      result->failure_json = Json{{"failure_code", "PERCEPTION_UNAVAILABLE"},
+                                  {"failure_phase", "perception_worker"},
+                                  {"reason", "UNKNOWN_EXCEPTION"}}.dump();
       publish_status("INTERNAL_ERROR", goal.get(), 0.0, true, result->result_code, "",
                      "UNKNOWN_EXCEPTION");
       goal_handle->abort(result);

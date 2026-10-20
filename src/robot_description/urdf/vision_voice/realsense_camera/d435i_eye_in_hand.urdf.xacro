@@ -1,0 +1,70 @@
+<?xml version="1.0"?>
+<robot name="d435i_eye_in_hand" xmlns:xacro="http://ros.org/wiki/xacro">
+  <!--
+    Reusable eye-in-hand Intel RealSense D435i description.
+
+    `parent` is the final link of any robotic arm (for example tool0, wrist_3_link,
+    flange, or link6). The supplied origin is the transform from that parent link
+    to the camera's bottom tripod-screw frame.
+
+    Example:
+      <xacro:include filename="$(find robot_description)/urdf/vision_voice/realsense_camera/d435i_eye_in_hand.urdf.xacro"/>
+      <xacro:d435i_eye_in_hand parent="tool0" name="wrist_camera"
+                               topic="/wrist_camera/rgbd">
+        <origin xyz="0.04 0 0.06" rpy="0 ${pi / 2} 0"/>
+      </xacro:d435i_eye_in_hand>
+
+    Set enable_gazebo="false" when only the URDF/TF frame tree is required.
+  -->
+  <xacro:include filename="$(find robot_description)/urdf/vision_voice/realsense_camera/_d435i.urdf.xacro"/>
+
+  <xacro:macro name="d435i_eye_in_hand"
+               params="parent *origin
+                       name:=arm_camera
+                       use_nominal_extrinsics:=true
+                       enable_gazebo:=true
+                       gazebo_sensor_name:=arm_rgbd_camera
+                       topic:=/arm_camera/arm_camera
+                       update_rate:=30
+                       horizontal_fov:=1.2112
+                       image_width:=640
+                       image_height:=480
+                       near_clip:=0.10
+                       far_clip:=5.0">
+    <!-- sensor_d435i creates the mount joint, camera body link, color/depth/IR
+         optical frames, and the accelerometer/gyroscope frames. -->
+    <xacro:sensor_d435i parent="${parent}" name="${name}"
+                         use_nominal_extrinsics="${use_nominal_extrinsics}">
+      <xacro:insert_block name="origin"/>
+    </xacro:sensor_d435i>
+
+    <xacro:if value="${enable_gazebo}">
+      <gazebo reference="${name}_link">
+        <sensor name="${gazebo_sensor_name}" type="rgbd_camera">
+          <always_on>true</always_on>
+          <update_rate>${update_rate}</update_rate>
+          <topic>${topic}</topic>
+          <gz_frame_id>${name}_color_optical_frame</gz_frame_id>
+          <camera>
+            <horizontal_fov>${horizontal_fov}</horizontal_fov>
+            <image>
+              <width>${image_width}</width>
+              <height>${image_height}</height>
+              <format>R8G8B8</format>
+            </image>
+            <clip>
+              <near>${near_clip}</near>
+              <far>${far_clip}</far>
+            </clip>
+            <depth_camera>
+              <clip>
+                <near>${near_clip}</near>
+                <far>${far_clip}</far>
+              </clip>
+            </depth_camera>
+          </camera>
+        </sensor>
+      </gazebo>
+    </xacro:if>
+  </xacro:macro>
+</robot>

@@ -413,16 +413,31 @@ class FindPersonByAttributeServer final : public rclcpp_lifecycle::LifecycleNode
       persist_match(goal_handle, *match, predicates, result);
     } else if (!match) {
       result->outcome = saw_frames ? "not_found" : "failed";
+      Json observed_people = Json::array();
+      for (const auto &person : latest_frame.people) {
+        if (observed_people.size() >= 5U) break;
+        observed_people.push_back(observation_json(person));
+      }
+      const std::string failure_code =
+          ambiguous_match ? "AMBIGUOUS_PERSON"
+          : saw_people     ? "PERSON_ATTRIBUTE_MISMATCH"
+          : saw_frames     ? "TARGET_PERSON_NOT_FOUND"
+                           : "PERCEPTION_UNAVAILABLE";
+      result->failure_json =
+          Json{{"failure_code", failure_code},
+               {"failure_phase", saw_frames ? "candidate_filtering" : "perception"},
+               {"requested_predicates", predicates},
+               {"observed_people", observed_people},
+               {"fresh_frames_received", saw_frames},
+               {"people_visible", saw_people}}.dump();
       result->message =
           ambiguous_match
               ? "ambiguous_person: multiple tracked people matched the requested attributes."
           : saw_people
-              ? (enable_vlm_fallback_
-                     ? "PERCEPTION_FAILED: VLM fallback returned no validated candidate."
-                     : "attribute_not_found: people were visible, but none matched every requested attribute.")
+              ? "attribute_not_found: people were visible, but none matched every requested attribute."
           : saw_frames
               ? "Fresh tracked-person frames arrived, but no people were visible."
-              : "No fresh tracked-person observations arrived before the deadline.";
+              : "PERCEPTION_FAILED: no fresh tracked-person observations arrived before the deadline.";
       goal_handle->abort(result);
     }
     busy_.store(false);
@@ -444,6 +459,10 @@ class FindPersonByAttributeServer final : public rclcpp_lifecycle::LifecycleNode
       return;
     }
     result->outcome = "not_found";
+    result->failure_json =
+        Json{{"failure_code", "PERSON_ATTRIBUTE_MISMATCH"},
+             {"failure_phase", "attribute_policy"},
+             {"reason", "negative_visible_attribute_not_supported"}}.dump();
     result->message = "attribute_not_detected: the person with described attribute is not detected; "
                       "S_err report=" + std::string(announced ? "sent" : "unavailable") +
                       ", return=" + std::string(returned ? "completed" : "failed") + ".";
@@ -610,6 +629,7 @@ class FindPersonByAttributeServer final : public rclcpp_lifecycle::LifecycleNode
     }
     result->success = true;
     result->outcome = "success";
+    result->failure_json = "";
     result->person_ref_json = person_ref.dump();
     result->memory_id = response->record.memory_id;
     result->memory_revision = response->record.revision;

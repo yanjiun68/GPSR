@@ -165,6 +165,7 @@ struct SearchPassDiagnostics {
   Json searched_waypoints{Json::array()};
   Json navigation_failures{Json::array()};
   Json scan_failures{Json::array()};
+  Json semantic_failures{Json::array()};
   bool complete_search{true};
 };
 
@@ -180,6 +181,7 @@ Json search_pass_to_json(const SearchPassDiagnostics &diagnostics) {
               {"searched_waypoints", diagnostics.searched_waypoints},
               {"navigation_failures", diagnostics.navigation_failures},
               {"scan_failures", diagnostics.scan_failures},
+              {"semantic_failures", diagnostics.semantic_failures},
               {"complete_search", diagnostics.complete_search}};
 }
 
@@ -192,6 +194,7 @@ void attach_search_pass_payload(SkillResultData &result,
   result.payload["searched_waypoints"] = diagnostics.searched_waypoints;
   result.payload["navigation_failures"] = diagnostics.navigation_failures;
   result.payload["scan_failures"] = diagnostics.scan_failures;
+  result.payload["semantic_failures"] = diagnostics.semantic_failures;
   result.payload["search_pass_complete"] = diagnostics.complete_search;
 }
 
@@ -353,6 +356,10 @@ SearchPassResult run_search_pass(
         perception.action_type = original.action_type;
         return finalize(std::move(perception));
       }
+      if (perception.payload.is_object() &&
+          perception.payload.contains("failure_code")) {
+        diagnostics.semantic_failures.push_back(perception.payload);
+      }
     }
   }
   diagnostics.searched_waypoints = visited;
@@ -364,10 +371,29 @@ SearchPassResult run_search_pass(
         "No configured " + entity_name + "-search waypoint was reachable.",
         Json::object(), true));
   }
+  std::string failure_code = entity_name == "Object"
+                                 ? TARGET_OBJECT_NOT_FOUND
+                                 : TARGET_PERSON_NOT_FOUND;
+  for (const auto &failure : diagnostics.semantic_failures) {
+    const auto code = failure.value("failure_code", std::string{});
+    if (code == OBJECT_ATTRIBUTE_MISMATCH ||
+        code == PERSON_ATTRIBUTE_MISMATCH) {
+      failure_code = code;
+      break;
+    }
+  }
+  const auto message =
+      failure_code == OBJECT_ATTRIBUTE_MISMATCH
+          ? "Object candidates were found, but their attributes did not match."
+      : failure_code == PERSON_ATTRIBUTE_MISMATCH
+          ? "People were found, but their attributes did not match."
+          : entity_name +
+                " was not found after all configured waypoints were searched.";
   return finalize(make_skill_result(
-      original.action_type, NOT_FOUND,
-      entity_name + " was not found after all configured waypoints were searched.",
-      Json::object(), true));
+      original.action_type, NOT_FOUND, message,
+      failure_payload(failure_code, "exhaustive_search",
+                      Json{{"semantic_failures", diagnostics.semantic_failures}}),
+      true));
 }
 
 // Special function: Execute one or more complete passes while retrying only a clean
@@ -409,6 +435,7 @@ SkillResultData search_with_waypoint_route(
   Json all_searched_waypoints = Json::array();
   Json all_navigation_failures = Json::array();
   Json all_scan_failures = Json::array();
+  Json all_semantic_failures = Json::array();
   SearchPassResult latest;
   std::uint32_t completed_passes = 0;
   std::uint32_t retries_used = 0;
@@ -442,6 +469,8 @@ SkillResultData search_with_waypoint_route(
       all_navigation_failures.push_back(failure);
     for (const auto &failure : latest.diagnostics.scan_failures)
       all_scan_failures.push_back(failure);
+    for (const auto &failure : latest.diagnostics.semantic_failures)
+      all_semantic_failures.push_back(failure);
 
     auto result = latest.result;
     if (!result.payload.is_object()) result.payload = Json::object();
@@ -452,6 +481,7 @@ SkillResultData search_with_waypoint_route(
     result.payload["searched_waypoints"] = all_searched_waypoints;
     result.payload["navigation_failures"] = all_navigation_failures;
     result.payload["scan_failures"] = all_scan_failures;
+    result.payload["semantic_failures"] = all_semantic_failures;
     if (result.outcome == SUCCESS) return result;
     if (result.outcome != NOT_FOUND) return result;
     if (!latest.diagnostics.complete_search || pass_index == total_passes) {

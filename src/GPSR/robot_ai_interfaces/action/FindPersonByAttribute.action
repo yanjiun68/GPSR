@@ -13,6 +13,8 @@ string memory_id
 uint64 memory_revision
 string observation_json
 string message
+# Section: Machine-readable terminal failure evidence; empty on success.
+string failure_json
 ---
 string status
 uint32 visible_count

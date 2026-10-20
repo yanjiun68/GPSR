@@ -93,3 +93,62 @@ def test_category_global_report_uses_indefinite_article_without_location():
     assert GpsrTaskSchedulerNode.failure_report_text(planned, result) == (
         "I could not find a snack after searching twice."
     )
+
+
+def test_object_attribute_mismatch_has_specific_report():
+    """Special function: Do not describe a visible wrong-color object as absent."""
+    result = {
+        "results": [
+            {
+                "action_type": "FIND_OBJECT",
+                "outcome": "not_found",
+                "result": {
+                    "failure_code": "OBJECT_ATTRIBUTE_MISMATCH",
+                    "search_passes_completed": 1,
+                },
+            }
+        ]
+    }
+    assert GpsrTaskSchedulerNode.requires_automatic_failure_report(
+        _compound_plan(), result
+    )
+    assert GpsrTaskSchedulerNode.failure_report_text(_compound_plan(), result) == (
+        "I found the Coke in the kitchen, but its attributes did not match the request."
+    )
+
+
+def test_structured_execution_failures_have_deterministic_reports():
+    """Special function: Cover every newly supported non-object failure family."""
+    expected = {
+        "PERSON_ATTRIBUTE_MISMATCH":
+            "I found people, but none matched all requested attributes.",
+        "PERCEPTION_UNAVAILABLE":
+            "I could not complete the task because perception was unavailable.",
+        "INVALID_INPUT":
+            "I could not execute the task because the command input was invalid.",
+        "LIFECYCLE_SKILL_UNAVAILABLE":
+            "I could not complete the task because a required skill could not be started.",
+        "SKILL_UNAVAILABLE":
+            "I could not complete the task because a required skill was unavailable.",
+        "MANIPULATION_FAILED":
+            "I could not complete the requested manipulation.",
+        "MANIPULATION_GOAL_REJECTED":
+            "The manipulation system did not accept the requested action.",
+        "MANIPULATION_TIMEOUT":
+            "The requested manipulation did not finish in time.",
+    }
+    planned = {"task_request": {}, "steps": []}
+    for failure_code, speech in expected.items():
+        result = {
+            "results": [
+                {
+                    "action_type": "TEST",
+                    "outcome": "failed",
+                    "result": {"failure_code": failure_code},
+                }
+            ]
+        }
+        assert GpsrTaskSchedulerNode.requires_automatic_failure_report(
+            planned, result
+        )
+        assert GpsrTaskSchedulerNode.failure_report_text(planned, result) == speech

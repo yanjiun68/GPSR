@@ -139,6 +139,20 @@ bool wait_future(FutureT &future, double timeout_sec,
   return future.wait_for(std::chrono::seconds(0)) == std::future_status::ready;
 }
 
+// Special function: Attach operation and preserved object state to manipulation
+// failures without relying on provider-specific message text.
+Json manipulation_failure_payload(const std::string &failure_code,
+                                  const std::string &phase,
+                                  const std::string &operation,
+                                  const std::string &object) {
+  return failure_payload(
+      failure_code, phase,
+      Json{{"subsystem", "manipulation"},
+           {"operation", operation},
+           {"object", object},
+           {"object_state_preserved", true}});
+}
+
 // Special function: Resolve safe dotted JSON paths used by deferred speech.
 std::pair<std::string, std::vector<std::string>> render_template(
     const std::string &input, const Json &source) {
@@ -755,9 +769,13 @@ SkillResultData PerceptionClient::count_objects(const Blackboard::SharedPtr &bla
   }
   const double timeout = action.timeout_sec != 0.0 ? action.timeout_sec : 5.0;
   if (!object_client_->wait_for_action_server(std::chrono::duration<double>(timeout))) {
-    return make_skill_result(action.action_type, FAILED,
+    return make_skill_result(action.action_type, RECOVERABLE_FAILURE,
                              "CountObjects action unavailable: " + object_action_,
-                             Json::object(), true);
+                             failure_payload(
+                                 PERCEPTION_UNAVAILABLE, "perception_action",
+                                 Json{{"provider", object_action_},
+                                      {"reason", "action_server_unavailable"}}),
+                             true);
   }
   robot_ai_interfaces::action::CountObjects::Goal goal;
   goal.category =
@@ -773,19 +791,28 @@ SkillResultData PerceptionClient::count_objects(const Blackboard::SharedPtr &bla
   goal.timeout_sec = static_cast<float>(timeout);
   auto goal_future = object_client_->async_send_goal(goal);
   if (!wait_future(goal_future, timeout, blackboard) || !goal_future.get()) {
-    return make_skill_result(action.action_type, FAILED,
+    return make_skill_result(action.action_type, RECOVERABLE_FAILURE,
                              "CountObjects action goal was rejected or timed out.",
-                             Json::object(), true);
+                             failure_payload(
+                                 PERCEPTION_UNAVAILABLE, "perception_action",
+                                 Json{{"provider", object_action_},
+                                      {"reason", "goal_rejected_or_timed_out"}}),
+                             true);
   }
   auto handle = goal_future.get();
   auto result_future = object_client_->async_get_result(handle);
   if (!wait_future(result_future, timeout, blackboard)) {
     object_client_->async_cancel_goal(handle);
     const bool canceled = cancel_requested(blackboard);
-    return make_skill_result(action.action_type, canceled ? CANCELED : FAILED,
+    return make_skill_result(action.action_type,
+                             canceled ? CANCELED : RECOVERABLE_FAILURE,
                              canceled ? "CountObjects action canceled."
                                       : "CountObjects action result timed out.",
-                             Json::object(), !canceled, canceled);
+                             failure_payload(
+                                 PERCEPTION_UNAVAILABLE, "perception_action",
+                                 Json{{"provider", object_action_},
+                                      {"reason", canceled ? "canceled" : "result_timeout"}}),
+                             !canceled, canceled);
   }
   const auto wrapped = result_future.get();
   const auto result = wrapped.result;
@@ -807,9 +834,12 @@ SkillResultData PerceptionClient::count_objects(const Blackboard::SharedPtr &bla
   return result && result->success
              ? make_skill_result(action.action_type, SUCCESS, result->message,
                                  skill_payload)
-             : make_skill_result(action.action_type, FAILED,
+             : make_skill_result(action.action_type, RECOVERABLE_FAILURE,
                                  result ? result->message : "CountObjects failed.",
-                                 skill_payload, true);
+                                 failure_payload(PERCEPTION_UNAVAILABLE,
+                                                 "perception_action",
+                                                 skill_payload),
+                                 true);
 }
 
 SkillResultData PerceptionClient::count_people(const Blackboard::SharedPtr &blackboard,
@@ -831,9 +861,13 @@ SkillResultData PerceptionClient::count_people(const Blackboard::SharedPtr &blac
   }
   const double timeout = action.timeout_sec != 0.0 ? action.timeout_sec : 5.0;
   if (!people_client_->wait_for_action_server(std::chrono::duration<double>(timeout))) {
-    return make_skill_result(action.action_type, FAILED,
+    return make_skill_result(action.action_type, RECOVERABLE_FAILURE,
                              "CountPeople action unavailable: " + people_action_,
-                             Json::object(), true);
+                             failure_payload(
+                                 PERCEPTION_UNAVAILABLE, "perception_action",
+                                 Json{{"provider", people_action_},
+                                      {"reason", "action_server_unavailable"}}),
+                             true);
   }
   robot_ai_interfaces::action::CountPeople::Goal goal;
   goal.location = !action.target_location.empty()
@@ -843,21 +877,33 @@ SkillResultData PerceptionClient::count_people(const Blackboard::SharedPtr &blac
   goal.timeout_sec = static_cast<float>(timeout);
   auto goal_future = people_client_->async_send_goal(goal);
   if (!wait_future(goal_future, timeout, blackboard)) {
-    return make_skill_result(action.action_type, FAILED,
+    return make_skill_result(action.action_type, RECOVERABLE_FAILURE,
                              "CountPeople action goal was rejected or timed out.",
-                             Json::object(), true);
+                             failure_payload(
+                                 PERCEPTION_UNAVAILABLE, "perception_action",
+                                 Json{{"provider", people_action_},
+                                      {"reason", "goal_rejected_or_timed_out"}}),
+                             true);
   }
   auto handle = goal_future.get();
   if (!handle) {
-    return make_skill_result(action.action_type, FAILED,
+    return make_skill_result(action.action_type, RECOVERABLE_FAILURE,
                              "CountPeople action goal was rejected or timed out.",
-                             Json::object(), true);
+                             failure_payload(
+                                 PERCEPTION_UNAVAILABLE, "perception_action",
+                                 Json{{"provider", people_action_},
+                                      {"reason", "goal_rejected_or_timed_out"}}),
+                             true);
   }
   auto result_future = people_client_->async_get_result(handle);
   if (!wait_future(result_future, timeout, blackboard)) {
     people_client_->async_cancel_goal(handle);
-    return make_skill_result(action.action_type, FAILED,
-                             "CountPeople action result timed out.", Json::object(),
+    return make_skill_result(action.action_type, RECOVERABLE_FAILURE,
+                             "CountPeople action result timed out.",
+                             failure_payload(
+                                 PERCEPTION_UNAVAILABLE, "perception_action",
+                                 Json{{"provider", people_action_},
+                                      {"reason", "result_timeout"}}),
                              true);
   }
   const auto result = result_future.get().result;
@@ -874,9 +920,12 @@ SkillResultData PerceptionClient::count_people(const Blackboard::SharedPtr &blac
   return result && result->success
              ? make_skill_result(action.action_type, SUCCESS, result->message,
                                  skill_payload)
-             : make_skill_result(action.action_type, FAILED,
+             : make_skill_result(action.action_type, RECOVERABLE_FAILURE,
                                  result ? result->message : "CountPeople failed.",
-                                 skill_payload, true);
+                                 failure_payload(PERCEPTION_UNAVAILABLE,
+                                                 "perception_action",
+                                                 skill_payload),
+                                 true);
 }
 
 SkillResultData PerceptionClient::compare_objects(
@@ -1094,7 +1143,11 @@ SkillResultData RemoteSkillClient::find_person(
   const auto result = wrapped.result;
   if (!result) {
     return make_skill_result(action.action_type, RECOVERABLE_FAILURE,
-                             "Find-person returned no result.", Json::object(), true);
+                             "Find-person returned no result.",
+                             failure_payload(PERCEPTION_UNAVAILABLE,
+                                             "perception_action",
+                                             Json{{"reason", "empty_result"}}),
+                             true);
   }
   Json payload{{"found", result->found},
                {"person_id", result->person_id},
@@ -1115,12 +1168,14 @@ SkillResultData RemoteSkillClient::find_person(
   }
   if (result->message.rfind("PERSON_NOT_FOUND:", 0) == 0) {
     payload["failure_status"] = "PERSON_NOT_FOUND";
+    payload.update(failure_payload(TARGET_PERSON_NOT_FOUND, "perception"));
   } else if (result->message.rfind("GESTURE_TIMEOUT:", 0) == 0) {
     payload["failure_status"] = "GESTURE_TIMEOUT";
   } else if (result->message.rfind("IDENTITY_NOT_CONFIRMED:", 0) == 0) {
     payload["failure_status"] = "IDENTITY_NOT_CONFIRMED";
   } else if (result->message.rfind("PERCEPTION_FAILED:", 0) == 0) {
     payload["failure_status"] = "PERCEPTION_FAILED";
+    payload.update(failure_payload(PERCEPTION_UNAVAILABLE, "perception"));
   }
   std::string outcome = NOT_FOUND;
   bool recoverable = true;
@@ -1174,9 +1229,11 @@ SkillResultData RemoteSkillClient::find_object(const Blackboard::SharedPtr &blac
           : json_value<double>(action.parameters, "timeout_sec", 300.0);
   if (!find_object_client_->wait_for_action_server(std::chrono::seconds(5))) {
     return make_skill_result(
-        action.action_type, RECOVERABLE_FAILURE,
-        "FindObject action server /gpsr/find_object is unavailable.", Json::object(),
-        true);
+        action.action_type, SKILL_UNAVAILABLE,
+        "FindObject action server /gpsr/find_object is unavailable.",
+        failure_payload(SKILL_UNAVAILABLE_FAILURE, "skill_dispatch",
+                        Json{{"provider", "/gpsr/find_object"}}),
+        false, true);
   }
   robot_ai_interfaces::action::FindObject::Goal goal;
   goal.object_name = object_name;
@@ -1196,15 +1253,21 @@ SkillResultData RemoteSkillClient::find_object(const Blackboard::SharedPtr &blac
   goal.query_json = dump_json(build_find_query(action, object_name, category));
   auto goal_future = find_object_client_->async_send_goal(goal);
   if (!wait_future(goal_future, 5.0, blackboard)) {
-    return make_skill_result(action.action_type, RECOVERABLE_FAILURE,
+    return make_skill_result(action.action_type, SKILL_UNAVAILABLE,
                              "FindObject goal was rejected or timed out.",
-                             Json::object(), true);
+                             failure_payload(
+                                 SKILL_UNAVAILABLE_FAILURE, "goal_submission",
+                                 Json{{"provider", "/gpsr/find_object"}}),
+                             false, true);
   }
   auto handle = goal_future.get();
   if (!handle) {
-    return make_skill_result(action.action_type, RECOVERABLE_FAILURE,
+    return make_skill_result(action.action_type, SKILL_UNAVAILABLE,
                              "FindObject goal was rejected or timed out.",
-                             Json::object(), true);
+                             failure_payload(
+                                 SKILL_UNAVAILABLE_FAILURE, "goal_submission",
+                                 Json{{"provider", "/gpsr/find_object"}}),
+                             false, true);
   }
   auto result_future = find_object_client_->async_get_result(handle);
   if (!wait_future(result_future, timeout + 5.0, blackboard)) {
@@ -1219,7 +1282,11 @@ SkillResultData RemoteSkillClient::find_object(const Blackboard::SharedPtr &blac
   const auto result = wrapped.result;
   if (!result) {
     return make_skill_result(action.action_type, RECOVERABLE_FAILURE,
-                             "FindObject returned no result.", Json::object(), true);
+                             "FindObject returned no result.",
+                             failure_payload(PERCEPTION_UNAVAILABLE,
+                                             "perception_action",
+                                             Json{{"reason", "empty_result"}}),
+                             true);
   }
   const bool localized = !result->object_pose.header.frame_id.empty();
   Json payload{{"found", result->found},
@@ -1234,6 +1301,8 @@ SkillResultData RemoteSkillClient::find_object(const Blackboard::SharedPtr &blac
                {"viewpoints_searched", result->viewpoints_searched},
                {"navigation_failures", result->navigation_failures},
                {"selection", parse_json(result->selection_json, Json::object())}};
+  const auto failure = parse_json(result->failure_json, Json::object());
+  if (failure.is_object() && !failure.empty()) payload.update(failure);
   using Result = robot_ai_interfaces::action::FindObject::Result;
   std::string outcome = FAILED;
   bool recoverable = false;
@@ -1279,9 +1348,11 @@ SkillResultData RemoteSkillClient::find_person_by_attribute(
   if (!find_attribute_client_->wait_for_action_server(
           std::chrono::duration<double>(std::min(timeout, 5.0)))) {
     return make_skill_result(
-        action.action_type, FAILED,
+        action.action_type, SKILL_UNAVAILABLE,
         "Find-person action unavailable: /gpsr/find_person_by_attribute",
-        Json::object(), true);
+        failure_payload(SKILL_UNAVAILABLE_FAILURE, "skill_dispatch",
+                        Json{{"provider", "/gpsr/find_person_by_attribute"}}),
+        false, true);
   }
   robot_ai_interfaces::action::FindPersonByAttribute::Goal goal;
   goal.selector_json = dump_json(action.parameters.value("selector", Json::object()));
@@ -1303,8 +1374,11 @@ SkillResultData RemoteSkillClient::find_person_by_attribute(
   }
   auto handle = goal_future.get();
   if (!handle) {
-    return make_skill_result(action.action_type, FAILED,
-                             "Find-person goal was rejected.", Json::object(), true);
+    return make_skill_result(
+        action.action_type, SKILL_UNAVAILABLE, "Find-person goal was rejected.",
+        failure_payload(SKILL_UNAVAILABLE_FAILURE, "goal_submission",
+                        Json{{"provider", "/gpsr/find_person_by_attribute"}}),
+        false, true);
   }
   auto result_future = find_attribute_client_->async_get_result(handle);
   if (!wait_future(result_future, timeout, blackboard)) {
@@ -1317,8 +1391,11 @@ SkillResultData RemoteSkillClient::find_person_by_attribute(
   }
   const auto result = result_future.get().result;
   if (!result)
-    return make_skill_result(action.action_type, FAILED,
-                             "Find-person returned no result.", Json::object(), true);
+    return make_skill_result(
+        action.action_type, RECOVERABLE_FAILURE, "Find-person returned no result.",
+        failure_payload(PERCEPTION_UNAVAILABLE, "perception_action",
+                        Json{{"reason", "empty_result"}}),
+        true);
   const auto person_ref = parse_json(result->person_ref_json, Json::object());
   const auto observation = parse_json(result->observation_json, Json::object());
   if (person_ref.is_object() && !person_ref.empty()) {
@@ -1335,23 +1412,21 @@ SkillResultData RemoteSkillClient::find_person_by_attribute(
   const std::set<std::string> valid{SUCCESS,   FAILED,  INVALID_INPUT,
                                     NOT_FOUND, TIMEOUT, CANCELED};
   const auto outcome = valid.count(result->outcome) ? result->outcome : FAILED;
-  // Section: Preserve machine-readable policy status even though the legacy action
-  // carries its detailed status in the message field.
-  std::string failure_status;
-  if (result->message.rfind("PERCEPTION_FAILED:", 0) == 0) {
-    failure_status = "PERCEPTION_FAILED";
-  } else if (result->message.rfind("ambiguous_person:", 0) == 0) {
-    failure_status = "AMBIGUOUS_PERSON";
-  } else if (result->message.rfind("attribute_not_found:", 0) == 0) {
-    failure_status = "ATTRIBUTE_NOT_FOUND";
-  } else if (result->message.rfind("PERSON_NOT_FOUND:", 0) == 0) {
-    failure_status = "PERSON_NOT_FOUND";
-  }
   Json result_payload{{"person_ref", person_ref},
                       {"observation", observation},
                       {"memory_id", result->memory_id},
                       {"memory_revision", result->memory_revision}};
-  if (!failure_status.empty()) result_payload["failure_status"] = failure_status;
+  const auto failure = parse_json(result->failure_json, Json::object());
+  if (failure.is_object() && !failure.empty()) {
+    result_payload.update(failure);
+  } else if (result->message.rfind("PERCEPTION_FAILED:", 0) == 0) {
+    result_payload.update(failure_payload(PERCEPTION_UNAVAILABLE, "perception"));
+  } else if (result->message.rfind("attribute_not_found:", 0) == 0) {
+    result_payload.update(
+        failure_payload(PERSON_ATTRIBUTE_MISMATCH, "candidate_filtering"));
+  } else if (result->message.rfind("PERSON_NOT_FOUND:", 0) == 0) {
+    result_payload.update(failure_payload(TARGET_PERSON_NOT_FOUND, "perception"));
+  }
   return make_skill_result(
       action.action_type, outcome, result->message,
       result_payload,
@@ -1458,7 +1533,9 @@ SkillResultData ManipulationClient::pick_object(const Blackboard::SharedPtr &bla
   if (simulate_) {
     if (json_value<bool>(action.parameters, "simulate_failure", false)) {
       return make_skill_result(action.action_type, FAILED, "Pick failed.",
-                               Json::object(), true);
+                               manipulation_failure_payload(
+                                   MANIPULATION_FAILED, "execution", "pick", object),
+                               true);
     }
     blackboard->set<std::string>(bb::HELD_OBJECT, object);
     return make_skill_result(action.action_type, SUCCESS, "Object picked.",
@@ -1467,8 +1544,12 @@ SkillResultData ManipulationClient::pick_object(const Blackboard::SharedPtr &bla
   const double timeout = action.timeout_sec > 0.0 ? action.timeout_sec : 60.0;
   if (!pick_client_ || !pick_client_->wait_for_action_server(
                            std::chrono::duration<double>(std::min(timeout, 5.0)))) {
-    return make_skill_result(action.action_type, FAILED,
-                             "PickObject action unavailable.", Json::object(), true);
+    return make_skill_result(
+        action.action_type, SKILL_UNAVAILABLE, "PickObject action unavailable.",
+        failure_payload(SKILL_UNAVAILABLE_FAILURE, "skill_dispatch",
+                        Json{{"subsystem", "manipulation"},
+                             {"operation", "pick"}}),
+        false, true);
   }
   auto pose = bb_get<geometry_msgs::msg::PoseStamped>(
       blackboard, bb::TARGET_POSE, geometry_msgs::msg::PoseStamped{});
@@ -1483,8 +1564,11 @@ SkillResultData ManipulationClient::pick_object(const Blackboard::SharedPtr &bla
   auto goal_future = pick_client_->async_send_goal(goal);
   if (!wait_future(goal_future, std::min(timeout, 5.0), blackboard) ||
       !goal_future.get()) {
-    return make_skill_result(action.action_type, FAILED, "Pick failed.", Json::object(),
-                             true);
+    return make_skill_result(
+        action.action_type, FAILED, "Pick failed.",
+        manipulation_failure_payload(MANIPULATION_GOAL_REJECTED,
+                                     "goal_submission", "pick", object),
+        true);
   }
   auto handle = goal_future.get();
   auto result_future = pick_client_->async_get_result(handle);
@@ -1493,13 +1577,22 @@ SkillResultData ManipulationClient::pick_object(const Blackboard::SharedPtr &bla
     const bool canceled = cancel_requested(blackboard);
     return make_skill_result(action.action_type, canceled ? CANCELED : TIMEOUT,
                              canceled ? "Pick canceled." : "Pick timed out.",
-                             Json::object(), !canceled, canceled);
+                             canceled
+                                 ? manipulation_failure_payload(
+                                       MANIPULATION_FAILED, "cancellation", "pick",
+                                       object)
+                                 : manipulation_failure_payload(
+                                       MANIPULATION_TIMEOUT, "execution", "pick",
+                                       object),
+                             !canceled, canceled);
   }
   const auto wrapped = result_future.get();
   const auto result = wrapped.result;
   if (!result || !result->success) {
     return make_skill_result(action.action_type, FAILED,
-                             result ? result->message : "Pick failed.", Json::object(),
+                             result ? result->message : "Pick failed.",
+                             manipulation_failure_payload(
+                                 MANIPULATION_FAILED, "execution", "pick", object),
                              true);
   }
   const auto held = result->held_object_id.empty() ? object : result->held_object_id;
@@ -1520,8 +1613,13 @@ SkillResultData ManipulationClient::place_object(
   const double timeout = action.timeout_sec > 0.0 ? action.timeout_sec : 60.0;
   if (!place_client_ || !place_client_->wait_for_action_server(
                             std::chrono::duration<double>(std::min(timeout, 5.0)))) {
-    return make_skill_result(action.action_type, FAILED,
-                             "PlaceObject action unavailable.", Json::object(), true);
+    return make_skill_result(
+        action.action_type, SKILL_UNAVAILABLE, "PlaceObject action unavailable.",
+        failure_payload(SKILL_UNAVAILABLE_FAILURE, "skill_dispatch",
+                        Json{{"subsystem", "manipulation"},
+                             {"operation", "place"},
+                             {"object", held}}),
+        false, true);
   }
   auto pose = bb_get<geometry_msgs::msg::PoseStamped>(
       blackboard, bb::TARGET_POSE, geometry_msgs::msg::PoseStamped{});
@@ -1538,7 +1636,10 @@ SkillResultData ManipulationClient::place_object(
       !goal_future.get()) {
     return make_skill_result(action.action_type, FAILED,
                              "PlaceObject goal was rejected or timed out.",
-                             Json::object(), true);
+                             manipulation_failure_payload(
+                                 MANIPULATION_GOAL_REJECTED, "goal_submission",
+                                 "place", held),
+                             true);
   }
   auto handle = goal_future.get();
   auto result_future = place_client_->async_get_result(handle);
@@ -1547,12 +1648,21 @@ SkillResultData ManipulationClient::place_object(
     const bool canceled = cancel_requested(blackboard);
     return make_skill_result(action.action_type, canceled ? CANCELED : TIMEOUT,
                              canceled ? "Place canceled." : "Place timed out.",
-                             Json::object(), !canceled, canceled);
+                             canceled
+                                 ? manipulation_failure_payload(
+                                       MANIPULATION_FAILED, "cancellation", "place",
+                                       held)
+                                 : manipulation_failure_payload(
+                                       MANIPULATION_TIMEOUT, "execution", "place",
+                                       held),
+                             !canceled, canceled);
   }
   const auto result = result_future.get().result;
   if (!result || !result->success) {
     return make_skill_result(action.action_type, FAILED,
-                             result ? result->message : "Place failed.", Json::object(),
+                             result ? result->message : "Place failed.",
+                             manipulation_failure_payload(
+                                 MANIPULATION_FAILED, "execution", "place", held),
                              true);
   }
   blackboard->set<std::string>(bb::HELD_OBJECT, "");
@@ -1588,8 +1698,14 @@ SkillResultData ManipulationClient::handover(const Blackboard::SharedPtr &blackb
   const double timeout = action.timeout_sec > 0.0 ? action.timeout_sec : 60.0;
   if (!handover_client_ || !handover_client_->wait_for_action_server(
                                std::chrono::duration<double>(std::min(timeout, 5.0)))) {
-    return make_skill_result(action.action_type, FAILED, "Handover action unavailable.",
-                             Json::object(), true);
+    return make_skill_result(
+        action.action_type, SKILL_UNAVAILABLE, "Handover action unavailable.",
+        failure_payload(SKILL_UNAVAILABLE_FAILURE, "skill_dispatch",
+                        Json{{"subsystem", "manipulation"},
+                             {"operation", "handover"},
+                             {"object", held},
+                             {"recipient", recipient}}),
+        false, true);
   }
   robot_ai_interfaces::action::Handover::Goal goal;
   goal.object_id = held;
@@ -1599,7 +1715,10 @@ SkillResultData ManipulationClient::handover(const Blackboard::SharedPtr &blackb
   if (!wait_future(goal_future, std::min(timeout, 5.0), blackboard) ||
       !goal_future.get()) {
     return make_skill_result(action.action_type, FAILED,
-                             "Handover goal was rejected or timed out.", Json::object(),
+                             "Handover goal was rejected or timed out.",
+                             manipulation_failure_payload(
+                                 MANIPULATION_GOAL_REJECTED, "goal_submission",
+                                 "handover", held),
                              true);
   }
   auto handle = goal_future.get();
@@ -1609,13 +1728,23 @@ SkillResultData ManipulationClient::handover(const Blackboard::SharedPtr &blackb
     const bool canceled = cancel_requested(blackboard);
     return make_skill_result(action.action_type, canceled ? CANCELED : TIMEOUT,
                              canceled ? "Handover canceled." : "Handover timed out.",
-                             Json::object(), !canceled, canceled);
+                             canceled
+                                 ? manipulation_failure_payload(
+                                       MANIPULATION_FAILED, "cancellation",
+                                       "handover", held)
+                                 : manipulation_failure_payload(
+                                       MANIPULATION_TIMEOUT, "execution",
+                                       "handover", held),
+                             !canceled, canceled);
   }
   const auto result = result_future.get().result;
   if (!result || !result->success) {
     return make_skill_result(action.action_type, FAILED,
                              result ? result->message : "Handover failed.",
-                             Json::object(), true);
+                             manipulation_failure_payload(
+                                 MANIPULATION_FAILED, "execution", "handover",
+                                 held),
+                             true);
   }
   blackboard->set<std::string>(bb::HELD_OBJECT, "");
   return make_skill_result(action.action_type, SUCCESS, result->message,

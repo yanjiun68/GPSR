@@ -24,7 +24,7 @@ def generate_launch_description():
         pkg_robot_description,
         'urdf',
         'sim',
-        'my_car.urdf.xacro'
+        'my_car_rx200.urdf.xacro'
     )
 
     # Launch args

@@ -1180,7 +1180,9 @@ class GpsrTaskSchedulerNode(Node):
         """Special function: Rebase report dependencies and inject cross-queue result data."""
         steps = copy.deepcopy(list(planned.get("post_return_steps", [])))
         # Section: Synthesize mandatory target-specific speech when FIND_OBJECT exhausts its scope.
-        if not steps and GpsrTaskSchedulerNode.requires_not_found_report(planned, task_result):
+        if not steps and GpsrTaskSchedulerNode.requires_automatic_failure_report(
+            planned, task_result
+        ):
             steps = [{
                 "step_id": "report_find_object_not_found",
                 "skill_name": "SAY",
@@ -1286,6 +1288,40 @@ class GpsrTaskSchedulerNode(Node):
         return GpsrTaskSchedulerNode.find_failed_object_search(planned, task_result) is not None
 
     @staticmethod
+    def find_structured_failure(task_result: dict[str, Any]) -> dict[str, Any] | None:
+        """Special function: Return the final result carrying a stable failure code."""
+        for item in reversed(list(task_result.get("results", []))):
+            if not isinstance(item, dict):
+                continue
+            payload = item.get("result")
+            if isinstance(payload, dict) and str(payload.get("failure_code", "")).strip():
+                return {"result": item, "payload": payload}
+        return None
+
+    @staticmethod
+    def requires_automatic_failure_report(
+        planned: dict[str, Any],
+        task_result: dict[str, Any],
+    ) -> bool:
+        """Special function: Report the supported execution failures after safe return."""
+        if GpsrTaskSchedulerNode.requires_not_found_report(planned, task_result):
+            return True
+        failure = GpsrTaskSchedulerNode.find_structured_failure(task_result)
+        if failure is None:
+            return False
+        return str(failure["payload"].get("failure_code", "")) in {
+            "OBJECT_ATTRIBUTE_MISMATCH",
+            "PERSON_ATTRIBUTE_MISMATCH",
+            "PERCEPTION_UNAVAILABLE",
+            "INVALID_INPUT",
+            "LIFECYCLE_SKILL_UNAVAILABLE",
+            "SKILL_UNAVAILABLE",
+            "MANIPULATION_FAILED",
+            "MANIPULATION_GOAL_REJECTED",
+            "MANIPULATION_TIMEOUT",
+        }
+
+    @staticmethod
     def extract_result_variables(
         planned: dict[str, Any],
         task_result: dict[str, Any],
@@ -1330,7 +1366,33 @@ class GpsrTaskSchedulerNode(Node):
             completed_passes = int(payload.get("search_passes_completed", 0) or 0)
             retries_used = int(payload.get("not_found_retries_used", 0) or 0)
             retry_phrase = " after searching twice" if completed_passes >= 2 and retries_used >= 1 else ""
+            if str(payload.get("failure_code", "")) == "OBJECT_ATTRIBUTE_MISMATCH":
+                return (
+                    f"I found {article} {label}{location_phrase}, but its attributes "
+                    "did not match the request."
+                )
             return f"I could not find {article} {label}{location_phrase}{retry_phrase}."
+        failure = GpsrTaskSchedulerNode.find_structured_failure(task_result)
+        if failure is not None:
+            code = str(failure["payload"].get("failure_code", ""))
+            return {
+                "PERSON_ATTRIBUTE_MISMATCH":
+                    "I found people, but none matched all requested attributes.",
+                "PERCEPTION_UNAVAILABLE":
+                    "I could not complete the task because perception was unavailable.",
+                "INVALID_INPUT":
+                    "I could not execute the task because the command input was invalid.",
+                "LIFECYCLE_SKILL_UNAVAILABLE":
+                    "I could not complete the task because a required skill could not be started.",
+                "SKILL_UNAVAILABLE":
+                    "I could not complete the task because a required skill was unavailable.",
+                "MANIPULATION_FAILED":
+                    "I could not complete the requested manipulation.",
+                "MANIPULATION_GOAL_REJECTED":
+                    "The manipulation system did not accept the requested action.",
+                "MANIPULATION_TIMEOUT":
+                    "The requested manipulation did not finish in time.",
+            }.get(code, "I could not complete the requested task.")
         return "I could not complete the requested task."
 
     @staticmethod

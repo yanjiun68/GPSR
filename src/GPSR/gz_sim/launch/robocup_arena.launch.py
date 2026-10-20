@@ -75,7 +75,7 @@ def _launch_arena(context):
     mesh_share = get_package_share_directory('robot_description')
     agx_arm_share = get_package_share_directory('agx_arm_description')
     robot_xml = xacro.process_file(
-        os.path.join(mesh_share, 'urdf', 'sim', 'my_car.urdf.xacro')
+        os.path.join(mesh_share, 'urdf', 'sim', 'my_car_rx200.urdf.xacro')
     ).toxml()
     camera_enabled = arg('enable_camera').lower()
     if camera_enabled not in ('true', 'false'):

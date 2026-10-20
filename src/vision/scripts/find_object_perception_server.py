@@ -246,9 +246,20 @@ class FindObjectPerceptionServer(Node):
         """Special function: Build the FindObject action result from a matched detection."""
         result = FindObject.Result()
         result.found = bool(found)
+        result.result_code = (
+            FindObject.Result.SUCCESS if found else FindObject.Result.NOT_FOUND
+        )
         result.object_pose = PoseStamped()
         result.object_id = self.build_object_id(target_name, detection) if detection is not None else ""
         result.message = str(message)
+        result.failure_json = "" if found else json.dumps(
+            {
+                "failure_code": "TARGET_OBJECT_NOT_FOUND",
+                "failure_phase": "perception",
+                "target_object": target_name,
+            },
+            sort_keys=True,
+        )
         return result
 
     def build_object_id(self, target_name: str, detection: ObjectDetection | None) -> str:

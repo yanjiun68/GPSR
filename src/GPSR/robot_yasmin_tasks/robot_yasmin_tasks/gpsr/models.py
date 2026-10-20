@@ -208,4 +208,9 @@ def canonicalize_action_step(action: ActionStepData) -> ActionStepData:
 
 def make_skill_result(action_type: str, outcome: str, message: str = "", result: dict[str, Any] | None = None, recoverable: bool = False, fatal: bool = False) -> SkillResultData:
     """Special function: Create a normalized skill result."""
-    return SkillResultData(action_type, outcome, message, result or {}, recoverable, fatal)
+    payload = dict(result or {})
+    if outcome == "invalid_input" and "failure_code" not in payload:
+        payload.update({"failure_code": "INVALID_INPUT", "failure_phase": "validation"})
+    elif outcome == "skill_unavailable" and "failure_code" not in payload:
+        payload.update({"failure_code": "SKILL_UNAVAILABLE", "failure_phase": "skill_dispatch"})
+    return SkillResultData(action_type, outcome, message, payload, recoverable, fatal)

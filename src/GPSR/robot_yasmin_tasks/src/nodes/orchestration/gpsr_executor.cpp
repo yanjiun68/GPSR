@@ -527,7 +527,12 @@ class GpsrExecutor final : public rclcpp::Node {
       auto prepared = lifecycle_->start(action.action_type);
       if (!prepared.first) {
         auto result = make_skill_result(action.action_type, SKILL_UNAVAILABLE,
-                                        prepared.second, Json::object(), false, true);
+                                        prepared.second,
+                                        failure_payload(
+                                            LIFECYCLE_SKILL_UNAVAILABLE,
+                                            "lifecycle_prepare",
+                                            Json{{"skill", action.action_type}}),
+                                        false, true);
         results.push_back(result);
         result_step_ids.push_back(action.step_id);
         step_outcomes[action.step_id] = result.outcome;
@@ -553,25 +558,42 @@ class GpsrExecutor final : public rclcpp::Node {
                                 true));
         } catch (const std::exception &error) {
           result = make_skill_result(action.action_type, SKILL_UNAVAILABLE,
-                                     error.what(), Json::object(), false, true);
+                                     error.what(),
+                                     failure_payload(
+                                         SKILL_UNAVAILABLE_FAILURE,
+                                         "skill_construction",
+                                         Json{{"skill", action.action_type}}),
+                                     false, true);
         }
         const auto cleaned = lifecycle_->stop(action.action_type);
         if (!cleaned.first) {
           result = make_skill_result(action.action_type, FATAL_FAILURE, cleaned.second,
-                                     result.payload, false, true);
+                                     failure_payload(
+                                         LIFECYCLE_SKILL_UNAVAILABLE,
+                                         "lifecycle_cleanup",
+                                         Json{{"skill", action.action_type},
+                                              {"prior_result", result.payload}}),
+                                     false, true);
         }
         // Section: FIND_OBJECT owns its NOT_FOUND retry inside the compound search
         // mission; never restart the full lifecycle-backed skill here.
         const bool object_miss_owned_by_search_policy =
             action.action_type == FIND_OBJECT && result.outcome == NOT_FOUND;
-        if (object_miss_owned_by_search_policy || !is_recoverable(result.outcome) ||
+        if (object_miss_owned_by_search_policy || result.fatal ||
+            !is_recoverable(result.outcome) ||
             attempt >= action.max_retries)
           break;
         ++attempt;
         const auto recovered = lifecycle_->recover(action.action_type);
         if (!recovered.first) {
           result = make_skill_result(action.action_type, FATAL_FAILURE,
-                                     recovered.second, result.payload, false, true);
+                                     recovered.second,
+                                     failure_payload(
+                                         LIFECYCLE_SKILL_UNAVAILABLE,
+                                         "lifecycle_recovery",
+                                         Json{{"skill", action.action_type},
+                                              {"prior_result", result.payload}}),
+                                     false, true);
           break;
         }
       }

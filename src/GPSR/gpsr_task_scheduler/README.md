@@ -238,6 +238,24 @@ lifecycle manager, and transient GPSR perception/action servers by default.
 
 Section: Error recovery.
 
+Every execution failure retains its broad queue `outcome` and carries a stable
+`failure_code` plus `failure_phase` in `SkillResult.result_json`. Recovery and user
+reporting must use these fields rather than parse the human-readable message.
+
+| Failure code | Broad outcome | Executor behavior |
+| --- | --- | --- |
+| `TARGET_OBJECT_NOT_FOUND` | `not_found` | Complete the bounded search policy, skip dependent manipulation, return, and report the miss. |
+| `OBJECT_ATTRIBUTE_MISMATCH` | `not_found` | Preserve visible candidate evidence, skip dependent manipulation, return, and report the mismatch. |
+| `PERSON_ATTRIBUTE_MISMATCH` | `not_found` | Preserve requested predicates and visible-person evidence, then report the mismatch. |
+| `PERCEPTION_UNAVAILABLE` | `recoverable_failure` or `failed` | Recover/retry within policy; never describe unavailable observations as a semantic miss. |
+| `INVALID_INPUT` | `invalid_input` | Reject before further robot actions and terminate the invalid queue. |
+| `LIFECYCLE_SKILL_UNAVAILABLE` / `SKILL_UNAVAILABLE` | `skill_unavailable` | Abort the queue because the required execution resource is unavailable. |
+| `MANIPULATION_FAILED` / `MANIPULATION_GOAL_REJECTED` / `MANIPULATION_TIMEOUT` | `failed` or `timeout` | Preserve held-object state, skip dependent actions, and report the operation-specific failure. |
+
+Object and person action servers transport their detailed terminal evidence through
+`failure_json`; the executor adapter merges it into `SkillResult.result_json`. Successful
+results leave `failure_json` empty.
+
 When an initial or post-command return to the Instruction Point fails, the scheduler enters
 `ERROR`, waits for the configured delay, and transitions through
 `RECOVERING_TO_INSTRUCTION_POINT`. Command admission remains closed until a recovery return

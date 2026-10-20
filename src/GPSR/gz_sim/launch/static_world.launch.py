@@ -15,7 +15,7 @@ def generate_launch_description():
     agx_arm_share = get_package_share_directory('agx_arm_description')
     
     # Paths
-    xacro_file = os.path.join(description_share, 'urdf', 'sim', 'my_car.urdf.xacro')
+    xacro_file = os.path.join(description_share, 'urdf', 'sim', 'my_car_rx200.urdf.xacro')
     robot_xml = xacro.process_file(xacro_file).toxml()
     world_file = os.path.join(sim_share, 'world', 'static_world.sdf')
     models_path = os.path.join(sim_share, 'world', 'models')

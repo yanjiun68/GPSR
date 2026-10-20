@@ -31,6 +31,8 @@ string found_viewpoint
 string[] viewpoints_searched
 uint32 navigation_failures
 string message
+# Section: Machine-readable terminal failure evidence; empty on success.
+string failure_json
 # Section: Validated selected-candidate evidence used by reporting and downstream skills.
 string selection_json
 ---
