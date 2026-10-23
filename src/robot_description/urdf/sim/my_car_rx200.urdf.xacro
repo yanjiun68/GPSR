@@ -15,6 +15,17 @@
 
   <!-- Frame enabled by default; pass enable_aluminium_frame:=false to disable. -->
   <xacro:arg name="enable_aluminium_frame" default="true"/>
+  <xacro:arg name="enable_head_gimbal" default="true"/>
+  <!-- Exactly one head controller backend may own the joints: gazebo, sts, none. -->
+  <xacro:arg name="head_control_backend" default="gazebo"/>
+  <xacro:arg name="head_serial_port" default="/dev/ttyACM0"/>
+  <xacro:arg name="head_use_mock" default="false"/>
+  <xacro:arg name="head_yaw_motor_id" default="1"/>
+  <xacro:arg name="head_pitch_motor_id" default="2"/>
+  <xacro:arg name="head_yaw_center_steps" default="2048"/>
+  <xacro:arg name="head_pitch_center_steps" default="2048"/>
+  <xacro:arg name="head_yaw_direction" default="1"/>
+  <xacro:arg name="head_pitch_direction" default="-1"/>
 
   <!-- Piper's standalone world joint is disabled because arm_base_link is
        mounted to this mobile base. -->
@@ -39,6 +50,8 @@
   <!-- Reuse the real D435i frame tree and the portable eye-in-hand wrapper so
        simulation and hardware publish the same optical frame names. -->
   <xacro:include filename="$(find robot_description)/urdf/vision_voice/realsense_camera/d435i_eye_in_hand.urdf.xacro"/>
+  <xacro:include filename="$(find robot_description)/urdf/sim/head_assembly.urdf.xacro"/>
+  <xacro:include filename="$(find robot_description)/urdf/sim/head_sts_control.urdf.xacro"/>
 
   <!-- Structural aluminium profile assembly (30 x 30 mm). -->
   <xacro:include filename="$(find robot_description)/urdf/sim/aluminium_3030_frame.urdf.xacro"/>
@@ -274,12 +287,29 @@
       enabled="$(arg enable_piper_self_collision)"/>
   </xacro:if>
 
-  <!-- Real-robot D435i mount. The macro supplies camera_link plus nominal
-       color/depth/infrared optical frames for simulation. -->
-  <xacro:sensor_d435i parent="baseup_link" name="camera"
-                       use_nominal_extrinsics="true">
-    <origin xyz="-0.121 0 1.272" rpy="0 0 0"/>
-  </xacro:sensor_d435i>
+  <!-- The gimbal replaces the original fixed mast camera. The fallback keeps
+       exactly one camera tree when either the frame or gimbal is disabled. -->
+  <xacro:if value="${'$(arg enable_aluminium_frame)' == 'true' and '$(arg enable_head_gimbal)' == 'true'}">
+    <xacro:head_camera_assembly parent="alu3030_blue_camera_top"
+                                enable_gazebo="${'$(arg head_control_backend)' == 'gazebo'}"/>
+    <xacro:if value="${'$(arg head_control_backend)' == 'sts'}">
+      <xacro:head_sts_control
+          serial_port="$(arg head_serial_port)"
+          use_mock="$(arg head_use_mock)"
+          yaw_motor_id="$(arg head_yaw_motor_id)"
+          pitch_motor_id="$(arg head_pitch_motor_id)"
+          yaw_center_steps="$(arg head_yaw_center_steps)"
+          pitch_center_steps="$(arg head_pitch_center_steps)"
+          yaw_direction="$(arg head_yaw_direction)"
+          pitch_direction="$(arg head_pitch_direction)"/>
+    </xacro:if>
+  </xacro:if>
+  <xacro:unless value="${'$(arg enable_aluminium_frame)' == 'true' and '$(arg enable_head_gimbal)' == 'true'}">
+    <xacro:sensor_d435i parent="baseup_link" name="camera"
+                         use_nominal_extrinsics="true">
+      <origin xyz="-0.121 0 1.272" rpy="0 0 0"/>
+    </xacro:sensor_d435i>
+  </xacro:unless>
 
   <!-- Piper eye-in-hand D435i. For another arm, reuse this macro with its
        tool/flange link as `parent` and replace only this calibrated origin.
@@ -292,6 +322,19 @@
                              gazebo_sensor_name="arm_rgbd_camera"
                              topic="/arm_camera/arm_camera">
       <origin xyz="-0.0375 0.0075 0.0394" rpy="0 ${3 * pi / 2} 0"/>
+    </xacro:d435i_eye_in_hand>
+  </xacro:if>
+
+  <!-- RX200 eye-in-hand D435i mounted at the wrist_rotate output. The
+       wrist_rotate joint's child is gripper_link; these coordinates are
+       relative to that link: +0.04 m in X and +0.05 m in Z. -->
+  <xacro:if value="${'$(arg arm_model)' == 'rx200'}">
+    <xacro:d435i_eye_in_hand parent="rx200/gripper_link"
+                             name="rx200_wrist_camera"
+                             use_nominal_extrinsics="true"
+                             gazebo_sensor_name="rx200_wrist_rgbd_camera"
+                             topic="/rx200_wrist_camera/rgbd">
+      <origin xyz="0.04 0 0.05" rpy="0 0 0"/>
     </xacro:d435i_eye_in_hand>
   </xacro:if>
 
@@ -406,6 +449,88 @@
         <topic>/piper/gripper_joint_trajectory</topic>
         <joint_name>gripper</joint_name>
         <initial_position>0.0</initial_position>
+        <position_p_gain>25</position_p_gain>
+        <position_i_gain>0.02</position_i_gain>
+        <position_d_gain>2</position_d_gain>
+        <position_i_min>-0.5</position_i_min>
+        <position_i_max>0.5</position_i_max>
+        <position_cmd_min>-10</position_cmd_min>
+        <position_cmd_max>10</position_cmd_max>
+      </plugin>
+    </xacro:if>
+
+    <!-- RX200 trajectory controllers for Gazebo Sim. MoveIt sends
+         FollowJointTrajectory goals to a ROS action relay, which forwards
+         JointTrajectory messages to these native Gazebo controllers. -->
+    <xacro:if value="${'$(arg arm_model)' == 'rx200'}">
+      <plugin
+        filename="libignition-gazebo-joint-trajectory-controller-system.so"
+        name="ignition::gazebo::systems::JointTrajectoryController">
+        <topic>/rx200/arm_joint_trajectory</topic>
+        <joint_name>waist</joint_name>
+        <initial_position>0.0</initial_position>
+        <position_p_gain>80</position_p_gain>
+        <position_i_gain>0.1</position_i_gain>
+        <position_d_gain>8</position_d_gain>
+        <position_i_min>-2</position_i_min>
+        <position_i_max>2</position_i_max>
+        <position_cmd_min>-100</position_cmd_min>
+        <position_cmd_max>100</position_cmd_max>
+        <joint_name>shoulder</joint_name>
+        <initial_position>0.0</initial_position>
+        <position_p_gain>80</position_p_gain>
+        <position_i_gain>0.1</position_i_gain>
+        <position_d_gain>8</position_d_gain>
+        <position_i_min>-2</position_i_min>
+        <position_i_max>2</position_i_max>
+        <position_cmd_min>-100</position_cmd_min>
+        <position_cmd_max>100</position_cmd_max>
+        <joint_name>elbow</joint_name>
+        <initial_position>0.0</initial_position>
+        <position_p_gain>70</position_p_gain>
+        <position_i_gain>0.1</position_i_gain>
+        <position_d_gain>7</position_d_gain>
+        <position_i_min>-2</position_i_min>
+        <position_i_max>2</position_i_max>
+        <position_cmd_min>-100</position_cmd_min>
+        <position_cmd_max>100</position_cmd_max>
+        <joint_name>wrist_angle</joint_name>
+        <initial_position>0.0</initial_position>
+        <position_p_gain>50</position_p_gain>
+        <position_i_gain>0.05</position_i_gain>
+        <position_d_gain>5</position_d_gain>
+        <position_i_min>-1</position_i_min>
+        <position_i_max>1</position_i_max>
+        <position_cmd_min>-50</position_cmd_min>
+        <position_cmd_max>50</position_cmd_max>
+        <joint_name>wrist_rotate</joint_name>
+        <initial_position>0.0</initial_position>
+        <position_p_gain>40</position_p_gain>
+        <position_i_gain>0.05</position_i_gain>
+        <position_d_gain>4</position_d_gain>
+        <position_i_min>-1</position_i_min>
+        <position_i_max>1</position_i_max>
+        <position_cmd_min>-40</position_cmd_min>
+        <position_cmd_max>40</position_cmd_max>
+      </plugin>
+
+      <!-- Both finger joints are commanded explicitly because Gazebo Sim's
+           URDF-to-SDF mimic handling varies between Fortress releases. -->
+      <plugin
+        filename="libignition-gazebo-joint-trajectory-controller-system.so"
+        name="ignition::gazebo::systems::JointTrajectoryController">
+        <topic>/rx200/gripper_joint_trajectory</topic>
+        <joint_name>left_finger</joint_name>
+        <initial_position>0.037</initial_position>
+        <position_p_gain>25</position_p_gain>
+        <position_i_gain>0.02</position_i_gain>
+        <position_d_gain>2</position_d_gain>
+        <position_i_min>-0.5</position_i_min>
+        <position_i_max>0.5</position_i_max>
+        <position_cmd_min>-10</position_cmd_min>
+        <position_cmd_max>10</position_cmd_max>
+        <joint_name>right_finger</joint_name>
+        <initial_position>-0.037</initial_position>
         <position_p_gain>25</position_p_gain>
         <position_i_gain>0.02</position_i_gain>
         <position_d_gain>2</position_d_gain>

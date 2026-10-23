@@ -42,6 +42,120 @@ def test_found_alias_becomes_valid_ok_status():
     assert result["bbox_pixels"] == [20, 20, 60, 50]
 
 
+def test_er_flow_found_bbox_uses_source_image_pixels():
+    """Special function: Parse the canonical UnifoLM-ER-Flow found/bbox contract."""
+    module = load_er_flow_module()
+    result = module.normalize_qwen_roi(
+        {
+            "found": True,
+            "bbox": [20, 10, 80, 60],
+            "confidence": 0.90,
+        },
+        module.TargetRequest("cup"),
+        100,
+        80,
+        0.35,
+    )
+    assert result["status"] == "ok"
+    assert result["bbox_2d"] == [20.0, 10.0, 80.0, 60.0]
+    assert result["coordinate_width"] == 100
+    assert result["coordinate_height"] == 80
+    assert result["bbox_pixels"] == [20, 10, 80, 60]
+
+
+def test_er_flow_not_found_is_valid_without_bbox():
+    """Special function: Accept ER-Flow's explicit negative grounding result."""
+    module = load_er_flow_module()
+    result = module.normalize_qwen_roi(
+        {"found": False, "bbox": None, "confidence": 0.0},
+        module.TargetRequest("cup"),
+        100,
+        80,
+        0.35,
+    )
+    assert result["status"] == "not_found"
+    assert result["bbox_pixels"] is None
+
+
+def test_point_anchor_can_seed_a_small_compatibility_roi():
+    """Special function: Reduce model-box dependence while preserving the ROS ROI interface."""
+    module = load_er_flow_module()
+    result = module.normalize_qwen_roi(
+        {
+            "found": True,
+            "point_2d": [50, 40],
+            "confidence": 0.90,
+        },
+        module.TargetRequest("cup"),
+        100,
+        80,
+        0.35,
+        20,
+        16,
+    )
+    assert result["status"] == "ok"
+    assert result["roi_source"] == "point"
+    assert result["bbox_pixels"] == [40, 32, 60, 48]
+
+
+def test_malformed_negative_response_is_rejected():
+    """Malformed negative output is an error, not evidence that a target is absent."""
+    module = load_er_flow_module()
+    with pytest.raises(ValueError, match="invalid JSON"):
+        module.extract_json_object('{"found":false,"bbox":[[518,6,534,100],"confidence":0.90}')
+
+
+def test_model_contract_rejects_contradictory_and_out_of_bounds_outputs():
+    module = load_er_flow_module()
+    validate = lambda data: module.validate_model_output(data, 640, 480)
+    validate({"found": False, "bbox": None, "point_2d": None, "confidence": 0.0})
+    validate({"found": True, "bbox": None, "point_2d": [40, 30], "confidence": 0.9})
+    with pytest.raises(ValueError, match="missing target"):
+        validate({"found": False, "bbox": [1, 2, 3, 4], "point_2d": None, "confidence": 0.9})
+    with pytest.raises(ValueError, match="within"):
+        validate({"found": True, "bbox": [402, 20, 466, 887], "point_2d": None, "confidence": 0.9})
+    with pytest.raises(ValueError, match="point_2d"):
+        validate({"found": True, "bbox": [1, 2, 30, 40], "point_2d": [1, 480], "confidence": 0.9})
+
+
+def test_invalid_model_output_retries_once_and_fails_visibly():
+    module = load_er_flow_module()
+    class Logger:
+        def __init__(self):
+            self.messages = []
+        def warning(self, message):
+            self.messages.append(message)
+    logger = Logger()
+    prompts = []
+    def generate(correction):
+        prompts.append(correction)
+        return '{"found":false,"bbox":[[1,2,3,4],"confidence":0.9}'
+    with pytest.raises(ValueError, match="after two attempts"):
+        module.generate_validated_output(generate, lambda data: module.validate_model_output(data, 640, 480), logger)
+    assert len(prompts) == len(logger.messages) == 2
+    assert prompts[0] == "" and "previous response was invalid" in prompts[1]
+
+
+def test_invalid_model_output_can_recover_on_retry():
+    module = load_er_flow_module()
+    responses = iter(['{}', '{"found":false,"bbox":null,"point_2d":null,"confidence":0.0}'])
+    class Logger:
+        def warning(self, message):
+            pass
+    result = module.generate_validated_output(
+        lambda correction: next(responses),
+        lambda data: module.validate_model_output(data, 640, 480), Logger(),
+    )
+    assert result["found"] is False
+
+
+def test_prompt_includes_source_image_bounds():
+    module = load_er_flow_module()
+    prompt = module.AstraCamQwenNode._build_roi_prompt(module.TargetRequest("key"), 640, 480)
+    assert "640 pixels wide and 480 pixels high" in prompt
+    assert "right <= 640" in prompt and "bottom <= 480" in prompt
+
+
 def test_invalid_confidence_is_rejected():
     """Special function: Prevent NaN or out-of-range confidence from reaching downstream consumers."""
     # Section: Non-finite confidence must fail closed instead of becoming a valid tracked ROI.

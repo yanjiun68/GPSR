@@ -1,0 +1,125 @@
+<?xml version="1.0"?>
+<robot name="omni_robot" xmlns:xacro="http://www.ros.org/wiki/xacro">
+  <!-- Only the manipulator is planned. The mobile base and wheels remain
+       available in the RobotModel for collision checking and TF. -->
+  <group name="interbotix_arm">
+    <joint name="waist"/>
+    <joint name="shoulder"/>
+    <joint name="elbow"/>
+    <joint name="wrist_angle"/>
+    <joint name="wrist_rotate"/>
+    <joint name="ee_arm"/>
+    <joint name="gripper_bar"/>
+    <joint name="ee_bar"/>
+    <joint name="ee_gripper"/>
+  </group>
+
+  <group name="interbotix_gripper">
+    <joint name="left_finger"/>
+  </group>
+
+  <!-- The two-axis camera head is planned in joint space. It cannot satisfy
+       an arbitrary six-degree-of-freedom pose target. -->
+  <group name="camera_head">
+    <joint name="head_yaw_joint"/>
+    <joint name="head_pitch_joint"/>
+  </group>
+
+  <group_state name="Home" group="interbotix_arm">
+    <joint name="waist" value="0"/>
+    <joint name="shoulder" value="0"/>
+    <joint name="elbow" value="0"/>
+    <joint name="wrist_angle" value="0"/>
+    <joint name="wrist_rotate" value="0"/>
+  </group_state>
+  <group_state name="Ready" group="interbotix_arm">
+    <joint name="waist" value="0"/>
+    <joint name="shoulder" value="-0.30"/>
+    <joint name="elbow" value="0.98"/>
+    <joint name="wrist_angle" value="-0.91"/>
+    <joint name="wrist_rotate" value="0"/>
+  </group_state>
+  <group_state name="Open" group="interbotix_gripper">
+    <joint name="left_finger" value="0.037"/>
+  </group_state>
+  <group_state name="Closed" group="interbotix_gripper">
+    <joint name="left_finger" value="0.015"/>
+  </group_state>
+  <group_state name="Center" group="camera_head">
+    <joint name="head_yaw_joint" value="0"/>
+    <joint name="head_pitch_joint" value="0"/>
+  </group_state>
+  <group_state name="Left" group="camera_head">
+    <joint name="head_yaw_joint" value="0.5"/>
+    <joint name="head_pitch_joint" value="0"/>
+  </group_state>
+  <group_state name="Right" group="camera_head">
+    <joint name="head_yaw_joint" value="-0.5"/>
+    <joint name="head_pitch_joint" value="0"/>
+  </group_state>
+  <group_state name="Up" group="camera_head">
+    <joint name="head_yaw_joint" value="0"/>
+    <joint name="head_pitch_joint" value="0.35"/>
+  </group_state>
+  <group_state name="Down" group="camera_head">
+    <joint name="head_yaw_joint" value="0"/>
+    <joint name="head_pitch_joint" value="-0.35"/>
+  </group_state>
+
+  <end_effector name="rx200_gripper"
+                parent_link="rx200/ee_gripper_link"
+                group="interbotix_gripper"/>
+
+  <!-- Joints simulated for feedback but intentionally excluded from planning. -->
+  <passive_joint name="gripper"/>
+  <passive_joint name="right_finger"/>
+  <passive_joint name="joint_Rear_Left"/>
+  <passive_joint name="joint_Front_Right"/>
+  <passive_joint name="joint_Front_Left"/>
+  <passive_joint name="joint_Rear_Right"/>
+
+  <!-- Mobile-base adjacency. Structural frame members remain collision
+       geometry so the arm plans around the physical camera/frame assembly. -->
+  <disable_collisions link1="base_footprint" link2="base_link" reason="Adjacent"/>
+  <disable_collisions link1="base_link" link2="baseup_link" reason="Adjacent"/>
+  <disable_collisions link1="base_link" link2="Rear_Left" reason="Adjacent"/>
+  <disable_collisions link1="base_link" link2="Rear_Right" reason="Adjacent"/>
+  <disable_collisions link1="base_link" link2="Front_Left" reason="Adjacent"/>
+  <disable_collisions link1="base_link" link2="Front_Right" reason="Adjacent"/>
+  <disable_collisions link1="baseup_link" link2="lidar_link" reason="Adjacent"/>
+  <disable_collisions link1="baseup_link" link2="rx200/base_link" reason="Adjacent"/>
+
+  <!-- Camera-head adjacency. -->
+  <disable_collisions link1="alu3030_blue_camera_top" link2="head_yaw_link" reason="Adjacent"/>
+  <disable_collisions link1="head_yaw_link" link2="head_pitch_link" reason="Adjacent"/>
+  <disable_collisions link1="head_pitch_link" link2="camera_bottom_screw_frame" reason="Adjacent"/>
+  <disable_collisions link1="head_pitch_link" link2="camera_link" reason="Adjacent"/>
+  <disable_collisions link1="camera_bottom_screw_frame" link2="camera_link" reason="Adjacent"/>
+
+  <!-- Standard RX200 adjacent and known-safe collision pairs. -->
+  <disable_collisions link1="rx200/base_link" link2="rx200/shoulder_link" reason="Adjacent"/>
+  <disable_collisions link1="rx200/shoulder_link" link2="rx200/upper_arm_link" reason="Adjacent"/>
+  <disable_collisions link1="rx200/upper_arm_link" link2="rx200/forearm_link" reason="Adjacent"/>
+  <disable_collisions link1="rx200/forearm_link" link2="rx200/wrist_link" reason="Adjacent"/>
+  <disable_collisions link1="rx200/wrist_link" link2="rx200/gripper_link" reason="Adjacent"/>
+  <disable_collisions link1="rx200/gripper_link" link2="rx200/ee_arm_link" reason="Adjacent"/>
+  <disable_collisions link1="rx200/ee_arm_link" link2="rx200/gripper_prop_link" reason="Adjacent"/>
+  <disable_collisions link1="rx200/ee_arm_link" link2="rx200/gripper_bar_link" reason="Adjacent"/>
+  <disable_collisions link1="rx200/gripper_bar_link" link2="rx200/fingers_link" reason="Adjacent"/>
+  <disable_collisions link1="rx200/fingers_link" link2="rx200/left_finger_link" reason="Adjacent"/>
+  <disable_collisions link1="rx200/fingers_link" link2="rx200/right_finger_link" reason="Adjacent"/>
+  <disable_collisions link1="rx200/fingers_link" link2="rx200/ee_gripper_link" reason="Adjacent"/>
+  <disable_collisions link1="rx200/forearm_link" link2="rx200/gripper_link" reason="Never"/>
+  <disable_collisions link1="rx200/forearm_link" link2="rx200/gripper_bar_link" reason="Never"/>
+  <disable_collisions link1="rx200/forearm_link" link2="rx200/gripper_prop_link" reason="Never"/>
+  <disable_collisions link1="rx200/wrist_link" link2="rx200/gripper_bar_link" reason="Never"/>
+  <disable_collisions link1="rx200/wrist_link" link2="rx200/gripper_prop_link" reason="Never"/>
+  <disable_collisions link1="rx200/left_finger_link" link2="rx200/right_finger_link" reason="Never"/>
+
+  <!-- The wrist camera is rigidly mounted to the wrist/gripper assembly. -->
+  <disable_collisions link1="rx200_wrist_camera_link" link2="rx200/gripper_link" reason="Adjacent"/>
+  <disable_collisions link1="rx200_wrist_camera_link" link2="rx200/ee_arm_link" reason="Adjacent"/>
+  <disable_collisions link1="rx200_wrist_camera_link" link2="rx200/gripper_prop_link" reason="Adjacent"/>
+  <disable_collisions link1="rx200_wrist_camera_link" link2="rx200/gripper_bar_link" reason="Adjacent"/>
+  <disable_collisions link1="rx200_wrist_camera_link" link2="rx200/wrist_link" reason="Never"/>
+</robot>

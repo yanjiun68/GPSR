@@ -374,11 +374,20 @@ Compare currently perceived objects and select one according to an attribute.
 Supported semantic mappings include:
 - smallest -> attribute=size, mode=smallest
 - largest -> attribute=size, mode=largest
-- lightest -> attribute=weight, mode=lightest
-- heaviest -> attribute=weight, mode=heaviest
+- nearest to a named reference -> mode=nearest, reference_object=<OBJECT>
+- furthest from a named reference -> mode=furthest, reference_object=<OBJECT>
+
+The current perception system does NOT measure weight. Never emit lightest or
+heaviest comparisons. Ask for clarification or report that the requested
+attribute is unsupported.
+
+Nearest and furthest are image-space comparisons, not metric distance. They
+MUST include reference_object. Never emit nearest or furthest without a named
+visible reference.
 
 Preconditions:
-- Relevant objects must already have been observed.
+- FIND_EXTREME_OBJECT performs its live scene observation through the executable
+  FIND_OBJECT primitive. A separate OBSERVE action is not required.
 
 Postcondition:
 - The selected object may be referenced as selected_object.
@@ -593,7 +602,7 @@ Rules:
 - If the speech is directed to a remote person, navigate to and find that person first when required.
 
 
-SPEAK_RESULT()
+SPEAK_RESULT(attribute optional)
 
 Purpose:
 Speak the most recent retained result produced by a perception, comparison, counting, description, or query operation.
@@ -602,6 +611,16 @@ Rules:
 - The result remains available while the robot navigates back to the intended listener.
 - SPEAK_RESULT does NOT need to be immediately adjacent to the result-producing action.
 - If the user says "tell me", "report to me", or equivalent and the robot must leave command_origin to obtain the result, return to requester before SPEAK_RESULT.
+- To report one perceived object attribute, use params {"attribute": "color"},
+  {"attribute": "shape"}, or {"attribute": "orientation"}.
+- SPEAK_RESULT must follow a result-producing FIND_OBJECT, FIND_EXTREME_OBJECT,
+  COUNT_OBJECTS, or COUNT_PEOPLE action.
+
+ActionQueue parameter contract for an attribute report:
+{
+  "skill": "SPEAK_RESULT",
+  "params": {"attribute": "color"}
+}
 
 ==================================================
 GENERAL PLANNING RULES
@@ -803,18 +822,39 @@ REPORT EXTREME OBJECT TO REQUESTER
 Command patterns:
 "Tell me the smallest object in <location>"
 "Tell me the largest object on <location>"
-"What is the lightest object in <location>?"
+"Tell me the object nearest to the cup in <location>"
 
 Required expansion:
 
 1. MOVE_TO(location)
-2. OBSERVE(location)
-3. FIND_EXTREME_OBJECT(attribute, mode)
-4. MOVE_TO(command_origin)
-5. FIND_PERSON(requester)
-6. SPEAK_RESULT()
+2. FIND_EXTREME_OBJECT(attribute, mode, and reference_object when required)
+3. MOVE_TO(command_origin)
+4. FIND_PERSON(requester)
+5. SPEAK_RESULT()
 
-Do NOT insert COUNT_OBJECTS merely to identify the smallest, largest, lightest, or heaviest object.
+Do NOT insert COUNT_OBJECTS merely to identify the smallest, largest, nearest,
+or furthest object.
+
+
+------------------------------
+DESCRIBE AN OBJECT ATTRIBUTE
+------------------------------
+
+Command patterns:
+"What color is the bottle in <location>?"
+"Tell me the color of the cup on <location>."
+
+Required expansion:
+
+1. MOVE_TO(location)
+2. FIND_OBJECT(object)
+3. MOVE_TO(command_origin)
+4. FIND_PERSON(requester)
+5. SPEAK_RESULT(attribute=color)
+
+Use the same pattern with attribute=shape or attribute=orientation when that
+observable attribute is explicitly requested. Do not invent attributes that
+were not returned by perception.
 
 
 ------------------------------

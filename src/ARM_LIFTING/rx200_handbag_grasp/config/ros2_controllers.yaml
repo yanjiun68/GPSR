@@ -32,8 +32,26 @@
       action_monitor_rate: 50.0       # was 20.0
       allow_partial_joints_goal: false
       constraints:
-        stopped_velocity_tolerance: 0.02
-        goal_time: 2.0
+        # Allow the arm additional settling time after the trajectory duration.
+        # These tolerances are intentionally explicit so every joint is checked
+        # consistently instead of relying on controller defaults.
+        stopped_velocity_tolerance: 0.05
+        goal_time: 5.0
+        waist:
+          trajectory: 0.05
+          goal: 0.05
+        shoulder:
+          trajectory: 0.05
+          goal: 0.05
+        elbow:
+          trajectory: 0.05
+          goal: 0.05
+        wrist_angle:
+          trajectory: 0.05
+          goal: 0.05
+        wrist_rotate:
+          trajectory: 0.05
+          goal: 0.05
 
   gripper_controller:
     ros__parameters:

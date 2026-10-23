@@ -8,9 +8,9 @@ target_grasp_geometry:
     external_roi_timeout_sec: 1.5
     # Section: Reject a Qwen ROI whose source image does not match the RGB-D bundle used for mesh reconstruction.
     max_external_roi_rgb_time_difference: 0.05
-    rgb_topic: /camera/camera/color/image_raw
-    depth_topic: /camera/camera/aligned_depth_to_color/image_raw
-    camera_info_topic: /camera/camera/color/camera_info
+    rgb_topic: /astra/color/image_raw
+    depth_topic: /astra/depth/image_raw
+    camera_info_topic: /astra/color/camera_info
 
     # Section: Required and optional perception outputs.
     mask_topic: /vision/target_mask

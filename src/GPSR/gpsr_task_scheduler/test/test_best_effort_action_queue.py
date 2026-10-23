@@ -176,6 +176,112 @@ def test_qwen_omitted_dependency_stays_empty_and_explicit_dependency_survives():
     assert [list(step.requires_success) for step in queue.steps] == [[], [], ["a"]]
 
 
+def test_qwen_compiles_extreme_object_report_into_find_and_say():
+    """Special function: Execute semantic observation/report actions with existing primitives."""
+    payload = json.dumps({
+        "task_id": "qwen_extreme_report",
+        "actions": [
+            {"skill": "MOVE_TO", "params": {"location": "kitchen_table"}},
+            {"skill": "OBSERVE", "params": {"location": "kitchen_table"}},
+            {
+                "skill": "FIND_EXTREME_OBJECT",
+                "params": {"attribute": "size", "mode": "largest"},
+            },
+            {"skill": "SPEAK_RESULT", "params": {}},
+        ],
+    })
+
+    queue = parse_qwen_action_queue(
+        payload,
+        default_timeout_sec=30.0,
+        default_retries=0,
+    )
+
+    assert [step.action_type for step in queue.steps] == ["NAVIGATE", "FIND_OBJECT", "SAY"]
+    find_step, say_step = queue.steps[1:]
+    find_params = json.loads(find_step.parameters_json)
+    say_params = json.loads(say_step.parameters_json)
+    assert find_step.target_category == "objects"
+    assert find_step.result_variable == "qwen_result_2"
+    assert {
+        "feature": "size_relation",
+        "operator": "equals",
+        "value": "largest",
+    } in find_params["filters"]
+    assert say_params == {
+        "text_template": "The {name} is the largest object I perceived.",
+        "substitution": "qwen_result_2",
+    }
+    assert list(say_step.requires_success) == [find_step.step_id]
+    assert list(say_step.requires_data) == ["qwen_result_2"]
+
+
+def test_qwen_compiles_perceived_color_report_and_requests_color_evidence():
+    """Special function: Bind a color report to validated FIND_OBJECT evidence."""
+    payload = json.dumps({
+        "actions": [
+            {"skill": "FIND_OBJECT", "params": {"object": "bottle"}},
+            {"skill": "SPEAK_RESULT", "params": {"attribute": "color"}},
+        ],
+    })
+
+    queue = parse_qwen_action_queue(
+        payload,
+        default_timeout_sec=30.0,
+        default_retries=0,
+    )
+
+    find_step, say_step = queue.steps
+    find_params = json.loads(find_step.parameters_json)
+    say_params = json.loads(say_step.parameters_json)
+    assert find_params["query"]["requested_fields"] == ["color"]
+    assert say_params["text_template"] == (
+        "The perceived color of the {name} is {attributes.color}."
+    )
+    assert say_params["substitution"] == find_step.result_variable
+
+
+@pytest.mark.parametrize(
+    ("mode", "relation"),
+    [("nearest", "near"), ("furthest", "far_from")],
+)
+def test_qwen_extreme_distance_requires_and_preserves_reference(mode: str, relation: str):
+    """Special function: Keep near/far claims explicitly relative and image-space."""
+    payload = json.dumps({
+        "actions": [{
+            "skill": "FIND_EXTREME_OBJECT",
+            "params": {"mode": mode, "reference_object": "cup"},
+        }],
+    })
+
+    queue = parse_qwen_action_queue(
+        payload,
+        default_timeout_sec=30.0,
+        default_retries=0,
+    )
+    params = json.loads(queue.steps[0].parameters_json)
+    assert {
+        "feature": "spatial_relation",
+        "operator": "equals",
+        "value": relation,
+    } in params["filters"]
+    assert {
+        "feature": "reference_object",
+        "operator": "equals",
+        "value": "cup",
+    } in params["filters"]
+
+
+def test_qwen_rejects_result_speech_without_a_producer():
+    """Special function: Prevent result speech from fabricating absent perception data."""
+    with pytest.raises(ValueError, match="earlier result-producing action"):
+        parse_qwen_action_queue(
+            json.dumps({"actions": [{"skill": "SPEAK_RESULT", "params": {}}]}),
+            default_timeout_sec=30.0,
+            default_retries=0,
+        )
+
+
 @pytest.mark.parametrize("dependency", ["missing", "future"])
 def test_qwen_rejects_unknown_or_future_dependencies(dependency: str):
     """Special function: Verify explicit malformed Qwen dependencies remain admission errors."""

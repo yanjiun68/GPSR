@@ -15,5 +15,6 @@
     "SAY": {"conflict_group": "", "lifecycle_nodes": [], "execution_interface": "/voice/tts/say", "interface_type": "voice_interfaces/srv/SayText", "implementation": "real", "production_enabled": true, "legacy_aliases": ["REPORT", "GREET"]},
     "ASK_AND_LISTEN": {"conflict_group": "", "lifecycle_nodes": [], "execution_interface": "/voice/stt", "interface_type": "voice topics plus voice_interfaces/srv/SayText", "implementation": "real", "production_enabled": true, "legacy_aliases": ["ASK"]},
     "FIXED_INFORMATION": {"conflict_group": "", "lifecycle_nodes": [], "execution_interface": "/fixed_information/query + /fixed_information/answer", "interface_type": "std_msgs/msg/String JSON request-response plus voice_interfaces/srv/SayText", "implementation": "real", "production_enabled": true, "legacy_aliases": []}
+    ,"COMPARE_OBJECTS": {"conflict_group": "vision_gpu", "lifecycle_nodes": [], "execution_interface": "in-process perception comparison", "interface_type": "local skill client", "implementation": "simulated", "production_enabled": false, "legacy_aliases": []}
   }
 }

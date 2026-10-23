@@ -1,0 +1,30 @@
+controller_names:
+  - /rx200/arm_controller
+  - /rx200/gripper_controller
+  - /head/motor_controller
+
+/rx200/arm_controller:
+  action_ns: follow_joint_trajectory
+  type: FollowJointTrajectory
+  default: true
+  joints:
+    - waist
+    - shoulder
+    - elbow
+    - wrist_angle
+    - wrist_rotate
+
+/rx200/gripper_controller:
+  action_ns: follow_joint_trajectory
+  type: FollowJointTrajectory
+  default: true
+  joints:
+    - left_finger
+
+/head/motor_controller:
+  action_ns: follow_joint_trajectory
+  type: FollowJointTrajectory
+  default: true
+  joints:
+    - head_yaw_joint
+    - head_pitch_joint

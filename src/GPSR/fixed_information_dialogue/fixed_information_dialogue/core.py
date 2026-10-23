@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 import re
 import unicodedata
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import yaml
 
 FOUND = "FOUND"
@@ -55,7 +56,19 @@ class FixedInformationStore:
         matching = raw.get("matching", {}) or {}
         self.match_threshold = float(matching.get("threshold", 0.82))
         self.ambiguity_margin = float(matching.get("ambiguity_margin", 0.05))
-        self.timezone_label = str(raw.get("timezone_label", "local"))
+        timezone = raw.get("timezone", {}) or {}
+        if not isinstance(timezone, dict):
+            raise ValueError("timezone must be a mapping with name and label")
+        self.timezone_name = str(timezone.get("name", "")).strip()
+        self.timezone_label = str(timezone.get("label", self.timezone_name)).strip()
+        if not self.timezone_name:
+            raise ValueError("timezone.name must be a non-empty IANA timezone")
+        try:
+            self.timezone = ZoneInfo(self.timezone_name)
+        except ZoneInfoNotFoundError as exc:
+            raise ValueError(
+                f"timezone.name is not a valid installed IANA timezone: {self.timezone_name}"
+            ) from exc
         self.entries = self._validate(raw.get("static_entries", {}) or {}, "static_entries")
         self.runtime_entries = self._validate(raw.get("runtime_entries", {}) or {}, "runtime_entries")
 
@@ -116,7 +129,14 @@ class FixedInformationStore:
         if source == "STATIC_KB":
             answer = str(entry.get("answer", "")).strip()
         else:
-            answer = self._runtime_answer(entry.get("handler"), now or datetime.now())
+            clock = now or datetime.now(self.timezone)
+            if clock.tzinfo is None:
+                clock = clock.replace(tzinfo=self.timezone)
+            else:
+                clock = clock.astimezone(self.timezone)
+            answer = self._runtime_answer(
+                entry.get("handler"), clock
+            )
 
         if not answer:
             return MatchResult(
@@ -130,7 +150,10 @@ class FixedInformationStore:
             confidence=score,
             source=source,
             candidates=(key,),
-            metadata={"timezone_label": self.timezone_label},
+            metadata={
+                "timezone": self.timezone_name,
+                "timezone_label": self.timezone_label,
+            },
         )
 
     def _runtime_answer(self, handler: Any, now: datetime) -> Optional[str]:

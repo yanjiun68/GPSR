@@ -1,0 +1,27 @@
+<?xml version="1.0"?>
+<!-- Gazebo Fortress owns the simulated head joints. Feedback comes from the
+     robot's single existing JointStatePublisher, not from this controller. -->
+<robot xmlns:xacro="http://ros.org/wiki/xacro">
+  <xacro:macro name="head_gazebo_control" params="topic:=/head/joint_trajectory">
+    <gazebo>
+      <plugin filename="libignition-gazebo-joint-trajectory-controller-system.so"
+              name="ignition::gazebo::systems::JointTrajectoryController">
+        <topic>${topic}</topic>
+        <joint_name>head_yaw_joint</joint_name>
+        <initial_position>0.0</initial_position>
+        <position_p_gain>25.0</position_p_gain>
+        <position_i_gain>0.0</position_i_gain>
+        <position_d_gain>2.0</position_d_gain>
+        <position_cmd_min>-2.0</position_cmd_min>
+        <position_cmd_max>2.0</position_cmd_max>
+        <joint_name>head_pitch_joint</joint_name>
+        <initial_position>0.0</initial_position>
+        <position_p_gain>25.0</position_p_gain>
+        <position_i_gain>0.0</position_i_gain>
+        <position_d_gain>2.0</position_d_gain>
+        <position_cmd_min>-2.0</position_cmd_min>
+        <position_cmd_max>2.0</position_cmd_max>
+      </plugin>
+    </gazebo>
+  </xacro:macro>
+</robot>

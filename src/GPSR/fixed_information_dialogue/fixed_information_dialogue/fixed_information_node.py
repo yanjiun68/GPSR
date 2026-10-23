@@ -84,7 +84,7 @@ class FixedInformationDialogueNode(Node):
             "candidates": list(result.candidates),
             "metadata": result.metadata or {},
             "context": context,
-            "answered_at": datetime.now().astimezone().isoformat(),
+            "answered_at": datetime.now(self.store.timezone).isoformat(),
         }
         out = String()
         out.data = json.dumps(payload, ensure_ascii=False)

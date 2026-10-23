@@ -41,6 +41,8 @@ def parse_command(command_id: str, instruction: str, config: SchedulerConfig) ->
     task_location = _task_location(text, known_locations, report_location)
     recipient = _recipient(text, config)
     target = _target(text, task_type, config)
+    if task_type == "compare_objects":
+        target["property"] = _comparison_property(text)
     filters = _filters(text, config, task_type)
     person_selector, person_issues = _person_selector(text, task_type, filters, config)
     requested_person_fields = _requested_person_fields(text, task_type)
@@ -70,6 +72,11 @@ def parse_command(command_id: str, instruction: str, config: SchedulerConfig) ->
         issues.append(ValidationIssue("missing_task_location", "Place requires a known destination or surface."))
     if task_type in {"acquire_object", "place_object", "deliver_object"} and not target.get("object_name"):
         issues.append(ValidationIssue("missing_target", "Object manipulation requires a known object target."))
+    if task_type == "compare_objects":
+        if not target.get("property"):
+            issues.append(ValidationIssue("missing_comparison_property", "Comparison requires a supported property."))
+        if len(target.get("object_names", [])) < 2 and not target.get("category"):
+            issues.append(ValidationIssue("missing_target", "Object comparison requires at least two known objects or a category."))
     if issues:
         return None, issues
     return TaskRequest(
@@ -237,6 +244,10 @@ def _detect_task_type(text: str, config: SchedulerConfig) -> str:
         r"\b(?:person|guest|someone|man|woman)\b", text
     ):
         return "find_person"
+    if re.search(r"\b(?:compare|which)\b.*\b(?:biggest|largest|smallest|heaviest|lightest|thinnest)\b", text) or re.search(
+        r"\b(?:biggest|largest|smallest|heaviest|lightest|thinnest)\b.*\b(?:object|item|one)\b", text
+    ):
+        return "compare_objects"
     if re.search(r"\b(how many|count)\b.*\b(people|persons|humans)\b", text):
         return "count_people"
     if re.search(r"\b(how many|count)\b", text):
@@ -486,6 +497,20 @@ def _is_fixed_information_query(text: str) -> bool:
 
 def _target(text: str, task_type: str, config: SchedulerConfig) -> dict[str, Any]:
     """Special function: Resolve object/category target semantics."""
+    if task_type == "compare_objects":
+        objects = [
+            config.object_aliases.get(object_name, object_name)
+            for object_name in config.known_objects
+            if re.search(rf"\b{re.escape(object_name.replace('_', ' '))}s?\b", text)
+        ]
+        if objects:
+            return {"object_names": sorted(set(objects))}
+        for category in config.known_categories:
+            if re.search(rf"\b{re.escape(category.replace('_', ' '))}s?\b", text):
+                return {"category": category}
+        if re.search(r"\b(?:object|objects|item|items)\b", text):
+            return {"category": "objects"}
+        return {}
     if task_type not in {"find_object", "count_objects", "acquire_object", "place_object", "deliver_object"}:
         return {}
     for object_name in config.known_objects:
@@ -495,6 +520,18 @@ def _target(text: str, task_type: str, config: SchedulerConfig) -> dict[str, Any
         if re.search(rf"\b{re.escape(category.replace('_', ' '))}s?\b", text):
             return {"category": category}
     return {}
+
+
+def _comparison_property(text: str) -> str:
+    """Special function: Resolve the canonical property used by COMPARE_OBJECTS."""
+    aliases = {
+        "biggest": "biggest", "largest": "largest", "smallest": "smallest",
+        "heaviest": "heaviest", "lightest": "lightest", "thinnest": "thinnest",
+    }
+    for phrase, canonical in aliases.items():
+        if re.search(rf"\b{phrase}\b", text):
+            return canonical
+    return ""
 
 
 def strip_object_mentions(text: str, config: SchedulerConfig) -> str:
@@ -563,6 +600,8 @@ def _output_template(text: str, task_type: str, requested_person_fields: list[st
         return "I counted {result.count} people."
     if task_type == "count_objects":
         return "I counted {result.count} objects."
+    if task_type == "compare_objects":
+        return "The {result.selected_object} is the {property}."
     if task_type == "find_person":
         fields = list(requested_person_fields or [])
         if fields == ["name"]:

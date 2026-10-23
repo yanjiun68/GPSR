@@ -74,8 +74,19 @@ def _launch_arena(context):
     sim_share = get_package_share_directory('gz_sim')
     mesh_share = get_package_share_directory('robot_description')
     agx_arm_share = get_package_share_directory('agx_arm_description')
+    head_enabled = arg('enable_head_gimbal').lower()
+    frame_enabled = arg('enable_aluminium_frame').lower()
+    if head_enabled not in ('true', 'false'):
+        raise ValueError('enable_head_gimbal must be true or false')
+    if frame_enabled not in ('true', 'false'):
+        raise ValueError('enable_aluminium_frame must be true or false')
     robot_xml = xacro.process_file(
-        os.path.join(mesh_share, 'urdf', 'sim', 'my_car_rx200.urdf.xacro')
+        os.path.join(mesh_share, 'urdf', 'sim', 'my_car_rx200.urdf.xacro'),
+        mappings={
+            'arm_model': 'rx200',
+            'enable_head_gimbal': head_enabled,
+            'enable_aluminium_frame': frame_enabled,
+        },
     ).toxml()
     camera_enabled = arg('enable_camera').lower()
     if camera_enabled not in ('true', 'false'):
@@ -202,6 +213,10 @@ def generate_launch_description():
         DeclareLaunchArgument('headless', default_value='false'),
         DeclareLaunchArgument('enable_camera', default_value='true',
                               description='Enable RGB-D rendering; disable for faster SLAM'),
+        DeclareLaunchArgument('enable_head_gimbal', default_value='true',
+                              description='Enable the two-axis mast camera head'),
+        DeclareLaunchArgument('enable_aluminium_frame', default_value='true',
+                              description='Enable the aluminium superstructure'),
         DeclareLaunchArgument('washer_panel', default_value='true',
                               description='Show washer controls when GUI is enabled'),
         OpaqueFunction(function=_launch_arena),

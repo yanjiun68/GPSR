@@ -42,9 +42,7 @@ except ImportError as exc:
 # Section: Bound external target text before it becomes part of the fixed model prompt.
 MAX_TARGET_TEXT_LENGTH = 128
 
-# Section: Qwen returns boxes in one stable normalized coordinate system for resolver compatibility.
-DEFAULT_COORDINATE_WIDTH = 1000
-DEFAULT_COORDINATE_HEIGHT = 1000
+# Section: ER-Flow returns boxes in source-image pixel coordinates for direct RGB-D alignment.
 
 
 @dataclass(frozen=True)
@@ -174,19 +172,74 @@ def parse_target_request(raw_text: str) -> TargetRequest:
 
 def extract_json_object(model_text: str) -> dict[str, Any]:
     """Special function: Extract exactly one JSON object from a Qwen response with optional Markdown fencing."""
-    # Section: Trim common code fences before strict JSON parsing because models occasionally add them.
+    # Section: Remove one common Markdown fence while retaining strict JSON parsing.
     text = str(model_text or "").strip()
     if text.startswith("```"):
-        text = text.strip("`").removeprefix("json").strip()
+        lines = text.splitlines()
+        lines = lines[1:] if lines and lines[0].strip().startswith("```") else lines
+        lines = lines[:-1] if lines and lines[-1].strip().startswith("```") else lines
+        text = "\n".join(lines).strip()
     # Section: Recover one outer object only; prose without a JSON object remains invalid.
     start = text.find("{")
     end = text.rfind("}")
     if start < 0 or end <= start:
         raise ValueError("Qwen response does not contain a complete JSON object.")
-    payload = json.loads(text[start : end + 1])
+    json_text = text[start : end + 1]
+    try:
+        payload = json.loads(json_text)
+    except json.JSONDecodeError as exc:
+        # Section: Include a bounded raw response so malformed ER-Flow output is diagnosable from ROS logs.
+        preview = json_text[:1000]
+        raise ValueError(
+            f"ER-Flow returned invalid JSON at character {exc.pos}: {exc.msg}; raw={preview!r}"
+        ) from exc
     if not isinstance(payload, dict):
         raise ValueError("Qwen response must decode to a JSON object.")
     return payload
+
+
+def validate_model_output(payload: dict[str, Any], width: int, height: int) -> None:
+    """Validate the model's two-case contract in source-image pixel coordinates."""
+    if set(payload) != {"found", "bbox", "point_2d", "confidence"}:
+        raise ValueError("Output must contain exactly found, bbox, point_2d, and confidence.")
+    found, bbox, point, confidence = (payload[k] for k in ("found", "bbox", "point_2d", "confidence"))
+    if not isinstance(found, bool):
+        raise ValueError("found must be a boolean.")
+    if isinstance(confidence, bool) or not isinstance(confidence, (int, float)) or not math.isfinite(confidence) or not 0 <= confidence <= 1:
+        raise ValueError("confidence must be a finite number between 0 and 1.")
+    if not found:
+        if bbox is not None or point is not None or confidence != 0:
+            raise ValueError("A missing target requires null bbox and point_2d and zero confidence.")
+        return
+    if bbox is None and point is None:
+        raise ValueError("A found target requires a bbox or point_2d.")
+    def valid_integer_list(value: Any, length: int) -> bool:
+        return isinstance(value, list) and len(value) == length and all(type(v) is int for v in value)
+    if bbox is not None:
+        if not valid_integer_list(bbox, 4):
+            raise ValueError("bbox must be a flat array of four integer pixels or null.")
+        left, top, right, bottom = bbox
+        if not (0 <= left < right <= width and 0 <= top < bottom <= height):
+            raise ValueError(f"bbox must be ordered and within {width}x{height} pixels.")
+    if point is not None:
+        if not valid_integer_list(point, 2) or not (0 <= point[0] < width and 0 <= point[1] < height):
+            raise ValueError(f"point_2d must be two integer pixels within {width}x{height}.")
+
+
+def generate_validated_output(generate, validate, logger):
+    """Try once more with a correction instruction when model output is invalid."""
+    correction = ""
+    for attempt in range(2):
+        raw = generate(correction)
+        try:
+            payload = extract_json_object(raw)
+            validate(payload)
+            return payload
+        except (ValueError, TypeError, OverflowError) as exc:
+            logger.warning(f"Invalid ER-Flow output (attempt {attempt + 1}/2): {str(exc)[:300]}; raw={raw[:1000]!r}")
+            if attempt == 1:
+                raise ValueError(f"Invalid model output after two attempts: {str(exc)[:300]}") from exc
+            correction = "Your previous response was invalid. Return a fresh response that exactly follows the JSON schema and pixel bounds."
 
 
 def scale_bbox_to_pixels(
@@ -196,7 +249,7 @@ def scale_bbox_to_pixels(
     image_width: int,
     image_height: int,
 ) -> list[int]:
-    """Special function: Convert normalized Qwen ROI coordinates into bounded Astra RGB pixels."""
+    """Special function: Convert declared ROI coordinates into bounded Astra RGB pixels."""
     # Section: Reject impossible dimensions before applying model-controlled coordinates.
     if min(coordinate_width, coordinate_height, image_width, image_height) <= 0:
         raise ValueError("ROI coordinate and image dimensions must be positive.")
@@ -215,14 +268,24 @@ def normalize_qwen_roi(
     image_width: int,
     image_height: int,
     minimum_confidence: float,
+    point_roi_width_px: int = 64,
+    point_roi_height_px: int = 64,
 ) -> dict[str, Any]:
     """Special function: Validate Qwen grounding JSON and emit a resolver-ready ROI result."""
-    # Section: Restrict model status to an explicit public vocabulary rather than guessing missing results.
-    status = str(payload.get("status", "")).strip().casefold()
-    # Section: Accept the prompt's compatibility alias but expose only the four public ROI statuses.
-    status = "ok" if status == "found" else status
-    if status not in {"ok", "not_found", "ambiguous", "uncertain"}:
-        raise ValueError("Qwen ROI status must be ok, not_found, ambiguous, or uncertain.")
+    # Section: ER-Flow's canonical contract is found/bbox/confidence; retain the former status contract as a fallback.
+    found_value = payload.get("found")
+    if found_value is not None:
+        if not isinstance(found_value, bool):
+            raise ValueError("ER-Flow field 'found' must be a JSON boolean.")
+        status = "ok" if found_value else "not_found"
+        bbox_value = payload.get("bbox")
+    else:
+        # Section: Accept older local callers while migrating all prompts to the ER-Flow schema.
+        status = str(payload.get("status", "")).strip().casefold()
+        status = "ok" if status == "found" else status
+        bbox_value = payload.get("bbox_2d", payload.get("bbox"))
+        if status not in {"ok", "not_found", "ambiguous", "uncertain"}:
+            raise ValueError("ER-Flow ROI status must be ok, not_found, ambiguous, or uncertain.")
     # Section: Program-owned request identity prevents the model from retargeting a caller's object.
     result: dict[str, Any] = {
         "status": status,
@@ -232,26 +295,68 @@ def normalize_qwen_roi(
         "coordinate_height": None,
         "bbox_pixels": None,
         "confidence": None,
+        "roi_source": None,
     }
     if status != "ok":
         return result
-    # Section: A found target requires four finite, ordered coordinates in a declared coordinate system.
-    bbox_value = payload.get("bbox_2d", payload.get("bbox"))
-    if not isinstance(bbox_value, list) or len(bbox_value) != 4:
-        raise ValueError("Found Qwen ROI requires bbox_2d with four values.")
-    bbox = tuple(float(value) for value in bbox_value)
-    if not all(math.isfinite(value) for value in bbox) or bbox[2] <= bbox[0] or bbox[3] <= bbox[1]:
-        raise ValueError("Qwen ROI coordinates must be finite and ordered.")
-    coordinate_width = int(payload.get("coordinate_width", DEFAULT_COORDINATE_WIDTH))
-    coordinate_height = int(payload.get("coordinate_height", DEFAULT_COORDINATE_HEIGHT))
+    # Section: ER-Flow normally reports source-image pixels; optional dimensions remain compatibility-only.
+    coordinate_width = int(payload.get("coordinate_width", image_width))
+    coordinate_height = int(payload.get("coordinate_height", image_height))
     if coordinate_width <= 0 or coordinate_height <= 0:
-        raise ValueError("Qwen ROI coordinate dimensions must be positive.")
-    if bbox[0] < 0.0 or bbox[1] < 0.0 or bbox[2] > coordinate_width or bbox[3] > coordinate_height:
-        raise ValueError("Qwen ROI lies outside its declared coordinate system.")
+        raise ValueError("ER-Flow ROI coordinate dimensions must be positive.")
+    point_value = payload.get("point_2d", payload.get("point"))
+    roi_source = "bbox"
+    bbox: tuple[float, float, float, float]
+    bbox_is_usable = isinstance(bbox_value, list) and len(bbox_value) == 4
+    if bbox_is_usable:
+        try:
+            candidate_bbox = tuple(float(value) for value in bbox_value)
+            bbox_is_usable = (
+                all(math.isfinite(value) for value in candidate_bbox)
+                and candidate_bbox[2] > candidate_bbox[0]
+                and candidate_bbox[3] > candidate_bbox[1]
+                and candidate_bbox[0] >= 0.0
+                and candidate_bbox[1] >= 0.0
+                and candidate_bbox[2] <= coordinate_width
+                and candidate_bbox[3] <= coordinate_height
+            )
+        except (TypeError, ValueError):
+            bbox_is_usable = False
+    if bbox_is_usable:
+        bbox = candidate_bbox
+    else:
+        # Section: A point anchor can seed depth sampling and tracking without trusting a malformed object box.
+        if not isinstance(point_value, list) or len(point_value) != 2:
+            raise ValueError("Found ER-Flow ROI requires bbox or point_2d with valid coordinates.")
+        try:
+            point_x, point_y = (float(value) for value in point_value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("ER-Flow point_2d coordinates must be numeric.") from exc
+        if (
+            not math.isfinite(point_x)
+            or not math.isfinite(point_y)
+            or point_x < 0.0
+            or point_y < 0.0
+            or point_x > coordinate_width
+            or point_y > coordinate_height
+        ):
+            raise ValueError("ER-Flow point_2d lies outside its declared coordinate system.")
+        source_x = point_x * image_width / coordinate_width
+        source_y = point_y * image_height / coordinate_height
+        half_width = max(4, int(point_roi_width_px) // 2)
+        half_height = max(4, int(point_roi_height_px) // 2)
+        left = max(0, min(image_width - 1, int(round(source_x)) - half_width))
+        top = max(0, min(image_height - 1, int(round(source_y)) - half_height))
+        right = min(image_width, max(left + 1, int(round(source_x)) + half_width))
+        bottom = min(image_height, max(top + 1, int(round(source_y)) + half_height))
+        bbox = (float(left), float(top), float(right), float(bottom))
+        coordinate_width = int(image_width)
+        coordinate_height = int(image_height)
+        roi_source = "point"
     # Section: Confidence gates suppress weak model boxes before they reach a depth resolver.
     confidence = float(payload.get("confidence", 0.0))
     if not math.isfinite(confidence) or confidence < 0.0 or confidence > 1.0:
-        raise ValueError("Qwen ROI confidence must be between zero and one.")
+        raise ValueError("ER-Flow ROI confidence must be between zero and one.")
     if confidence < float(minimum_confidence):
         result["status"] = "uncertain"
         result["confidence"] = confidence
@@ -269,6 +374,7 @@ def normalize_qwen_roi(
                 int(image_height),
             ),
             "confidence": confidence,
+            "roi_source": roi_source,
         }
     )
     return result
@@ -289,9 +395,13 @@ class AstraCamQwenNode(Node):
         self.declare_parameter("annotated_image_topic", "/astra_cam_qw/annotated_image")
         # Section: Model controls use the installed Qwen3-VL-compatible UnifoLM ER-Flow checkpoint.
         self.declare_parameter("model_path", "/home/yanjiun68/ai/models/UnifoLM-ER-Flow")
+        # Section: Retain this launch parameter for compatibility; ER-Flow's processor controls image sizing.
         self.declare_parameter("image_size", 448)
         self.declare_parameter("max_new_tokens", 192)
         self.declare_parameter("minimum_confidence", 0.35)
+        # Section: Point-only grounding gets a small compatibility ROI for depth and tracker consumers.
+        self.declare_parameter("point_roi_width_px", 64)
+        self.declare_parameter("point_roi_height_px", 64)
         # Section: Heavy semantic inference is capped at 1 Hz while standard OpenCV tracking publishes at 20 Hz.
         self.declare_parameter("inference_rate_hz", 1.0)
         self.declare_parameter("tracking_rate_hz", 20.0)
@@ -534,20 +644,32 @@ class AstraCamQwenNode(Node):
             )
 
     @staticmethod
-    def _build_roi_prompt(request: TargetRequest) -> str:
-        """Special function: Build a fixed Qwen grounding contract for exactly one requested visual target."""
+    def _build_roi_prompt(request: TargetRequest, width: int, height: int) -> str:
+        """Special function: Build the canonical UnifoLM-ER-Flow target-grounding prompt."""
         # Section: JSON serialization makes target text data rather than free-form instruction content inside the prompt.
         target_json = json.dumps(request.target_id, ensure_ascii=False)
         return (
-            "You are a ROS 2 Astra camera ROI grounding system. Analyze only the supplied current RGB image.\n"
-            f"Find the visible target object described by this data: {target_json}.\n"
-            "Return exactly one JSON object and no Markdown or prose.\n"
-            "Use this schema exactly:\n"
-            '{"status":"ok|not_found|ambiguous|uncertain","bbox_2d":[x_min,y_min,x_max,y_max],'
-            '"coordinate_width":1000,"coordinate_height":1000,"confidence":0.0}\n'
-            "When status is ok, bbox_2d must be four ordered integer image coordinates in 0..1000.\n"
-            "When status is not_found, ambiguous, or uncertain, set bbox_2d to null and confidence to 0.0.\n"
-            "Do not estimate distance, map position, robot motion, or objects not visible in this image."
+            "You are the semantic ROI localization component of a real-time RGB-D robot perception pipeline.\n"
+            f"Target object: {target_json}\n"
+            f"The source image is {width} pixels wide and {height} pixels high.\n"
+            "Locate ONLY the requested target in the current RGB image.\n"
+            "Return the target ROI as a bounding box in CURRENT IMAGE PIXEL coordinates.\n"
+            "Do not estimate metric depth, camera coordinates, map coordinates, or robot motion.\n"
+            "Do not select a reflection, photograph, drawing, or heavily occluded entity.\n"
+            "If the target is not visible, return found=false.\n"
+            "Return EXACTLY one valid JSON object and no Markdown or explanation.\n"
+            "Use JSON syntax only: double quotes for keys and strings, no single quotes, comments, or trailing commas.\n"
+            "For a visible target, use this valid JSON shape:\n"
+            '{"found":true,"point_2d":[240,250],"bbox":[120,80,360,420],"confidence":0.90}\n'
+            "For a missing target, use exactly:\n"
+            '{"found":false,"bbox":null,"point_2d":null,"confidence":0.0}\n'
+            "Requirements: point_2d is [x,y] at the target center; bbox order is [left, top, right, bottom]; "
+            f"coordinates are integer source-image pixels: 0 <= left < right <= {width}, "
+            f"0 <= top < bottom <= {height}, 0 <= x < {width}, 0 <= y < {height}. "
+            "Do not use normalized coordinates. Confidence is from 0.0 to 1.0. "
+            "For found=true at least one of bbox and point_2d must be valid; use null for an unavailable field. "
+            "For found=false both bbox and point_2d must be null and confidence must be 0.0. "
+            "Return exactly these four keys; bbox must be a flat array, never nested."
         )
 
     def _run_inference(self, latest_frame: LatestFrame, request: TargetRequest, revision: int) -> None:
@@ -555,50 +677,50 @@ class AstraCamQwenNode(Node):
         try:
             # Section: Convert the copied RGB ndarray to the in-memory PIL image expected by Qwen3-VL.
             pil_image = PilImage.fromarray(latest_frame.rgb_image)
-            image_size = max(64, int(self.get_parameter("image_size").value))
-            messages = [
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "image",
-                            "image": pil_image,
-                            "resized_height": image_size,
-                            "resized_width": image_size,
-                        },
-                        {"type": "text", "text": self._build_roi_prompt(request)},
-                    ],
-                }
-            ]
-            # Section: Apply Qwen's chat template and place encoded image/text tensors on the selected model device.
-            inputs = self.processor.apply_chat_template(
-                messages,
-                tokenize=True,
-                add_generation_prompt=True,
-                return_dict=True,
-                return_tensors="pt",
-            ).to(self.model.device)
-            # Section: Deterministic decoding matches test_camera.py and makes repeated operator requests reproducible.
-            with self.torch.inference_mode():
-                output_ids = self.model.generate(
-                    **inputs,
-                    max_new_tokens=max(32, int(self.get_parameter("max_new_tokens").value)),
-                    do_sample=False,
-                )
-            # Section: Decode only completion tokens so prompt text cannot be mistaken for model JSON.
-            generated_ids = output_ids[:, inputs["input_ids"].shape[1] :]
-            model_text = self.processor.batch_decode(
-                generated_ids,
-                skip_special_tokens=True,
-                clean_up_tokenization_spaces=False,
-            )[0].strip()
-            raw_payload = extract_json_object(model_text)
+            width, height = int(latest_frame.rgb_image.shape[1]), int(latest_frame.rgb_image.shape[0])
+            prompt = self._build_roi_prompt(request, width, height)
+
+            def generate(correction):
+                messages = [
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "image", "image": pil_image},
+                            {"type": "text", "text": prompt + "\n" + correction},
+                        ],
+                    }
+                ]
+                inputs = self.processor.apply_chat_template(
+                    messages,
+                    tokenize=True,
+                    add_generation_prompt=True,
+                    return_dict=True,
+                    return_tensors="pt",
+                ).to(self.model.device)
+                with self.torch.inference_mode():
+                    output_ids = self.model.generate(
+                        **inputs,
+                        max_new_tokens=max(32, int(self.get_parameter("max_new_tokens").value)),
+                        do_sample=False,
+                    )
+                generated_ids = output_ids[:, inputs["input_ids"].shape[1] :]
+                return self.processor.batch_decode(
+                    generated_ids,
+                    skip_special_tokens=True,
+                    clean_up_tokenization_spaces=False,
+                )[0].strip()
+
+            raw_payload = generate_validated_output(
+                generate, lambda payload: validate_model_output(payload, width, height), self.get_logger()
+            )
             result = normalize_qwen_roi(
                 raw_payload,
                 request,
                 int(latest_frame.rgb_image.shape[1]),
                 int(latest_frame.rgb_image.shape[0]),
                 float(self.get_parameter("minimum_confidence").value),
+                int(self.get_parameter("point_roi_width_px").value),
+                int(self.get_parameter("point_roi_height_px").value),
             )
             # Section: Preserve the source RGB stamp so this result can be correlated with a depth observation.
             result["image_stamp"] = {
@@ -632,6 +754,9 @@ class AstraCamQwenNode(Node):
         except Exception as exc:
             # Section: Report parse and model failures as structured topic output rather than silently dropping the query.
             self.get_logger().error(f"Astra Qwen ROI inference failed: {exc}")
+            with self._state_lock:
+                if revision != self._command_revision or request != self._active_request:
+                    return
             self._publish_result(
                 {
                     "status": "uncertain",

@@ -76,7 +76,7 @@ def generate_launch_description() -> LaunchDescription:
     return LaunchDescription([
         # Section: Set this false when another launch already owns the shared ER-Flow node.
         DeclareLaunchArgument("start_er_flow", default_value="true"),
-        DeclareLaunchArgument("rgb_topic", default_value="/camera/camera/color/image_raw"),
+        DeclareLaunchArgument("rgb_topic", default_value="/astra/color/image_raw"),
         DeclareLaunchArgument("target_topic", default_value="/vision/target_object"),
         DeclareLaunchArgument("roi_topic", default_value="/vision/roi/result"),
         DeclareLaunchArgument("model_path", default_value="/home/yanjiun68/ai/models/UnifoLM-ER-Flow"),

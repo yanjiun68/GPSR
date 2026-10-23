@@ -50,15 +50,23 @@ CANONICAL_ACTION_TYPES = frozenset({
     "SAY",
     "ASK_AND_LISTEN",
     "FIXED_INFORMATION",
+    "COMPARE_OBJECTS",
 })
 
 
-# Section: Reject model actions that require a scheduler semantic compiler or a missing skill.
+# Section: Reject model actions that still require a missing executable implementation.
 UNSUPPORTED_QWEN_ACTIONS = frozenset({
-    "OBSERVE",
     "VERIFY_PERSON",
     "DESCRIBE_PERSON",
-    "SPEAK_RESULT",
+})
+
+
+# Section: Perception actions whose successful payload can feed a later report action.
+RESULT_PRODUCING_ACTIONS = frozenset({
+    "FIND_OBJECT",
+    "COUNT_OBJECTS",
+    "COUNT_PEOPLE",
+    "EXTRACT_PERSON_INFO",
 })
 
 
@@ -104,10 +112,15 @@ def _normalize_object_constraints(params: dict[str, Any], action_name: str) -> N
     """Special function: Convert Qwen feature aliases into the shared object-query schema."""
     # Section: Largest and smallest select a candidate; they never create a separate executor action.
     mode = _string_value(params.get("mode", params.get("size_relation"))).casefold()
-    mode = {"biggest": "largest"}.get(mode, mode)
-    if mode:
+    mode = {"biggest": "largest", "farthest": "furthest"}.get(mode, mode)
+    if mode in {"nearest", "furthest"}:
+        # Section: Distance words are image-space relations and require an explicit reference.
+        params.setdefault("spatial_relation", "near" if mode == "nearest" else "far_from")
+    elif mode:
         if mode not in {"largest", "smallest"}:
-            raise ValueError(f"{action_name} mode must be largest or smallest.")
+            raise ValueError(
+                f"{action_name} mode must be largest, smallest, nearest, or furthest."
+            )
         _append_object_filter(params, "size_relation", mode)
 
     # Section: Preserve only image-verifiable relations for the current RGB perception contract.
@@ -142,6 +155,95 @@ def _normalize_object_constraints(params: dict[str, Any], action_name: str) -> N
         normalized_value = _string_value(value)
         if feature in {"object_color", "shape", "orientation"} and normalized_value:
             _append_object_filter(params, feature, normalized_value)
+
+
+def _add_requested_field(step: ActionStep, field: str) -> None:
+    """Special function: Add one report field to an already-normalized producer step."""
+    try:
+        params = json.loads(str(step.parameters_json or "{}"))
+    except json.JSONDecodeError as exc:
+        raise ValueError("Producer parameters_json is invalid JSON.") from exc
+    if not isinstance(params, dict):
+        raise ValueError("Producer parameters_json must be a JSON object.")
+    query = params.get("query", {})
+    query = dict(query) if isinstance(query, dict) else {}
+    requested_fields = query.get("requested_fields", [])
+    requested_fields = list(requested_fields) if isinstance(requested_fields, list) else []
+    if field not in requested_fields:
+        requested_fields.append(field)
+    query["requested_fields"] = requested_fields
+    params["query"] = query
+    step.parameters_json = json.dumps(params, ensure_ascii=False, sort_keys=True)
+
+
+def _compile_speak_result(
+    action: dict[str, Any],
+    producer: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Special function: Compile semantic SPEAK_RESULT into executable SAY templating."""
+    if producer is None:
+        raise ValueError("SPEAK_RESULT requires an earlier result-producing action.")
+    raw_params = action.get(
+        "params", action.get("arguments", action.get("parameters", {}))
+    )
+    if not isinstance(raw_params, dict):
+        raise ValueError("SPEAK_RESULT params must be a JSON object.")
+
+    producer_type = str(producer["action_type"])
+    result_variable = str(producer["result_variable"])
+    producer_step = producer["step"]
+    attribute = _first_string(raw_params, "attribute", "field").casefold()
+    if producer_type == "FIND_OBJECT":
+        if attribute in {"color", "colour"}:
+            _add_requested_field(producer_step, "color")
+            template = "The perceived color of the {name} is {attributes.color}."
+        elif attribute in {"shape", "orientation"}:
+            _add_requested_field(producer_step, attribute)
+            template = f"The perceived {attribute} of the {{name}} is {{attributes.{attribute}}}."
+        else:
+            mode = str(producer.get("mode", "")).casefold()
+            if mode in {"largest", "smallest"}:
+                template = f"The {{name}} is the {mode} object I perceived."
+            elif mode in {"nearest", "furthest", "farthest"}:
+                normalized_mode = "furthest" if mode == "farthest" else mode
+                reference = str(producer.get("reference", "object")).replace("_", " ")
+                preposition = "to" if normalized_mode == "nearest" else "from"
+                template = (
+                    f"The {{name}} is the {normalized_mode} object {preposition} "
+                    f"the {reference} in the image."
+                )
+            else:
+                template = "I found the {name}."
+    elif producer_type == "COUNT_OBJECTS":
+        template = "I counted {count} matching objects."
+    elif producer_type == "COUNT_PEOPLE":
+        template = "I counted {count} matching people."
+    else:
+        raise ValueError(
+            f"SPEAK_RESULT does not have a safe renderer for {producer_type}."
+        )
+
+    dependencies = _as_string_list(action.get("requires_success"), "requires_success")
+    if producer_step.step_id not in dependencies:
+        dependencies.append(producer_step.step_id)
+    required_data = _as_string_list(action.get("requires_data"), "requires_data")
+    if result_variable not in required_data:
+        required_data.append(result_variable)
+    compiled = {
+        "step_id": action.get("step_id"),
+        "skill": "SAY",
+        "params": {
+            "text_template": template,
+            "substitution": result_variable,
+        },
+        "max_retries": action.get("max_retries", 0),
+        "requires_success": dependencies,
+        "requires_data": required_data,
+    }
+    timeout_value = action.get("timeout_sec", raw_params.get("timeout_sec"))
+    if timeout_value is not None:
+        compiled["timeout_sec"] = timeout_value
+    return compiled
 
 
 def _payload_command_id(payload_text: str) -> str:
@@ -340,12 +442,49 @@ def parse_qwen_action_queue(
     queue = ActionQueue()
     queue.task_id = task_id
     seen_step_ids: set[str] = set()
+    latest_producer: dict[str, Any] | None = None
     for action_index, raw_action in enumerate(actions):
         if not isinstance(raw_action, dict):
             raise ValueError(f"Qwen action {action_index} must be a JSON object.")
+        supplied_name = _string_value(
+            raw_action.get("skill", raw_action.get("action_type"))
+        ).upper()
+        # Section: Perception actions already own live observation; OBSERVE is a no-op.
+        if supplied_name == "OBSERVE":
+            continue
+        if supplied_name == "SPEAK_RESULT":
+            raw_action = _compile_speak_result(raw_action, latest_producer)
+            supplied_name = "SAY"
+        else:
+            raw_action = dict(raw_action)
+            raw_params = raw_action.get(
+                "params", raw_action.get("arguments", raw_action.get("parameters", {}))
+            )
+            if not isinstance(raw_params, dict):
+                raise ValueError(f"Action {action_index} params must be a JSON object.")
+            raw_params = dict(raw_params)
+            # Section: An unconstrained extreme-object request compares all configured objects.
+            if supplied_name == "FIND_EXTREME_OBJECT" and not any(
+                _string_value(raw_params.get(key))
+                for key in (
+                    "object",
+                    "object_name",
+                    "target_object",
+                    "category",
+                    "filter",
+                    "target_category",
+                )
+            ):
+                raw_params["category"] = "objects"
+            raw_action["params"] = raw_params
+            canonical_name = QWEN_ACTION_ALIASES.get(supplied_name, supplied_name)
+            if canonical_name in RESULT_PRODUCING_ACTIONS and not _string_value(
+                raw_action.get("result_variable")
+            ):
+                raw_action["result_variable"] = f"qwen_result_{len(queue.steps) + 1}"
         step = _build_action_step(
             raw_action,
-            action_index,
+            len(queue.steps),
             task_id,
             default_timeout_sec,
             default_retries,
@@ -365,6 +504,24 @@ def parse_qwen_action_queue(
             )
         seen_step_ids.add(step.step_id)
         queue.steps.append(step)
+        if step.action_type in RESULT_PRODUCING_ACTIONS:
+            normalized_params = json.loads(step.parameters_json)
+            latest_producer = {
+                "action_type": step.action_type,
+                "result_variable": step.result_variable,
+                "step": step,
+                "mode": _string_value(
+                    normalized_params.get("mode", normalized_params.get("size_relation"))
+                ),
+                "reference": _first_string(
+                    normalized_params,
+                    "reference_object",
+                    "reference",
+                    "relative_to",
+                ),
+            }
+    if not queue.steps:
+        raise ValueError("Qwen ActionQueue contains no executable actions.")
     return queue
 
 

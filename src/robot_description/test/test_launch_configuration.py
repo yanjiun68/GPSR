@@ -24,3 +24,8 @@ def test_installed_launch_exposes_required_arguments():
     for argument in ('model', 'use_sim_time', 'use_joint_state_publisher',
                      'use_rviz'):
         assert argument in completed.stdout
+
+
+def test_launch_pins_robot_description_to_global_topic():
+    source = LAUNCH_FILE.read_text()
+    assert "('robot_description', '/robot_description')" in source

@@ -29,6 +29,11 @@
   ros_type_name: sensor_msgs/msg/JointState
   gz_type_name: ignition.msgs.Model
   direction: GZ_TO_ROS
+- ros_topic_name: /head/joint_trajectory
+  gz_topic_name: /head/joint_trajectory
+  ros_type_name: trajectory_msgs/msg/JointTrajectory
+  gz_type_name: ignition.msgs.JointTrajectory
+  direction: ROS_TO_GZ
 - ros_topic_name: /camera/color/image_raw
   gz_topic_name: /camera/image
   ros_type_name: sensor_msgs/msg/Image
@@ -74,3 +79,33 @@
   ros_type_name: trajectory_msgs/msg/JointTrajectory
   gz_type_name: ignition.msgs.JointTrajectory
   direction: ROS_TO_GZ
+- ros_topic_name: /rx200/arm_joint_trajectory
+  gz_topic_name: /rx200/arm_joint_trajectory
+  ros_type_name: trajectory_msgs/msg/JointTrajectory
+  gz_type_name: ignition.msgs.JointTrajectory
+  direction: ROS_TO_GZ
+- ros_topic_name: /rx200/gripper_joint_trajectory
+  gz_topic_name: /rx200/gripper_joint_trajectory
+  ros_type_name: trajectory_msgs/msg/JointTrajectory
+  gz_type_name: ignition.msgs.JointTrajectory
+  direction: ROS_TO_GZ
+- ros_topic_name: /rx200_wrist_camera/rgbd/color/image_raw
+  gz_topic_name: /rx200_wrist_camera/rgbd/image
+  ros_type_name: sensor_msgs/msg/Image
+  gz_type_name: ignition.msgs.Image
+  direction: GZ_TO_ROS
+- ros_topic_name: /rx200_wrist_camera/rgbd/aligned_depth_to_color/image_raw
+  gz_topic_name: /rx200_wrist_camera/rgbd/depth_image
+  ros_type_name: sensor_msgs/msg/Image
+  gz_type_name: ignition.msgs.Image
+  direction: GZ_TO_ROS
+- ros_topic_name: /rx200_wrist_camera/rgbd/color/camera_info
+  gz_topic_name: /rx200_wrist_camera/rgbd/camera_info
+  ros_type_name: sensor_msgs/msg/CameraInfo
+  gz_type_name: ignition.msgs.CameraInfo
+  direction: GZ_TO_ROS
+- ros_topic_name: /rx200_wrist_camera/rgbd/points
+  gz_topic_name: /rx200_wrist_camera/rgbd/points
+  ros_type_name: sensor_msgs/msg/PointCloud2
+  gz_type_name: ignition.msgs.PointCloudPacked
+  direction: GZ_TO_ROS

@@ -1,0 +1,11 @@
+<?xml version="1.0"?>
+<!-- Mount the existing D435i model so camera_link is exactly 0.145 m above
+     head_pitch_link at zero yaw and pitch. -->
+<robot xmlns:xacro="http://ros.org/wiki/xacro">
+  <xacro:macro name="head_camera_mount" params="parent:=head_pitch_link">
+    <xacro:sensor_d435i parent="${parent}" name="camera"
+                         use_nominal_extrinsics="true">
+      <origin xyz="-0.0106 -0.0175 0.1325" rpy="0 0 0"/>
+    </xacro:sensor_d435i>
+  </xacro:macro>
+</robot>

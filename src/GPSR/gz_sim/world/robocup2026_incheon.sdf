@@ -3,7 +3,9 @@
   <!--Generated from official Incheon2026 diagrams; metric dimensions are assumptions. See ROBOCUP2026.md.-->
   <world name="robocup2026_incheon">
     <physics name="1ms" type="ignored">
-      <max_step_size>0.001</max_step_size>
+      <!-- A 1 ms step ran at only ~0.075 RTF on the target workstation.
+           Use a coarser step to keep the arena near half real time. -->
+      <max_step_size>0.009</max_step_size>
       <real_time_factor>1.0</real_time_factor>
     </physics>
     <plugin filename="ignition-gazebo-physics-system" name="ignition::gazebo::systems::Physics" />

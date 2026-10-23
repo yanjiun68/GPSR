@@ -1,0 +1,259 @@
+#!/usr/bin/env python3
+"""Expose MoveIt FollowJointTrajectory actions for the RX200 in Gazebo Sim."""
+
+import asyncio
+import math
+import threading
+import time
+
+import rclpy
+from control_msgs.action import FollowJointTrajectory
+from rclpy.action import ActionServer, CancelResponse, GoalResponse
+from rclpy.callback_groups import ReentrantCallbackGroup
+from rclpy.executors import MultiThreadedExecutor
+from rclpy.node import Node
+from sensor_msgs.msg import JointState
+from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
+
+
+ARM_JOINTS = ('waist', 'shoulder', 'elbow', 'wrist_angle', 'wrist_rotate')
+GRIPPER_JOINTS = ('left_finger',)
+GAZEBO_GRIPPER_JOINTS = ('left_finger', 'right_finger')
+
+
+def duration_seconds(duration):
+    return float(duration.sec) + float(duration.nanosec) * 1e-9
+
+
+def _ordered(values, source_names, target_names):
+    """Return values reordered from source_names to target_names."""
+    if not values:
+        return []
+    by_name = dict(zip(source_names, values))
+    return [float(by_name[name]) for name in target_names]
+
+
+class TrajectoryEndpoint:
+    def __init__(
+            self, node, action_name, command_topic, joints,
+            command_joints=None, command_transform=None, tolerance=0.03):
+        self.node = node
+        self.action_name = action_name
+        self.joints = tuple(joints)
+        self.command_joints = tuple(command_joints or joints)
+        self.command_transform = command_transform
+        self.tolerance = float(tolerance)
+        self.publisher = node.create_publisher(JointTrajectory, command_topic, 10)
+        self.lock = threading.Lock()
+        self.busy = False
+        self.server = ActionServer(
+            node,
+            FollowJointTrajectory,
+            action_name,
+            execute_callback=self.execute,
+            goal_callback=self.accept_goal,
+            cancel_callback=self.accept_cancel,
+            callback_group=node.callback_group,
+        )
+
+    def accept_goal(self, goal):
+        names = tuple(goal.trajectory.joint_names)
+        if len(names) != len(self.joints) or set(names) != set(self.joints):
+            self.node.get_logger().error(
+                f'{self.action_name}: expected joints {self.joints}, got {names}')
+            return GoalResponse.REJECT
+        if not goal.trajectory.points:
+            return GoalResponse.REJECT
+
+        previous_time = -1.0
+        for point in goal.trajectory.points:
+            point_time = duration_seconds(point.time_from_start)
+            arrays = (point.positions, point.velocities, point.accelerations, point.effort)
+            if (
+                    len(point.positions) != len(self.joints)
+                    or any(values and len(values) != len(self.joints) for values in arrays)
+                    or any(not math.isfinite(value) for values in arrays for value in values)
+                    or point_time <= previous_time):
+                return GoalResponse.REJECT
+            previous_time = point_time
+
+        with self.lock:
+            return GoalResponse.REJECT if self.busy else GoalResponse.ACCEPT
+
+    @staticmethod
+    def accept_cancel(_goal_handle):
+        return CancelResponse.ACCEPT
+
+    def command_values(self, values):
+        if not values:
+            return []
+        return list(self.command_transform(values) if self.command_transform else values)
+
+    def command_trajectory(self, source):
+        command = JointTrajectory()
+        command.header = source.header
+        command.joint_names = list(self.command_joints)
+        for source_point in source.points:
+            point = JointTrajectoryPoint()
+            ordered_positions = _ordered(
+                source_point.positions, source.joint_names, self.joints)
+            ordered_velocities = _ordered(
+                source_point.velocities, source.joint_names, self.joints)
+            ordered_accelerations = _ordered(
+                source_point.accelerations, source.joint_names, self.joints)
+            ordered_effort = _ordered(source_point.effort, source.joint_names, self.joints)
+            point.positions = self.command_values(ordered_positions)
+            point.velocities = self.command_values(ordered_velocities)
+            point.accelerations = self.command_values(ordered_accelerations)
+            point.effort = self.command_values(ordered_effort)
+            point.time_from_start = source_point.time_from_start
+            command.points.append(point)
+        return command
+
+    def hold_current_position(self):
+        positions = self.node.positions_for(self.joints)
+        if positions is None:
+            return
+        trajectory = JointTrajectory()
+        trajectory.joint_names = list(self.command_joints)
+        point = JointTrajectoryPoint()
+        point.positions = self.command_values(positions)
+        point.time_from_start.nanosec = 100_000_000
+        trajectory.points = [point]
+        self.publisher.publish(trajectory)
+
+    async def execute(self, goal_handle):
+        with self.lock:
+            if self.busy:
+                goal_handle.abort()
+                result = FollowJointTrajectory.Result()
+                result.error_code = FollowJointTrajectory.Result.INVALID_GOAL
+                result.error_string = 'controller is busy'
+                return result
+            self.busy = True
+
+        result = FollowJointTrajectory.Result()
+        try:
+            if not self.node.wait_for_positions(self.joints, 5.0):
+                goal_handle.abort()
+                result.error_code = FollowJointTrajectory.Result.INVALID_JOINTS
+                result.error_string = 'Gazebo joint feedback is unavailable'
+                return result
+
+            source = goal_handle.request.trajectory
+            command = self.command_trajectory(source)
+            self.publisher.publish(command)
+
+            final_source = source.points[-1]
+            desired_positions = _ordered(
+                final_source.positions, source.joint_names, self.joints)
+            command_duration = duration_seconds(final_source.time_from_start)
+            completion_not_before = time.monotonic() + command_duration
+            deadline = completion_not_before + 10.0
+
+            feedback = FollowJointTrajectory.Feedback()
+            feedback.joint_names = list(self.joints)
+            feedback.desired.positions = desired_positions
+
+            while time.monotonic() < deadline:
+                if goal_handle.is_cancel_requested:
+                    self.hold_current_position()
+                    goal_handle.canceled()
+                    result.error_code = FollowJointTrajectory.Result.SUCCESSFUL
+                    result.error_string = 'trajectory canceled and joints held'
+                    return result
+
+                actual = self.node.positions_for(self.joints)
+                if actual is not None:
+                    errors = [
+                        desired - measured
+                        for desired, measured in zip(desired_positions, actual)
+                    ]
+                    feedback.actual.positions = actual
+                    feedback.error.positions = errors
+                    goal_handle.publish_feedback(feedback)
+                    if (
+                            time.monotonic() >= completion_not_before
+                            and max(abs(value) for value in errors) <= self.tolerance):
+                        goal_handle.succeed()
+                        result.error_code = FollowJointTrajectory.Result.SUCCESSFUL
+                        return result
+                await asyncio.sleep(0.02)
+
+            self.hold_current_position()
+            goal_handle.abort()
+            result.error_code = FollowJointTrajectory.Result.GOAL_TOLERANCE_VIOLATED
+            result.error_string = 'Gazebo joints did not reach the trajectory goal'
+            return result
+        finally:
+            with self.lock:
+                self.busy = False
+
+
+class Rx200TrajectoryActionRelay(Node):
+    def __init__(self):
+        super().__init__('rx200_trajectory_action_relay')
+        self.callback_group = ReentrantCallbackGroup()
+        self.state_lock = threading.Lock()
+        self.positions = {}
+        self.last_state_time = 0.0
+        self.create_subscription(
+            JointState, '/joint_states', self.on_joint_state, 20,
+            callback_group=self.callback_group)
+
+        self.arm = TrajectoryEndpoint(
+            self,
+            '/rx200/arm_controller/follow_joint_trajectory',
+            '/rx200/arm_joint_trajectory',
+            ARM_JOINTS,
+            tolerance=0.03,
+        )
+        self.gripper = TrajectoryEndpoint(
+            self,
+            '/rx200/gripper_controller/follow_joint_trajectory',
+            '/rx200/gripper_joint_trajectory',
+            GRIPPER_JOINTS,
+            command_joints=GAZEBO_GRIPPER_JOINTS,
+            command_transform=lambda values: (values[0], -values[0]),
+            tolerance=0.003,
+        )
+
+    def on_joint_state(self, message):
+        with self.state_lock:
+            for name, position in zip(message.name, message.position):
+                if math.isfinite(position):
+                    self.positions[name] = float(position)
+            self.last_state_time = time.monotonic()
+
+    def positions_for(self, joints):
+        with self.state_lock:
+            if time.monotonic() - self.last_state_time > 1.0:
+                return None
+            values = [self.positions.get(name) for name in joints]
+        return None if any(value is None for value in values) else values
+
+    def wait_for_positions(self, joints, timeout):
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if self.positions_for(joints) is not None:
+                return True
+            time.sleep(0.02)
+        return False
+
+
+def main(args=None):
+    rclpy.init(args=args)
+    node = Rx200TrajectoryActionRelay()
+    executor = MultiThreadedExecutor(num_threads=4)
+    executor.add_node(node)
+    try:
+        executor.spin()
+    finally:
+        executor.shutdown()
+        node.destroy_node()
+        if rclpy.ok():
+            rclpy.shutdown()
+
+
+if __name__ == '__main__':
+    main()

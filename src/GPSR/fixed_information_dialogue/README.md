@@ -8,6 +8,9 @@ Answers only:
 - static competition/team/robot facts stored in YAML;
 - local runtime time/date facts.
 
+Runtime time/date answers use the IANA timezone configured in
+`config/fixed_information.yaml` (currently `Asia/Kuala_Lumpur`).
+
 It intentionally returns `NO_MATCH` for perception, task-memory, scene-memory,
 external-live-data, and general-knowledge questions.
 

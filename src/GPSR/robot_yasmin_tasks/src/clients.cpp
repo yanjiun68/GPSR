@@ -1244,7 +1244,7 @@ SkillResultData RemoteSkillClient::find_object(const Blackboard::SharedPtr &blac
   // into approach.
   goal.approach_target = json_value<bool>(action.parameters, "approach_target", false);
   goal.stand_off_distance = static_cast<float>(
-      json_value<double>(action.parameters, "stand_off_distance", 0.8));
+      json_value<double>(action.parameters, "stand_off_distance", 0.4));
   goal.timeout_sec = static_cast<float>(timeout);
   goal.preferred_viewpoint =
       json_value<std::string>(action.parameters, "preferred_viewpoint", "");
@@ -1289,6 +1289,7 @@ SkillResultData RemoteSkillClient::find_object(const Blackboard::SharedPtr &blac
                              true);
   }
   const bool localized = !result->object_pose.header.frame_id.empty();
+  const auto selection = parse_json(result->selection_json, Json::object());
   Json payload{{"found", result->found},
                {"approached", result->approached},
                {"localized", localized},
@@ -1300,7 +1301,16 @@ SkillResultData RemoteSkillClient::find_object(const Blackboard::SharedPtr &blac
                {"found_viewpoint", result->found_viewpoint},
                {"viewpoints_searched", result->viewpoints_searched},
                {"navigation_failures", result->navigation_failures},
-               {"selection", parse_json(result->selection_json, Json::object())}};
+               {"selection", selection}};
+  // Section: Report templates consume stable selected-object fields directly while
+  // retaining the nested selection object for diagnostics and compatibility.
+  if (selection.is_object()) {
+    for (const auto *key : {"name", "confidence", "bbox", "image_position",
+                            "attributes", "selection_reason", "query",
+                            "furniture_relative_location", "furniture_relative_phrase"}) {
+      if (selection.contains(key)) payload[key] = selection.at(key);
+    }
+  }
   const auto failure = parse_json(result->failure_json, Json::object());
   if (failure.is_object() && !failure.empty()) payload.update(failure);
   using Result = robot_ai_interfaces::action::FindObject::Result;

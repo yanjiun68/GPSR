@@ -29,7 +29,7 @@ control_msgs/action/FollowJointTrajectory \
     ],
     points: [
       {
-       positions: [-0.089, -0.456, -0.953 , 1.154 , 0.000] ,
+       positions: [-0.00, -0.456, -0.953 , 1.154 , 0.000] ,
         time_from_start: {sec: 6, nanosec: 0}
       }
     ]
@@ -157,3 +157,22 @@ ros2 launch realsense2_camera rs_laun ch.py \
     enable_accel:=true \
     initial_reset:=true
     ----------------------------------- [ for temporarily not using IMU ]
+
+  ros2 launch interbotix_xsarm_moveit xsarm_moveit.launch.py \
+  robot_model:=rx200 \
+  robot_name:=rx200 \
+  hardware_type:=actual \
+  use_moveit_rviz:=true \
+  use_world_frame:=true \
+  rviz_frame:=world
+
+  -----------------------------------------
+
+
+  ======================================================
+  ## 2 axis head 
+  ======================================================
+  
+ros2 launch head_moveit_config head_moveit.launch.py \
+  use_mock:=true \
+  use_rviz:=true

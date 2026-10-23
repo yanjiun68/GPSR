@@ -59,7 +59,7 @@ localization:
 
 # Section: Collision-safe candidate generation and Nav2 planner validation.
 approach:
-  default_stand_off_distance_m: 0.8
+  default_stand_off_distance_m: 0.4
   candidate_angles_deg: [180, 135, -135, 90, -90, 45, -45, 0]
   costmap_lethal_threshold: 252
   planner_timeout_sec: 5.0

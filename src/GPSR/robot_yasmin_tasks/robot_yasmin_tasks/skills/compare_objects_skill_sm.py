@@ -2,6 +2,7 @@
 
 # Section: State-machine composition and skill-specific execution behavior.
 from yasmin import Blackboard
+from robot_yasmin_tasks.gpsr import blackboard_keys as bb
 from robot_yasmin_tasks.gpsr.models import ActionStepData
 from robot_yasmin_tasks.ros_clients.perception_clients import PerceptionClients
 from robot_yasmin_tasks.skills.skill_base import SimpleSkillSM

@@ -1,0 +1,10 @@
+planner_configs:
+  RRTConnect:
+    type: geometric::RRTConnect
+    range: 0.1
+
+camera_head:
+  default_planner_config: RRTConnect
+  longest_valid_segment_fraction: 0.01
+  planner_configs:
+    - RRTConnect

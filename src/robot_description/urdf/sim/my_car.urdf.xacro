@@ -2,16 +2,33 @@
 <robot name="omni_robot" xmlns:xacro="http://ros.org/wiki/xacro">
 
   <!-- Select the manipulator while keeping one shared mobile-base model. -->
+  <!-- RX200 is the default arm; pass arm_model:=piper for the legacy Piper. -->
   <xacro:arg name="arm_model" default="piper"/>
+
+  <!-- The RX200 mount is 75 mm farther along +X than the original Piper
+       mount (0.037 + 0.075 = 0.112 m). -->
+  <xacro:property name="arm_mount_x"
+                  value="${0.112 if '$(arg arm_model)' == 'rx200' else 0.037}"/>
 
   <!-- Create the reusable xacro module for Agilex Piper X arm self-collision. -->
   <xacro:arg name="enable_piper_self_collision" default="true"/>
 
   <!-- Frame enabled by default; pass enable_aluminium_frame:=false to disable. -->
   <xacro:arg name="enable_aluminium_frame" default="true"/>
+  <xacro:arg name="enable_head_gimbal" default="true"/>
+  <!-- Exactly one head controller backend may own the joints: gazebo, sts, none. -->
+  <xacro:arg name="head_control_backend" default="gazebo"/>
+  <xacro:arg name="head_serial_port" default="/dev/ttyACM0"/>
+  <xacro:arg name="head_use_mock" default="false"/>
+  <xacro:arg name="head_yaw_motor_id" default="1"/>
+  <xacro:arg name="head_pitch_motor_id" default="2"/>
+  <xacro:arg name="head_yaw_center_steps" default="2048"/>
+  <xacro:arg name="head_pitch_center_steps" default="2048"/>
+  <xacro:arg name="head_yaw_direction" default="1"/>
+  <xacro:arg name="head_pitch_direction" default="-1"/>
 
-  <!-- Piper is the default arm. Its standalone world joint is disabled
-       because arm_base_link is mounted to this mobile base. -->
+  <!-- Piper's standalone world joint is disabled because arm_base_link is
+       mounted to this mobile base. -->
   <xacro:arg name="piper_standalone" default="false"/>
   <!-- This model supplies its own rendered D435i and Gazebo sensor below. -->
   <xacro:arg name="piper_include_arm_camera" default="false"/>
@@ -25,12 +42,16 @@
     <xacro:include filename="$(find robot_description)/urdf/arm/rx200.urdf.xacro"/>
   </xacro:if>
 
-  <!-- Register piper_gazebo_self_collision -->
-  <xacro:include filename="$(find agx_arm_description)/agx_arm_urdf/piper/urdf/piper_self_collision.gazebo.xacro"/>
+  <!-- Register piper_gazebo_self_collision only when Piper is selected. -->
+  <xacro:if value="${'$(arg arm_model)' == 'piper'}">
+    <xacro:include filename="$(find agx_arm_description)/agx_arm_urdf/piper/urdf/piper_self_collision.gazebo.xacro"/>
+  </xacro:if>
 
-  <!-- Reuse the real D435i frame tree so simulation and hardware publish the
-       same camera_link/color/depth/infra optical frame names. -->
-  <xacro:include filename="$(find robot_description)/urdf/vision_voice/realsense_camera/_d435i.urdf.xacro"/>
+  <!-- Reuse the real D435i frame tree and the portable eye-in-hand wrapper so
+       simulation and hardware publish the same optical frame names. -->
+  <xacro:include filename="$(find robot_description)/urdf/vision_voice/realsense_camera/d435i_eye_in_hand.urdf.xacro"/>
+  <xacro:include filename="$(find robot_description)/urdf/sim/head_assembly.urdf.xacro"/>
+  <xacro:include filename="$(find robot_description)/urdf/sim/head_sts_control.urdf.xacro"/>
 
   <!-- Structural aluminium profile assembly (30 x 30 mm). -->
   <xacro:include filename="$(find robot_description)/urdf/sim/aluminium_3030_frame.urdf.xacro"/>
@@ -122,7 +143,7 @@
     <link name="${wheel_name}">
       <visual>
         <geometry>
-          <cylinder radius="0.05" length="0.03804"/>  
+          <cylinder radius="0.05" length="0.03804"/>
         </geometry>
         <!-- Rotate cylinder so axis (Z) aligns with Y -->
         <origin xyz="0 0 0" rpy="1.5708 0 0"/>
@@ -211,13 +232,13 @@
     <origin xyz="0.137 0 0.0335" rpy="0 0 0"/>
   </joint>
 
-  <!-- Arm mount: 0.10 m behind the lidar along robot X, with the arm base
-       0.445 m above baseup_link. -->
+  <!-- Arm mount: the RX200 is at x=0.112 m; the legacy Piper remains at
+       x=0.037 m. Both arm bases are 0.445 m above baseup_link. -->
   <xacro:if value="${'$(arg arm_model)' == 'piper'}">
     <joint name="arm_base_joint" type="fixed">
       <parent link="baseup_link"/>
       <child link="arm_base_link"/>
-      <origin xyz="0.037 0 0.445" rpy="0 0 0"/>
+      <origin xyz="${arm_mount_x} 0 0.445" rpy="0 0 0"/>
     </joint>
   </xacro:if>
 
@@ -225,7 +246,7 @@
     <joint name="arm_base_joint" type="fixed">
       <parent link="baseup_link"/>
       <child link="rx200/base_link"/>
-      <origin xyz="0.037 0 0.445" rpy="0 0 0"/>
+      <origin xyz="${arm_mount_x} 0 0.445" rpy="0 0 0"/>
     </joint>
   </xacro:if>
 
@@ -237,7 +258,7 @@
     blue: one 0.25 m crossbar between the two red posts at the top.
     green: a 0.30 m rectangle extending forward (+X), with front legs
            stopping 15 mm below the arm-base-link origin (z=0.445).
-    yellow: centre post directly beneath the arm base at x=0.037.
+    yellow: centre post directly beneath the selected arm base.
 
     All x, y, z values are in the baseup_link coordinate frame.
     The red/camera x parameter and the lidar frame height below match
@@ -252,7 +273,7 @@
         forward_length="0.30"
         red_height="1.113"
         bottom_z="0.0335"
-        arm_x="0.037"
+        arm_x="${arm_mount_x}"
         arm_base_z="0.445"
         arm_clearance="0.015"
         profile_size="0.030"
@@ -266,22 +287,42 @@
       enabled="$(arg enable_piper_self_collision)"/>
   </xacro:if>
 
-  <!-- Real-robot D435i mount. The macro supplies camera_link plus nominal
-       color/depth/infrared optical frames for simulation. -->
-  <xacro:sensor_d435i parent="baseup_link" name="camera"
-                       use_nominal_extrinsics="true">
-    <origin xyz="-0.121 0 1.272" rpy="0 0 0"/>
-  </xacro:sensor_d435i>
-
-  <!-- Piper eye-in-hand D435i. The sensor macro defines arm_camera_link at
-       the physical camera centre, so compensate for its bottom-screw origin
-       to place that centre 0.05 m along -X, 0.025 m along +Y, and 0.05 m
-       along +Z from the joint6/link6 TF. -->
-  <xacro:if value="${'$(arg arm_model)' == 'piper'}">
-    <xacro:sensor_d435i parent="link6" name="arm_camera"
+  <!-- The gimbal replaces the original fixed mast camera. The fallback keeps
+       exactly one camera tree when either the frame or gimbal is disabled. -->
+  <xacro:if value="${'$(arg enable_aluminium_frame)' == 'true' and '$(arg enable_head_gimbal)' == 'true'}">
+    <xacro:head_camera_assembly parent="alu3030_blue_camera_top"
+                                enable_gazebo="${'$(arg head_control_backend)' == 'gazebo'}"/>
+    <xacro:if value="${'$(arg head_control_backend)' == 'sts'}">
+      <xacro:head_sts_control
+          serial_port="$(arg head_serial_port)"
+          use_mock="$(arg head_use_mock)"
+          yaw_motor_id="$(arg head_yaw_motor_id)"
+          pitch_motor_id="$(arg head_pitch_motor_id)"
+          yaw_center_steps="$(arg head_yaw_center_steps)"
+          pitch_center_steps="$(arg head_pitch_center_steps)"
+          yaw_direction="$(arg head_yaw_direction)"
+          pitch_direction="$(arg head_pitch_direction)"/>
+    </xacro:if>
+  </xacro:if>
+  <xacro:unless value="${'$(arg enable_aluminium_frame)' == 'true' and '$(arg enable_head_gimbal)' == 'true'}">
+    <xacro:sensor_d435i parent="baseup_link" name
                          use_nominal_extrinsics="true">
-      <origin xyz="-0.0375 0.0075 0.0394" rpy="0 ${3 * pi / 2} 0"/>
+      <origin xyz="-0.121 0 1.272" rpy="0 0 0"/>
     </xacro:sensor_d435i>
+  </xacro:unless>
+
+  <!-- Piper eye-in-hand D435i. For another arm, reuse this macro with its
+       tool/flange link as `parent` and replace only this calibrated origin.
+       The sensor macro defines arm_camera_link at the physical camera centre,
+       so this bottom-screw origin places that centre 0.05 m along -X, 0.025 m
+       along +Y, and 0.05 m along +Z from the joint6/link6 TF. -->
+  <xacro:if value="${'$(arg arm_model)' == 'piper'}">
+    <xacro:d435i_eye_in_hand parent="link6" name="arm_camera"
+                             use_nominal_extrinsics="true"
+                             gazebo_sensor_name="arm_rgbd_camera"
+                             topic="/arm_camera/arm_camera">
+      <origin xyz="-0.0375 0.0075 0.0394" rpy="0 ${3 * pi / 2} 0"/>
+    </xacro:d435i_eye_in_hand>
   </xacro:if>
 
   <!-- Gazebo Plugins and Sensors.
@@ -459,33 +500,6 @@
           <clip>
             <near>0.3</near>
             <far>10.0</far>
-          </clip>
-        </depth_camera>
-      </camera>
-    </sensor>
-  </gazebo>
-
-  <gazebo reference="arm_camera_link">
-    <sensor name="arm_rgbd_camera" type="rgbd_camera">
-      <always_on>true</always_on>
-      <update_rate>30</update_rate>
-      <topic>/arm_camera/arm_camera</topic>
-      <gz_frame_id>arm_camera_color_optical_frame</gz_frame_id>
-      <camera>
-        <horizontal_fov>1.2112</horizontal_fov>
-        <image>
-          <width>640</width>
-          <height>480</height>
-          <format>R8G8B8</format>
-        </image>
-        <clip>
-          <near>0.10</near>
-          <far>5.0</far>
-        </clip>
-        <depth_camera>
-          <clip>
-            <near>0.10</near>
-            <far>5.0</far>
           </clip>
         </depth_camera>
       </camera>

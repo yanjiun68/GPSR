@@ -1,4 +1,6 @@
-timezone_label: local
+timezone:
+  name: Asia/Kuala_Lumpur
+  label: Malaysia Time (MYT)
 
 matching:
   threshold: 0.82

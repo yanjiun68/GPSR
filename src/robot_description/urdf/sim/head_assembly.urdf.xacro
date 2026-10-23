@@ -1,0 +1,16 @@
+<?xml version="1.0"?>
+<!-- Single entry point for the modular camera head. sensor_d435i must already
+     be imported by the including robot description. -->
+<robot xmlns:xacro="http://ros.org/wiki/xacro">
+  <xacro:include filename="$(find robot_description)/urdf/sim/head_2axis.urdf.xacro"/>
+  <xacro:include filename="$(find robot_description)/urdf/sim/head_realsense_mount.urdf.xacro"/>
+  <xacro:include filename="$(find robot_description)/urdf/sim/head_gazebo_control.urdf.xacro"/>
+  <xacro:macro name="head_camera_assembly"
+               params="parent:=alu3030_blue_camera_top enable_gazebo:=true">
+    <xacro:head_2axis parent="${parent}"/>
+    <xacro:head_camera_mount parent="head_pitch_link"/>
+    <xacro:if value="${enable_gazebo}">
+      <xacro:head_gazebo_control/>
+    </xacro:if>
+  </xacro:macro>
+</robot>

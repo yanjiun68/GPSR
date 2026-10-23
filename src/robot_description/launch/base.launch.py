@@ -87,6 +87,10 @@ def generate_launch_description():
         package='robot_state_publisher',
         executable='robot_state_publisher',
         name=robot_state_publisher_name,
+        # Keep the description on one absolute topic so consumers such as
+        # joint_state_publisher and RViz resolve the same address even when
+        # this launch file is included under a namespace.
+        remappings=[('robot_description', '/robot_description')],
         parameters=[{
             'use_sim_time': sim_time_parameter,
             'robot_description': robot_description
@@ -98,6 +102,7 @@ def generate_launch_description():
         package='joint_state_publisher',
         executable='joint_state_publisher',
         name=joint_state_publisher_name,
+        remappings=[('robot_description', '/robot_description')],
         parameters=[{
             'rate': 10,
             'publish_default_positions': True,

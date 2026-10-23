@@ -12,9 +12,14 @@ install(DIRECTORY
   PATTERN "*.pyc" EXCLUDE
 )
 
+install(FILES README.md DESTINATION share/${PROJECT_NAME})
+
 install(PROGRAMS
   scripts/generate_robocup2026_world.py
+  scripts/check_real_time_factor.py
   scripts/piper_trajectory_action_relay.py
+  scripts/rx200_pick_place.py
+  scripts/rx200_trajectory_action_relay.py
   scripts/washer_controller.py
   scripts/washer_panel.py
   DESTINATION lib/${PROJECT_NAME}

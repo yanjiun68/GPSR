@@ -49,7 +49,7 @@ def generate_launch_description():
         DeclareLaunchArgument("qwen_annotated_image_topic", default_value="/astra_cam_qw/annotated_image"),
         DeclareLaunchArgument(
             "qwen_model_path",
-            default_value="/home/yanjiun68/ai/models/UnifoLM-ER-1",
+            default_value="/home/yanjiun68/ai/models/UnifoLM-ER-Flow",
         ),
         DeclareLaunchArgument("qwen_image_size", default_value="448"),
         DeclareLaunchArgument("qwen_max_new_tokens", default_value="192"),

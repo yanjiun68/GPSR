@@ -72,6 +72,7 @@ INTENT_TO_TASK = {
     "SAY": "say",
     "ASK_AND_LISTEN": "ask_and_listen",
     "FIXED_INFORMATION": "fixed_information",
+    "COMPARE_OBJECTS": "compare_objects",
 }
 
 
@@ -93,6 +94,7 @@ REQUIRED_PRIMITIVE_ARGUMENTS = {
     "SAY": (("text", "question"),),
     "ASK_AND_LISTEN": (("question",),),
     "FIXED_INFORMATION": (("question",),),
+    "COMPARE_OBJECTS": (("property",),),
 }
 
 
@@ -413,6 +415,8 @@ def _semantic_from_clause(
     arguments: dict[str, Any] = {}
     if objects:
         arguments["object_name"] = objects[0]
+    if intent == "COMPARE_OBJECTS" and objects:
+        arguments["object_names"] = objects
     elif categories:
         arguments["category"] = categories[0]
     if people:
@@ -436,6 +440,17 @@ def _semantic_from_clause(
         arguments.get("object_name") or arguments.get("category")
     ):
         return None, [ValidationIssue("UNKNOWN_OBJECT", f"Unknown object target: {clause}")]
+    if intent == "COMPARE_OBJECTS":
+        property_name = next(
+            (value for value in ("biggest", "largest", "smallest", "heaviest", "lightest", "thinnest")
+             if re.search(rf"\b{value}\b", clause)),
+            "",
+        )
+        if not property_name:
+            return None, [ValidationIssue("MISSING_REQUIRED_ARGUMENT", "COMPARE_OBJECTS requires a supported property.")]
+        arguments["property"] = property_name
+        if len(arguments.get("object_names", [])) < 2 and not arguments.get("category"):
+            return None, [ValidationIssue("UNKNOWN_OBJECT", "Object comparison requires at least two known objects or a category.")]
     if intent in {"FIND_PERSON", "FOLLOW_PERSON", "GUIDE_PERSON"} and not arguments.get("target_person"):
         if re.search(r"\b(?:person|someone|guest|man|woman)\b", clause) and intent == "FIND_PERSON":
             arguments["person_selector"] = {"type": "any_person", "value": ""}
@@ -503,6 +518,8 @@ def _detect_clause_intent(clause: str, entities: dict[str, list[str]]) -> str:
         if entities["objects"] or entities["categories"]:
             return "DELIVER_OBJECT" if has_destination else "PICK_OBJECT"
         return ""
+    if re.search(r"\b(?:compare|which)\b.*\b(?:biggest|largest|smallest|heaviest|lightest|thinnest)\b", clause):
+        return "COMPARE_OBJECTS"
     if re.search(r"\bcount\b", clause):
         return "COUNT_PEOPLE" if re.search(r"\b(?:people|persons|humans)\b", clause) else "COUNT_OBJECTS"
     if re.search(r"\bfind\b", clause):
@@ -735,7 +752,7 @@ def _request_from_semantic(
     intent = semantic.intent
     arguments = semantic.arguments
     target: dict[str, Any] = {}
-    for key in ("object_name", "category", "target_person", "text", "question"):
+    for key in ("object_name", "object_names", "category", "property", "target_person", "text", "question"):
         if key in arguments:
             target[key] = arguments[key]
     filters = [

@@ -1,0 +1,67 @@
+<?xml version="1.0"?>
+<!-- ros2_control backend for the physical STS pan/tilt head. Geometry lives
+     in head_2axis.urdf.xacro; this module only declares hardware ownership. -->
+<robot xmlns:xacro="http://ros.org/wiki/xacro">
+  <xacro:macro name="head_sts_control" params="
+      serial_port:=/dev/ttyACM0
+      use_mock:=false
+      yaw_motor_id:=1
+      pitch_motor_id:=2
+      yaw_center_steps:=2048
+      pitch_center_steps:=2048
+      yaw_direction:=1
+      pitch_direction:=-1">
+    <ros2_control name="sts_head_system" type="system">
+      <hardware>
+        <plugin>sts_hardware_interface/STSHardwareInterface</plugin>
+        <param name="serial_port">${serial_port}</param>
+        <param name="baud_rate">1000000</param>
+        <param name="enable_mock_mode">${'true' if use_mock else 'false'}</param>
+        <param name="reset_states_on_activate">false</param>
+        <param name="use_sync_write">true</param>
+        <!-- About 0.5 rad/s for a 4096-step/revolution STS motor. This caps
+             the initial hardware commissioning speed independently of MoveIt. -->
+        <param name="proportional_vel_max">326</param>
+        <param name="proportional_vel_deadband">0.005</param>
+      </hardware>
+
+      <joint name="head_yaw_joint">
+        <param name="motor_id">${yaw_motor_id}</param>
+        <param name="operating_mode">0</param>
+        <param name="direction_multiplier">${yaw_direction}</param>
+        <param name="position_center_steps">${yaw_center_steps}</param>
+        <param name="min_position">-0.7</param>
+        <param name="max_position">0.7</param>
+        <param name="max_velocity_steps">3400</param>
+        <param name="max_velocity">0.5</param>
+        <command_interface name="position"/>
+        <state_interface name="position"/>
+        <state_interface name="velocity"/>
+        <state_interface name="effort"/>
+        <state_interface name="voltage"/>
+        <state_interface name="temperature"/>
+        <state_interface name="current"/>
+        <state_interface name="is_moving"/>
+      </joint>
+
+      <joint name="head_pitch_joint">
+        <param name="motor_id">${pitch_motor_id}</param>
+        <param name="operating_mode">0</param>
+        <param name="direction_multiplier">${pitch_direction}</param>
+        <param name="position_center_steps">${pitch_center_steps}</param>
+        <param name="min_position">-0.6</param>
+        <param name="max_position">0.6</param>
+        <param name="max_velocity_steps">3400</param>
+        <param name="max_velocity">0.5</param>
+        <command_interface name="position"/>
+        <state_interface name="position"/>
+        <state_interface name="velocity"/>
+        <state_interface name="effort"/>
+        <state_interface name="voltage"/>
+        <state_interface name="temperature"/>
+        <state_interface name="current"/>
+        <state_interface name="is_moving"/>
+      </joint>
+    </ros2_control>
+  </xacro:macro>
+</robot>

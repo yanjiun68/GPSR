@@ -22,6 +22,7 @@ TASK_TO_SKILL = {
     "ask_and_listen": "ASK_AND_LISTEN",
     # Section: Fixed facts are spoken through SAY, which delegates lookup to fixed_information_dialogue.
     "fixed_information": "SAY",
+    "compare_objects": "COMPARE_OBJECTS",
 }
 
 # Section: Compound parser tasks are compiler-only and never become ActionQueue identifiers.
@@ -62,6 +63,9 @@ def plan_task(request: TaskRequest, config: SchedulerConfig) -> SchedulerResult:
         return _validated_capability_result(request, steps, config)
     if request.task_type in {"say", "ask_and_listen", "fixed_information"}:
         steps.extend(_communication_steps(request, config))
+        return _validated_capability_result(request, steps, config)
+    if request.task_type == "compare_objects":
+        steps.append(_step("compare_objects", "COMPARE_OBJECTS", dict(request.target), [], config, "comparison_result"))
         return _validated_capability_result(request, steps, config)
     # Section: Every FIND skill is a compound mission and owns its search navigation.
     if request.task_type in {"find_object", "find_person"}:

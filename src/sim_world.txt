@@ -7,14 +7,6 @@ export IGN_GAZEBO_RESOURCE_PATH="$ARENA_MODELS${IGN_GAZEBO_RESOURCE_PATH:+:$IGN_
 
 ========================================================================================================
 
-# Arena + robot + bridge + saved SLAM map + AMCL/Nav2 + RViz
-ros2 launch my_robot_nav robocup_sim_nav.launch.py
-
-Run commands : 
-ros2 launch gz_sim robocup_arena.launch.py \
-  start_side:=inside start_distance:=0.8 enable_camera:=false
 
 
-ros2 launch my_robot_nav robocup_localization.launch.py
-
-ros2 launch my_robot_nav robocup_nav_driver.launch.py
+  ==================================
